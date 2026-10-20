@@ -49,6 +49,21 @@ import org.libsdl.app.SDLActivity;
  *       --esa args --gpu_backend=null
  */
 public class PinyonShiftActivity extends SDLActivity {
+    private static native void nativeHostMenu(boolean active);
+    private static native void nativeOpenSettings();
+    private static native void nativeApplySetting(String name,String value);
+    private static native void nativeReloadTouch(String file,boolean controller);
+    private static native void nativeController(boolean connected);
+    private boolean bridgeLoaded;
+    private android.app.AlertDialog gameMenu;
+    private android.os.ParcelFileDescriptor gameIso;
+    private String launchError;
+    private android.hardware.input.InputManager inputManager;
+    private final android.hardware.input.InputManager.InputDeviceListener controllers=new android.hardware.input.InputManager.InputDeviceListener(){
+        public void onInputDeviceAdded(int id){updateController();}
+        public void onInputDeviceRemoved(int id){updateController();}
+        public void onInputDeviceChanged(int id){updateController();}
+    };
     private static final String TAG = "PinyonShift";
     private static final int REQUEST_GPU_DRIVER_ZIP = 0x5053;
     private File driversDir;
@@ -62,6 +77,18 @@ public class PinyonShiftActivity extends SDLActivity {
                 new File(base, "state").getAbsolutePath());
         setDefaultEnvironment("PINYON_SHIFT_GAME_ROOT",
                 new File(base, "game/base").getAbsolutePath());
+        String isoUri=getSharedPreferences("mobile",0).getString("iso_uri","");
+        if(!isoUri.isEmpty()){
+            try{
+                gameIso=getContentResolver().openFileDescriptor(Uri.parse(isoUri),"r");
+                if(gameIso==null)throw new IOException("The disc image is unavailable.");
+                android.system.Os.lseek(gameIso.getFileDescriptor(),0,android.system.OsConstants.SEEK_SET);
+                setEnvironment("PINYON_SHIFT_GAME_ISO","/proc/self/fd/"+gameIso.getFd());
+            }catch(Exception error){
+                if(gameIso!=null)try{gameIso.close();}catch(IOException ignored){}
+                launchError="Disc image unavailable. Choose the ISO again in Game files and keep it in local storage while playing.";
+            }
+        }
         // Custom GPU drivers (Mesa Turnip) the player copied in, chosen with
         // android_gpu_driver; the runtime copies the chosen one inside.
         driversDir = new File(base, "state/drivers");
@@ -110,11 +137,18 @@ public class PinyonShiftActivity extends SDLActivity {
                 }
             }
         }
+        GameSession.record(this,true);
         super.onCreate(savedInstanceState);
         // A race played on a controller touches nothing, and a screen that
         // times out sends the game to the background, where it pauses (a
         // scripted route stalls the same way). Only while this window shows.
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if(bridgeLoaded){
+            addGameMenuButton();
+            inputManager=(android.hardware.input.InputManager)getSystemService(INPUT_SERVICE);
+            if(inputManager!=null)inputManager.registerInputDeviceListener(controllers,new android.os.Handler(android.os.Looper.getMainLooper()));
+            nativeReloadTouch(TouchLayout.file(this).getAbsolutePath(),hasController());
+        }
         // Scripted routes started from the PC: over the lock screen, with the
         // screen on, so a device that slept between runs does not hold the
         // game behind the lock. A launch from the home screen never asks.
@@ -137,11 +171,13 @@ public class PinyonShiftActivity extends SDLActivity {
     // initializer. SDL shows a link error from here as a dialog instead.
     @Override
     public void loadLibraries() {
+        if(launchError!=null)throw new UnsatisfiedLinkError(launchError);
         if (!cpuHasFeatures("atomics", "asimdrdm")) {
             throw new UnsatisfiedLinkError("Pinyon Shift needs an ARMv8.2 CPU "
                     + "(Cortex-A55, Cortex-A75 or newer); this device's CPU is older.");
         }
         super.loadLibraries();
+        bridgeLoaded=true;
     }
 
     // Whether the kernel lists every given feature for the CPU. True when
@@ -182,7 +218,56 @@ public class PinyonShiftActivity extends SDLActivity {
                 Log.w(TAG, "launch arguments not read", error);
             }
         }
+        String verified=getIntent().getStringExtra("verified_driver");
+        if(verified!=null)arguments.add("--android_gpu_driver="+verified);
+        if(getIntent().getBooleanExtra("debug_report",false)){
+            arguments.add("--pinyon_shift_capture_performance=true");
+            arguments.add("--fh1_native_gpu_profile=true");
+        }else arguments.add("--pinyon_shift_capture_performance=false");
         return arguments.toArray(new String[0]);
+    }
+
+    private boolean hasController(){
+        for(int id:android.view.InputDevice.getDeviceIds()){android.view.InputDevice device=android.view.InputDevice.getDevice(id);
+            if(device!=null&&!device.isVirtual()&&((device.getSources()&android.view.InputDevice.SOURCE_GAMEPAD)==android.view.InputDevice.SOURCE_GAMEPAD
+                ||(device.getSources()&android.view.InputDevice.SOURCE_JOYSTICK)==android.view.InputDevice.SOURCE_JOYSTICK))return true;}
+        return false;
+    }
+    private void updateController(){if(bridgeLoaded)nativeController(hasController());}
+    private void addGameMenuButton(){
+        android.widget.Button menu=FestivalUi.button(this,"☰",false);menu.setContentDescription("Open FH4Droid game menu");
+        android.widget.RelativeLayout.LayoutParams params=new android.widget.RelativeLayout.LayoutParams(FestivalUi.dp(this,52),FestivalUi.dp(this,48));
+        params.addRule(android.widget.RelativeLayout.ALIGN_PARENT_RIGHT);params.addRule(android.widget.RelativeLayout.ALIGN_PARENT_TOP);
+        params.setMargins(0,FestivalUi.dp(this,12),FestivalUi.dp(this,18),0);mLayout.addView(menu,params);menu.setOnClickListener(v->showGameMenu());
+    }
+    private void showGameMenu(){
+        if(!bridgeLoaded||isFinishing()||gameMenu!=null&&gameMenu.isShowing())return;
+        nativeHostMenu(true);android.widget.LinearLayout body=FestivalUi.column(this);
+        body.addView(FestivalUi.text(this,"Saved settings: "+MobileSettings.summary(this),14,FestivalUi.MUTED));
+        FestivalUi.action(this,body,"Resume driving",()->gameMenu.dismiss());
+        FestivalUi.action(this,body,"Settings",()->MobileSettings.show(this,(key,value)->nativeApplySetting(key,value),
+            ()->startActivity(new Intent(this,TouchEditorActivity.class)),
+            ()->Toast.makeText(this,"Quit to the launcher to change or test drivers.",1).show()));
+        FestivalUi.action(this,body,"Edit touch controls",()->startActivity(new Intent(this,TouchEditorActivity.class)));
+        FestivalUi.action(this,body,"Advanced game settings",()->{gameMenu.dismiss();nativeOpenSettings();});
+        FestivalUi.action(this,body,"Share problem report",()->ProblemReports.share(this));
+        FestivalUi.action(this,body,"Quit to launcher",()->new android.app.AlertDialog.Builder(this).setTitle("Quit the game?")
+            .setMessage("Wait for the game's save indicator to finish before quitting.").setNegativeButton("Keep playing",null)
+            .setPositiveButton("Quit",(d,w)->{gameMenu.dismiss();finish();}).show());
+        gameMenu=FestivalUi.dialog(this,"FH4Droid",body);
+        gameMenu.setOnDismissListener(d->{if(bridgeLoaded)nativeHostMenu(false);FestivalUi.immersive(this);});gameMenu.show();
+    }
+    @Override public void onBackPressed(){if(gameMenu!=null&&gameMenu.isShowing())gameMenu.dismiss();else showGameMenu();}
+    @Override protected void onResume(){super.onResume();if(bridgeLoaded){nativeReloadTouch(TouchLayout.file(this).getAbsolutePath(),hasController());FestivalUi.immersive(this);}}
+    @Override protected void onDestroy(){
+        if(inputManager!=null)inputManager.unregisterInputDeviceListener(controllers);
+        if(gameMenu!=null)gameMenu.dismiss();
+        super.onDestroy();
+        GameSession.record(this,false);
+        if(gameIso!=null)try{gameIso.close();}catch(IOException ignored){}
+        // SDL and its driver hooks cannot be safely reinitialized in this process.
+        // The launcher lives separately and survives game crashes and normal exits.
+        android.os.Process.killProcess(android.os.Process.myPid());
     }
 
     // enabled_mods from a mod set the setup screen copied before the game had

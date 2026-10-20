@@ -826,6 +826,12 @@ std::unique_ptr<MenuScreen> SettingsPages::Graphics() {
     };
   }
   rows.push_back(std::move(resolution));
+#if defined(__ANDROID__)
+  rows.push_back(Setting("RASTER RESOLUTION",
+      {{"50% (640 X 360)", {{"fh1_render_scale_percent", "50"}}},
+       {"75% (960 X 540)", {{"fh1_render_scale_percent", "75"}}},
+       {"100% (1280 X 720)", {{"fh1_render_scale_percent", "100"}}}}));
+#endif
   // anisotropic_override holds the Xenos filter: 3, 4 and 5 are 4x, 8x, 16x;
   // -1 keeps what each of the game's textures asks for.
   rows.push_back(Setting("ANISOTROPIC FILTERING",

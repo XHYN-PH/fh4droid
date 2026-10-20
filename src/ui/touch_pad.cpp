@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <sstream>
 
 #include <rex/logging.h>
 #include <rex/ui/ui_event.h>
@@ -93,9 +95,38 @@ const std::vector<TouchPad::Layout>& TouchPad::Controls() {
       {Control::kRightBumper, "RB", 0.93f, 0.20f, 0.075f},
       {Control::kBack, "BACK", 0.40f, 0.08f, 0.06f},
       {Control::kStart, "START", 0.60f, 0.08f, 0.06f},
+      {Control::kStick, "LS", 0.16f, 0.74f, kStickTravel},
   };
   return controls;
 }
+
+void TouchPad::LoadLayout(const std::filesystem::path& path) {
+  {
+    std::lock_guard lock(mutex_);
+    controls_ = Controls(); hidden_.assign(controls_.size(), false);
+    opacity_ = 0.55f; auto_hide_ = true; fingers_.clear();
+    std::ifstream in(path);
+    for (std::string line; std::getline(in, line);) {
+      std::istringstream row(line); std::string label; row >> label;
+      if (label == "opacity") { float value; if (row >> value && std::isfinite(value)) opacity_ = std::clamp(value, .2f, 1.f); }
+      else if (label == "auto_hide") { int value; if (row >> value) auto_hide_ = value != 0; }
+      else {
+        float x, y, r; int hide;
+        if (!(row >> x >> y >> r >> hide) || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(r)) continue;
+        for (size_t i = 0; i < controls_.size(); ++i) if (label == controls_[i].label) {
+          controls_[i].x = std::clamp(x, 0.f, 1.f); controls_[i].y = std::clamp(y, 0.f, 1.f);
+          controls_[i].radius = std::clamp(r, .035f, .24f); hidden_[i] = hide != 0;
+        }
+      }
+    }
+  }
+  Changed();
+}
+void TouchPad::SetPhysicalController(bool connected) {
+  { std::lock_guard lock(mutex_); physical_controller_ = connected; fingers_.clear(); }
+  Changed();
+}
+float TouchPad::Opacity() const { std::lock_guard lock(mutex_); return opacity_; }
 
 std::unique_ptr<rex::input::InputDriver> TouchPad::CreateDriver() {
   return std::make_unique<TouchPadDriver>(*this);
@@ -126,14 +157,18 @@ void TouchPad::Place(const Layout& control, float width, float height, float& x,
   // camera cutout or a rounded corner.
   const float safe_width = std::max(1.0f, width - safe_left_ - safe_right_);
   const float safe_height = std::max(1.0f, height - safe_top_ - safe_bottom_);
-  x = safe_left_ + control.x * safe_width;
-  y = safe_top_ + control.y * safe_height;
+  const float r = std::min(control.radius * height, std::min(safe_width, safe_height) * .49f);
+  x = safe_left_ + std::clamp(control.x * safe_width, r, safe_width - r);
+  y = safe_top_ + std::clamp(control.y * safe_height, r, safe_height - r);
 }
 
 TouchPad::Control TouchPad::Hit(float x, float y, float width, float height) const {
   Control best = Control::kNone;
   float best_distance = 0.0f;
-  for (const Layout& control : Controls()) {
+  const auto& controls = controls_.empty() ? Controls() : controls_;
+  for (size_t i = 0; i < controls.size(); ++i) {
+    if (!hidden_.empty() && hidden_[i]) continue;
+    const Layout& control = controls[i];
     float control_x, control_y;
     Place(control, width, height, control_x, control_y);
     const float dx = x - control_x;
@@ -145,9 +180,6 @@ TouchPad::Control TouchPad::Hit(float x, float y, float width, float height) con
       best = control.control;
       best_distance = distance;
     }
-  }
-  if (best == Control::kNone && x < width * 0.45f && y > height * 0.35f) {
-    return Control::kStick;
   }
   return best;
 }
@@ -176,7 +208,7 @@ void TouchPad::OnTouchEvent(rex::ui::TouchEvent& e) {
     safe_top_ = float(insets.top);
     safe_right_ = float(insets.right);
     safe_bottom_ = float(insets.bottom);
-    if (suspended_) {
+    if (suspended_ || (auto_hide_ && physical_controller_)) {
       return;
     }
     last_touch_ = std::chrono::steady_clock::now();
@@ -198,8 +230,10 @@ void TouchPad::OnTouchEvent(rex::ui::TouchEvent& e) {
         break;
       }
       case rex::ui::TouchEvent::Action::kUp:
-      case rex::ui::TouchEvent::Action::kCancel:
         fingers_.erase(e.pointer_id());
+        break;
+      case rex::ui::TouchEvent::Action::kCancel:
+        fingers_.clear();
         break;
     }
   }
@@ -219,21 +253,23 @@ void TouchPad::Changed() {
 
 bool TouchPad::Visible() const {
   std::lock_guard lock(mutex_);
-  return !suspended_ && last_touch_ != std::chrono::steady_clock::time_point{} &&
+  return !suspended_ && !(auto_hide_ && physical_controller_) &&
+         last_touch_ != std::chrono::steady_clock::time_point{} &&
          std::chrono::steady_clock::now() - last_touch_ < kVisibleAfterTouch;
 }
 
 rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
   rex::input::X_INPUT_GAMEPAD pad = {};
   std::lock_guard lock(mutex_);
-  if (suspended_) {
+  if (suspended_ || (auto_hide_ && physical_controller_)) {
     return pad;
   }
   uint16_t buttons = 0;
   for (const auto& [id, finger] : fingers_) {
     switch (finger.control) {
       case Control::kStick: {
-        const float travel = std::max(1.0f, kStickTravel * height_);
+        const auto& controls = controls_.empty() ? Controls() : controls_;
+        const float travel = std::max(1.0f, controls.back().radius * height_);
         const float x = std::clamp((finger.x - finger.origin_x) / travel, -1.0f, 1.0f);
         const float y = std::clamp((finger.y - finger.origin_y) / travel, -1.0f, 1.0f);
         pad.thumb_lx = int16_t(x * 32767.0f);
@@ -281,7 +317,10 @@ rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
 std::vector<TouchPad::Shape> TouchPad::Shapes(float width, float height) const {
   std::vector<Shape> shapes;
   std::lock_guard lock(mutex_);
-  for (const Layout& control : Controls()) {
+  const auto& controls = controls_.empty() ? Controls() : controls_;
+  for (size_t i = 0; i < controls.size(); ++i) {
+    if ((!hidden_.empty() && hidden_[i]) || controls[i].control == Control::kStick) continue;
+    const Layout& control = controls[i];
     Shape shape;
     Place(control, width, height, shape.x, shape.y);
     shape.radius = control.radius * height;
@@ -294,8 +333,9 @@ std::vector<TouchPad::Shape> TouchPad::Shapes(float width, float height) const {
   // The stick where the finger holds it, or its resting place.
   Shape stick;
   stick.stick = true;
-  Place({Control::kStick, "", 0.16f, 0.70f, kStickTravel}, width, height, stick.x, stick.y);
-  stick.radius = kStickTravel * height;
+  if (!hidden_.empty() && hidden_.back()) return shapes;
+  Place(controls.back(), width, height, stick.x, stick.y);
+  stick.radius = controls.back().radius * height;
   stick.stick_x = stick.x;
   stick.stick_y = stick.y;
   for (const auto& [id, finger] : fingers_) {

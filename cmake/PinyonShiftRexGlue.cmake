@@ -150,6 +150,7 @@ if(REXSDK_DIR)
         add_compile_options(-march=${PINYON_SHIFT_ANDROID_MARCH})
         set(REXGLUE_ARM64_MARCH ${PINYON_SHIFT_ANDROID_MARCH})
     endif()
+    include("${PROJECT_SOURCE_DIR}/cmake/PinyonShiftAndroidSdkPatch.cmake")
     add_subdirectory("${REXSDK_DIR}" rexglue-sdk EXCLUDE_FROM_ALL)
     # NN-3.6: calls inside the runtime libraries bind locally instead of
     # through the PLT, as libmain's already do. Nothing interposes on their

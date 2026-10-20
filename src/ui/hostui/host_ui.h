@@ -95,6 +95,7 @@ class HostUi final : public rex::ui::UIDrawer, public rex::ui::WindowInputListen
     float x = 0.0f, y = 0.0f, radius = 0.0f;
     std::string label;
     bool pressed = false;
+    float opacity = 0.55f;
   };
   void SetOverlaySource(std::function<std::vector<OverlayDisc>()> source) {
     overlay_source_ = std::move(source);

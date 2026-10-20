@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -42,6 +43,9 @@ class TouchPad final : public rex::ui::WindowInputListener {
   void SetChangedCallback(std::function<void()> callback);
   // While the host menus are open they take the touches (as mouse clicks).
   void SetSuspended(bool suspended);
+  void LoadLayout(const std::filesystem::path& path);
+  void SetPhysicalController(bool connected);
+  float Opacity() const;
 
   void OnTouchEvent(rex::ui::TouchEvent& e) override;
 
@@ -77,6 +81,11 @@ class TouchPad final : public rex::ui::WindowInputListener {
   };
 
   static const std::vector<Layout>& Controls();
+  std::vector<Layout> controls_;
+  std::vector<bool> hidden_;
+  float opacity_ = 0.55f;
+  bool auto_hide_ = true;
+  bool physical_controller_ = false;
   // A control's centre in window pixels, inside the safe area.
   void Place(const Layout& control, float width, float height, float& x, float& y) const;
   Control Hit(float x, float y, float width, float height) const;

@@ -93,8 +93,8 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     private static final int HTTP_PORT = 47615;
     private static final int DISCOVERY_PORT = 47616;
     private static final int REQUEST_FOLDER = 0x5055;
-    private static final int ACCENT = Color.rgb(241, 174, 54);
-    private static final int MUTED = Color.rgb(159, 178, 165);
+    private static final int ACCENT = FestivalUi.ORANGE;
+    private static final int MUTED = FestivalUi.MUTED;
     // Game files being copied: the game does not start from a partial copy.
     private static final String INCOMPLETE = "game/.copy-incomplete";
     // Arguments the game activity adds at every start (1000 Club offline).
@@ -151,7 +151,8 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         }
         buildLayout();
         refresh();
-        startDiscovery();
+        if(intent!=null&&intent.getBooleanExtra("choose_folder",false))chooseFolder();
+        else startDiscovery();
         installReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent status) {
@@ -174,7 +175,8 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     }
 
     private void startGame() {
-        Intent game = new Intent(this, PinyonShiftActivity.class);
+        Intent game = new Intent(this, LauncherActivity.class);
+        game.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         Intent intent = getIntent();
         if (intent != null && intent.getExtras() != null) {
             game.putExtras(intent.getExtras());
@@ -206,9 +208,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     }
 
     private Button button(LinearLayout parent, String label) {
-        Button button = new Button(this);
-        button.setText(label);
-        button.setAllCaps(false);
+        Button button = FestivalUi.button(this,label,false);
         button.setOnClickListener(this);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
@@ -232,15 +232,17 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     }
 
     private void buildLayout() {
-        getWindow().setStatusBarColor(Color.rgb(15, 26, 20));
+        FestivalUi.immersive(this);
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(Color.rgb(15, 26, 20));
+        scroll.setBackgroundColor(0xe5120c0d);
         LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
         column.setPadding(dp(28), dp(24), dp(28), dp(32));
         scroll.addView(column);
 
-        text(column, "FH4Droid", 26, Color.WHITE, true);
+        Button back=FestivalUi.button(this,"‹  Back to launcher",false);
+        column.addView(back);back.setOnClickListener(v->finish());
+        text(column, "Game setup", 26, Color.WHITE, true);
         intro = text(column, "", 15, MUTED, false);
 
         text(column, "From your PC over Wi-Fi", 18, ACCENT, true).setPadding(0, dp(16), 0, 0);
@@ -280,10 +282,13 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                 14, MUTED, false);
         folderButton = button(column, "Choose folder…");
 
-        playButton = button(column, "Play");
+        playButton = button(column, "Return to launcher");
         playButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         ((LinearLayout.LayoutParams) playButton.getLayoutParams()).topMargin = dp(24);
-        setContentView(scroll);
+        android.widget.FrameLayout canvas=new android.widget.FrameLayout(this);
+        canvas.addView(new FestivalUi.Artwork(this),new android.widget.FrameLayout.LayoutParams(-1,-1));
+        canvas.addView(scroll,new android.widget.FrameLayout.LayoutParams(-1,-1));
+        setContentView(canvas);
     }
 
     @Override
@@ -1192,52 +1197,61 @@ public class SetupActivity extends Activity implements View.OnClickListener {
 
     private void importFolder(Uri tree) throws IOException {
         String root = DocumentsContract.getTreeDocumentId(tree);
-        List<Entry> files = new ArrayList<>();
-        list(tree, root, "", files);
-        boolean game = false;
-        long total = 0;
-        for (Entry entry : files) {
-            game |= entry.path.equals("default.xex");
-            total += entry.size;
+        List<Entry> listed = new ArrayList<>();
+        list(tree, root, "", listed);
+        Map<String, Entry> incoming = new LinkedHashMap<>();
+        for (Entry entry : listed) {
+            String name = entry.path.toLowerCase(Locale.ROOT);
+            if (incoming.put(name, entry) != null) throw new IOException("duplicate game path: " + entry.path);
         }
-        if (!game) {
-            throw new IOException("that folder holds no default.xex; choose the extracted game folder itself");
+        Map<String, GameFiles.Expected> catalog = GameFiles.catalog(this);
+        List<GameFiles.Expected> needed = new ArrayList<>();
+        long remaining = 0;
+        for (Map.Entry<String, GameFiles.Expected> row : catalog.entrySet()) {
+            GameFiles.Expected expected = row.getValue();
+            Entry source = incoming.get(row.getKey());
+            if (source == null || source.size != expected.size) throw new IOException("missing or unexpected " + expected.path + "; choose the complete extracted base-game folder");
+            File target = destination("game/base/" + expected.path);
+            if (!target.isFile() || target.length() != expected.size || !DiscImage.hash(target).equals(expected.hash)) {
+                needed.add(expected);
+                remaining += expected.size;
+            }
         }
-        if (total > base.getUsableSpace() - (256L << 20)) {
-            throw new IOException("not enough free space: " + size(total) + " needed");
+        // Reject a wrong executable before marking an existing install incomplete.
+        for (Map.Entry<String, String> executable : GameFiles.EXECUTABLES.entrySet()) {
+            Entry source = incoming.get(executable.getKey().toLowerCase(Locale.ROOT));
+            try (InputStream in = getContentResolver().openInputStream(source.uri)) {
+                if (in == null || !GameFiles.hash(in).equals(executable.getValue())) throw new IOException("unsupported " + executable.getKey() + "; this build uses base-game files");
+            }
+        }
+        if (remaining > Math.max(0, base.getUsableSpace() - (256L << 20))) {
+            throw new IOException("not enough free space: " + size(remaining) + " still needs copying");
         }
         File incomplete = new File(base, INCOMPLETE);
         incomplete.getParentFile().mkdirs();
         new FileOutputStream(incomplete).close();
         long done = 0;
-        final long started = System.currentTimeMillis();
-        final int count = files.size();
-        for (int i = 0; i < files.size(); i++) {
-            Entry entry = files.get(i);
-            File target = destination("game/base/" + entry.path);
-            if (target.length() != entry.size) {
-                File part = new File(target.getPath() + ".part");
-                target.getParentFile().mkdirs();
-                final long before = done;
-                final int number = i + 1;
-                final long sum = total;
-                try (InputStream in = getContentResolver().openInputStream(entry.uri);
-                     OutputStream out = new FileOutputStream(part)) {
-                    if (in == null) throw new IOException("cannot read " + entry.path);
-                    copy(in, out, new Progress() {
-                        @Override
-                        public void written(long bytes) {
-                            report(before + bytes, sum, number, count, started);
-                        }
-                    });
-                }
-                if (part.length() != entry.size) throw new IOException("incomplete copy of " + entry.path);
-                if (target.exists() && !target.delete()) throw new IOException("cannot replace " + target);
-                if (!part.renameTo(target)) throw new IOException("cannot write " + target);
+        final long started = System.currentTimeMillis(), total = remaining;
+        for (int i = 0; i < needed.size(); i++) {
+            GameFiles.Expected expected = needed.get(i);
+            Entry source = incoming.get(expected.path.toLowerCase(Locale.ROOT));
+            File target = destination("game/base/" + expected.path), part = new File(target.getPath() + ".part");
+            target.getParentFile().mkdirs();
+            final long before = done; final int number = i + 1;
+            try (InputStream in = getContentResolver().openInputStream(source.uri); OutputStream out = new FileOutputStream(part)) {
+                if (in == null) throw new IOException("cannot read " + expected.path);
+                copy(in, out, new Progress() {
+                    @Override public void written(long bytes) { report(before + bytes, total, number, needed.size(), started); }
+                });
             }
-            done += entry.size;
+            if (part.length() != expected.size || !DiscImage.hash(part).equals(expected.hash)) {
+                part.delete(); throw new IOException("damaged or incomplete " + expected.path + "; check the original game files");
+            }
+            java.nio.file.Files.move(part.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            done += expected.size;
         }
-        incomplete.delete();
+        getSharedPreferences("mobile", 0).edit().remove("iso_uri").commit();
+        if (!incomplete.delete() && incomplete.exists()) throw new IOException("cannot finalize game import");
     }
 
     private void list(Uri tree, String document, String prefix, List<Entry> out) throws IOException {

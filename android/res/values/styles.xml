@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="FH4DroidTheme" parent="android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:colorAccent">#FF883B</item>
+        <item name="android:windowBackground">#120C0D</item>
+        <item name="android:fontFamily">sans-serif-condensed</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+    <style name="FH4DroidGameTheme" parent="FH4DroidTheme">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>
