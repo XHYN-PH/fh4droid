@@ -9,8 +9,8 @@
         android:shortcutShortLabel="@string/shortcut_setup_short"
         android:shortcutLongLabel="@string/shortcut_setup_long">
         <intent
-            android:action="studio.deimos.pinyonshift.SETUP"
-            android:targetPackage="studio.deimos.pinyonshift"
+            android:action="ph.xhyn.fh4droid.SETUP"
+            android:targetPackage="ph.xhyn.fh4droid"
             android:targetClass="studio.deimos.pinyonshift.SetupActivity" />
     </shortcut>
 </shortcuts>
