@@ -1,5 +1,13 @@
 # Pinyon Shift on Android
 
+## FH4Droid Android-only fork
+
+FH4Droid focuses on Android only. Its `0.6.0-r1` test release provides a prebuilt APK with application ID `ph.xhyn.fh4droid`. Install it, choose your own complete extracted USA retail game folder, wait for import, then play. A PC is needed to extract an ISO if your game is not already extracted; the phone does not compile the game. See the [fork release notes](releases/fh4droid-0.6.0-r1.md) for requirements and limitations. This build has not been tested on a physical Android device.
+
+The build and Wi-Fi instructions below are inherited from upstream. Its private-build distribution policy describes upstream Pinyon Shift; this fork's prebuilt APK release is separate and contains compiled game translations. Raw game files, generated source, native build products and signing keys remain excluded from the source repository.
+
+## Upstream Android status
+
 **Status: alpha, for developers.** The game builds for Android, installs and
 plays through the Vulkan renderer. On the reference tablet (nubia NP05J,
 Snapdragon 8 Elite) the race runs at 60 fps at 1x until the device heats up,
@@ -177,17 +185,16 @@ python tools/pinyon.py android push-data
 `build` cross-compiles the game and packages `.local/android/pinyon-shift.apk`,
 signed with a key made on your PC. `push-data` copies the extracted game
 (7.2 GB, 2,400 files) into the app's folder on the device,
-`Android/data/studio.deimos.pinyonshift/files/game/base`; it resumes where it
+`Android/data/ph.xhyn.fh4droid/files/game/base`; it resumes where it
 stopped if interrupted. Saves, settings, logs and mods live beside it in
 `files/state`, with the same layout as on the PC, so a save copies between
 the two as a folder.
 
-Builds before October 2026 installed as `com.pinyonshift.fh1`, which Android
-treats as another app with its own folder. After installing the current
-package, `python tools/pinyon.py android migrate` copies the earlier
-install's saves, settings and drivers into the new folder (leaving the
-originals) and moves its game files; uninstall the old app once the game
-shows your save.
+FH4Droid installs separately as `ph.xhyn.fh4droid`. Upstream Pinyon Shift
+uses `studio.deimos.pinyonshift` (or `com.pinyonshift.fh1` for older builds).
+This fork does not migrate those installations automatically. Import the
+extracted game folder with **Choose folder**, and back up existing saves
+before copying progress between apps.
 
 DLC and the v4 title update work as on the PC, with the content copied into
 the device's state. Import and enable packages into a state folder on the PC
