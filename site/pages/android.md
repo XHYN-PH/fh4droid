@@ -7,7 +7,11 @@ description: Build Pinyon Shift for an Android handheld from the launcher and in
 
 # Android
 
-A developer alpha. The Android build is the same recompiled game, cross-compiled for arm64 on your PC from your own disc and installed on your own device. It's never published or shared.
+This fork builds **FH4Droid**, an Android app for the original Xbox 360 **Forza Horizon (2012)**. Its application ID is `ph.xhyn.fh4droid`, so it installs separately from upstream Pinyon Shift. The runtime and renderer come from [Pinyon Shift](https://github.com/arcanite24/pinyon-shift). The Android preset keeps the dynamic physical-view offset and 16 KB-aligned libraries, allowing the existing 4 KB and 16 KB mapping paths. Device testing is pending on both page sizes.
+
+**FH4Droid focuses on Android only.** The `0.6.0-r1` test release provides a prebuilt APK. Install it, open **Choose folder**, select your complete extracted USA retail game folder, wait for import, then tap **Play**. The APK contains recompiled executable code; you supply the remaining game assets. The phone does not compile the game. This release has not been tested on a physical Android device. See the [release notes](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.0-r1.md).
+
+The sections below describe the inherited upstream developer-build workflow: the same recompiled game is cross-compiled for arm64 on your PC from your own disc and installed on your own device. Upstream's locally built APKs are kept private.
 
 ## Requirements
 
@@ -38,7 +42,7 @@ python tools/pinyon.py android install
 python tools/pinyon.py android push-data
 ```
 
-`push-data` copies the extracted game into `Android/data/studio.deimos.pinyonshift/files/game/base` and resumes if interrupted. Saves, settings, logs and mods live beside it in `files/state`, laid out as on the PC.
+`push-data` copies the extracted game into `Android/data/ph.xhyn.fh4droid/files/game/base` and resumes if interrupted. Saves, settings, logs and mods live beside it in `files/state`, laid out as on the PC.
 
 After the game has run once on a device, `python tools/pinyon.py android shader-pack` makes a shader pack for it: it starts the game to the title screen over adb, collects the SPIR-V of every shader the device's pipeline storage names, builds a pack and puts it in the state's shader cache. Later starts load the pack instead of translating those shaders: on the Odin 2 (Adreno 740), 711 shaders, shader translation at start 0.52 to 0.07 s and start to title 2.99 to 2.66 s. The pack belongs to the device and build it was made on; run the command again after updating. Stop the game first; the command refuses while it runs.
 
