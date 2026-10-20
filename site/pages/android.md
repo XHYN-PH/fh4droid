@@ -7,9 +7,9 @@ description: Build Pinyon Shift for an Android handheld from the launcher and in
 
 # Android
 
-This fork builds **FH4Droid**, an Android app for the original Xbox 360 **Forza Horizon (2012)**. Its application ID is `ph.xhyn.fh4droid`, so it installs separately from upstream Pinyon Shift. The runtime and renderer come from [Pinyon Shift](https://github.com/arcanite24/pinyon-shift). The Android preset keeps the dynamic physical-view offset and 16 KB-aligned libraries, allowing the existing 4 KB and 16 KB mapping paths. Device testing is pending on both page sizes.
+**FH4Droid** brings the original Xbox 360 **Forza Horizon (2012)** to compatible Android phones and handhelds. It is based on [Pinyon Shift](https://github.com/arcanite24/pinyon-shift) and installs separately from the original app.
 
-**FH4Droid focuses on Android only.** The `0.6.0-r1` test release provides a prebuilt APK. Install it, open **Choose folder**, select your complete extracted USA retail game folder, wait for import, then tap **Play**. The APK contains recompiled executable code; you supply the remaining game assets. The phone does not compile the game. This release has not been tested on a physical Android device. See the [release notes](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.0-r1.md).
+**FH4Droid focuses on Android only.** Install the `0.6.0-r1` APK, open **Choose folder**, select your own complete extracted USA retail game folder, wait for import, then tap **Play**. Extract an ISO first. Title Update 4 is not needed for this release, and saves already used with Update 4 will not work with it. This early test build has not been tested on a physical Android device. See the [release notes](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.0-r1.md).
 
 The sections below describe the inherited upstream developer-build workflow: the same recompiled game is cross-compiled for arm64 on your PC from your own disc and installed on your own device. Upstream's locally built APKs are kept private.
 
