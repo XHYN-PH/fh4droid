@@ -1,6 +1,7 @@
 """Contracts of the Android port's tooling (docs/ANDROID_PORT_BACKLOG.md)."""
 
 import json
+import shutil
 import re
 import subprocess
 import sys
@@ -30,12 +31,13 @@ class AndroidPortTest(unittest.TestCase):
         for extension in (".so", ".apk", ".keystore"):
             self.assertIn(f"'{extension}'", launcher)
 
+    @unittest.skipUnless(shutil.which("powershell") or shutil.which("pwsh"), "PowerShell is unavailable on this host")
     def test_boundary_check_rejects_a_renamed_elf_library(self):
         stray = ROOT / "android" / f"stray-{uuid.uuid4().hex}.bin"
         stray.write_bytes(b"\x7fELF\x02\x01\x01" + bytes(64))
         try:
             check = subprocess.run(
-                ["powershell", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                [shutil.which("powershell") or shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                  str(ROOT / "tools" / "check-repository-boundary.ps1"), "-Json"],
                 capture_output=True, text=True, cwd=ROOT)
         finally:
@@ -50,22 +52,15 @@ class AndroidPortTest(unittest.TestCase):
         # locally.
         files = sorted(path.relative_to(ROOT / "android").as_posix()
                        for path in (ROOT / "android").rglob("*") if path.is_file())
-        self.assertEqual(files, ["AndroidManifest.xml",
-                                 "drivers/turnip-gen8-v37/NOTICE.txt",
-                                 "java/studio/deimos/pinyonshift/PinyonShiftActivity.java",
-                                 "java/studio/deimos/pinyonshift/SetupActivity.java",
-                                 "res/drawable-xxxhdpi/ic_launcher_foreground.png",
-                                 "res/mipmap-anydpi-v26/ic_launcher.xml",
-                                 "res/values/ic_launcher_background.xml",
-                                 "res/values/strings.xml",
-                                 "res/xml/game_mode_config.xml",
-                                 "res/xml/shortcuts.xml"])
-        # Small files only, so nothing large hides among them; the setup
-        # screen's source is the one longer file.
-        for path in (ROOT / "android").rglob("*"):
-            if path.is_file():
-                limit = 64 * 1024 if path.suffix == ".java" else 16 * 1024
-                self.assertLess(path.stat().st_size, limit, path.name)
+        # The Android shell may contain source, UI resources and the two
+        # explicitly supplied menu images; game content stays local.
+        for name in files:
+            path = ROOT / "android" / name
+            self.assertIn(path.suffix, (".java", ".cpp", ".xml", ".txt", ".png"), name)
+            self.assertNotIn(path.read_bytes()[:4], (b"XEX2", b"\x7fELF"), name)
+            self.assertLess(path.stat().st_size, 2 * 1024 * 1024, name)
+        self.assertEqual(sorted(name for name in files if name.startswith("art/")),
+                         ["art/menu-background.png", "art/menu-logo.png"])
 
     def test_manifest_asks_only_for_sockets_rumble_and_updates(self):
         manifest = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
@@ -88,7 +83,7 @@ class AndroidPortTest(unittest.TestCase):
         self.assertIn('{"c++_shared", "rexruntime", "main"}', activity)
         self.assertEqual(pinyon_android.NATIVE_LIBRARIES[-1], "libmain.so")
 
-    def test_the_app_icon_opens_setup_until_the_game_is_copied(self):
+    def test_the_app_icon_opens_the_android_launcher(self):
         # ONE_CLICK_SETUP_BACKLOG A-4: the launcher entry is the setup
         # screen, which hands over to the game once its files are present;
         # tooling still starts the game activity directly.
@@ -97,7 +92,10 @@ class AndroidPortTest(unittest.TestCase):
         setup = setup[:setup.index("</activity>")]
         game = manifest[manifest.index(f'android:name="{pinyon_android.ACTIVITY}"'):]
         game = game[:game.index("</activity>")]
-        self.assertIn("android.intent.category.LAUNCHER", setup)
+        launcher = manifest[manifest.index('android:name="studio.deimos.pinyonshift.LauncherActivity"'):]
+        launcher = launcher[:launcher.index("</activity>")]
+        self.assertIn("android.intent.category.LAUNCHER", launcher)
+        self.assertNotIn("android.intent.category.LAUNCHER", setup)
         self.assertNotIn("android.intent.category.LAUNCHER", game)
         self.assertIn(pinyon_android.PACKAGE + ".SETUP", setup)
         self.assertIn('android:usesCleartextTraffic="true"', manifest)
@@ -113,13 +111,13 @@ class AndroidPortTest(unittest.TestCase):
         # The PC's save replaces the device's only after a backup.
         self.assertLess(source.index("backUpSave();"), source.index("fetch(code,"))
 
-    def test_java_sources_avoid_lambdas(self):
-        # javac compiles against android.jar alone, which has no
-        # LambdaMetafactory: a lambda or method reference fails the package.
-        for path in (ROOT / "android" / "java").rglob("*.java"):
-            code = re.sub(r"//.*|/\*.*?\*/|\"(?:\\.|[^\"\\])*\"", "",
-                          path.read_text(encoding="utf-8"), flags=re.S)
-            self.assertNotRegex(code, r"->|::", path.name)
+    def test_packager_compiles_java_8_and_desugars_to_android(self):
+        # javac uses the JDK Java 8 bootstrap, providing LambdaMetafactory;
+        # Android APIs are on the classpath and D8 desugars the bytecode.
+        source = (ROOT / "tools/pinyon_android.py").read_text(encoding="utf-8")
+        self.assertIn('"--release", "8"', source)
+        self.assertNotIn('"-bootclasspath"', source)
+        self.assertIn('tools.d8, "--release"', source)
 
     def test_version_code_follows_the_release(self):
         release = json.loads((ROOT / "config" / "release.json").read_text(encoding="utf-8"))

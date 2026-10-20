@@ -89,6 +89,7 @@ class PinyonShiftApp final : public rex::ReXApp {
   bool resize_listener_added_ = false;
 
   std::atomic_bool shutdown_recorded_{false};
+  std::atomic_bool android_menu_active_{false};
   // Created on first use: the presenter and input system it needs exist only
   // after runtime setup.
   std::unique_ptr<pinyon_shift::hostui::HostUi> host_ui_;

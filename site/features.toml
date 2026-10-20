@@ -16,7 +16,7 @@ platforms = ["Windows", "Linux and Steam Deck", "macOS", "Android"]
 feature = "Resolution"
 link = "playing.md#graphics-presets"
 xbox = "1280 × 720"
-pinyon = "1x to 4x internal resolution; bilinear, CAS or FSR 1 output scaling, temporal FSR 2 and 3 (built in on Linux, macOS and Android, with the FidelityFX runtime on Windows); ultrawide with a 16:9 HUD"
+pinyon = "Android adds 50%, 75% and 100% raster resolution (device testing pending); desktop has 1x to 4x internal resolution; bilinear, CAS or FSR 1 output scaling, temporal FSR 2 and 3 (built in on Linux, macOS and Android, with the FidelityFX runtime on Windows); ultrawide with a 16:9 HUD"
 
 [[original]]
 feature = "Frame rate"
@@ -268,3 +268,18 @@ cells = [
 feature = "Save backups and photos"
 link = "playing.md#saves"
 cells = ["yes", "yes", "yes", "yes"]
+
+[[platform]]
+feature = "Android launcher and touch editor"
+link = "android.md#launcher"
+cells = ["n/a", "n/a", "n/a", "partly: implemented; physical-device testing pending"]
+
+[[platform]]
+feature = "Direct ISO loading"
+link = "android.md#game-files"
+cells = ["n/a", "n/a", "n/a", "partly: base game; host support files cached; device testing pending"]
+
+[[platform]]
+feature = "Phone save import/export and reports"
+link = "android.md#saves"
+cells = ["n/a", "n/a", "n/a", "partly: standard base-game profile; device testing pending"]

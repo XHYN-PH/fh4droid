@@ -780,13 +780,14 @@ void HostUi::DrawOverlay(rex::ui::UIDrawContext& context) {
   drawer_.Begin(context, float(context.render_target_width()),
                 float(context.render_target_height()));
   for (const auto& disc : discs) {
-    DrawDisc(disc.x, disc.y, disc.radius, disc.pressed ? Rgba(255, 255, 255, 120)
-                                                       : Rgba(255, 255, 255, 45));
+    DrawDisc(disc.x, disc.y, disc.radius,
+             Rgba(255, 130, 69, int((disc.pressed ? 220 : 100) * disc.opacity)));
     if (!disc.label.empty()) {
       // Labels in title units: the canvas maps them back to these pixels.
       const float size = std::max(14.0f, disc.radius / canvas_.scale * 0.55f);
       DrawText(Face::kLabel, size, disc.label, (disc.x - canvas_.x) / canvas_.scale,
-               (disc.y - canvas_.y) / canvas_.scale + size * 0.35f, Rgba(255, 255, 255, 210),
+               (disc.y - canvas_.y) / canvas_.scale + size * 0.35f,
+               Rgba(255, 255, 255, int(255 * disc.opacity)),
                0.5f);
     }
   }

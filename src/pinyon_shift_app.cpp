@@ -64,6 +64,10 @@
 #include "ui/xam_dialogs.h"
 #include "ui/settings_menu.h"
 #include "ui/touch_pad.h"
+#if defined(__ANDROID__)
+#include "android_bridge.h"
+#include <rex/kernel/xam/module.h>
+#endif
 #include "ui/music.h"
 
 #include <cstdio>
@@ -896,10 +900,10 @@ bool PinyonShiftApp::EnsureHostUi() {
       for (const auto& shape : pad.Shapes(float(window()->GetActualPhysicalWidth()),
                                           float(window()->GetActualPhysicalHeight()))) {
         discs.push_back({shape.x, shape.y, shape.radius, shape.stick ? "" : shape.label,
-                         shape.pressed && !shape.stick});
+                         shape.pressed && !shape.stick, pad.Opacity()});
         if (shape.stick) {
           discs.push_back({shape.stick_x, shape.stick_y, shape.radius * 0.45f, "",
-                           shape.pressed});
+                           shape.pressed, pad.Opacity()});
         }
       }
       return discs;
@@ -997,6 +1001,18 @@ void PinyonShiftApp::ApplyMapView(bool open) {
 }
 
 void PinyonShiftApp::OnPostSetup() {
+#if defined(__ANDROID__)
+  pinyon_shift::ui::TouchPad::Get().LoadLayout(
+      pinyon_shift::diagnostics::StateRoot() / "config/touch-layout.txt");
+  pinyon_shift::android::InstallBridge([this](bool active) {
+    if (android_menu_active_.exchange(active) == active) return;
+    if (active) AcquireGuestInputCapture(); else ReleaseGuestInputCapture();
+    pinyon_shift::ui::TouchPad::Get().SetSuspended(active);
+    rex::kernel::xam::xeXamSetHostUIActive(active);
+  }, [this] {
+    if (window()) window()->app_context().CallInUIThreadDeferred([this] { OpenSettingsMenu(); });
+  });
+#endif
   // Launcher DLC selection is shared by normal and isolated modded profiles.
   // Saved games still use the active user root chosen in OnConfigurePaths.
   runtime()->kernel_state()->content_manager()->SetMarketplaceRoot(
@@ -1368,6 +1384,13 @@ bool PinyonShiftApp::OnWindowCloseRequested() {
 }
 
 void PinyonShiftApp::OnShutdown() {
+#if defined(__ANDROID__)
+  pinyon_shift::android::ClearBridge();
+  if (android_menu_active_.exchange(false)) {
+    ReleaseGuestInputCapture();
+    rex::kernel::xam::xeXamSetHostUIActive(false);
+  }
+#endif
   pinyon_shift::mod::NotifyShutdown();
   rex::ui::UnregisterBind("bind_game_menu");
   rex::cvar::UnregisterChangeCallbacks("pinyon_shift_hor_plus");

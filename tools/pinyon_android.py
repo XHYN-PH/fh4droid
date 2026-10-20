@@ -48,6 +48,7 @@ LOCAL_JDK = ROOT / CONFIG["bootstrap"]["jdk"]["install_path"]
 DEVICE_FILES = f"/sdcard/Android/data/{PACKAGE}/files"
 # The libraries the package carries besides the C++ runtime, in load order.
 NATIVE_LIBRARIES = (
+    "libfh4droid_android.so",
     "librexruntime.so",
     "librexgpu-fh1.so",
     "libpinyon_shift_SpeechFacade_default.so",
@@ -384,10 +385,14 @@ def _build_manifest(tools: Tools, version_name: str, libraries: list[Path]) -> d
         "executable_sha256": hashlib.sha256(main.read_bytes()).hexdigest().upper(),
         "generated_locally": True,
         "pinyon_shift_commit": _source_commit(),
-        "pinyon_shift_dirty": _dirty(_git("status", "--porcelain", "--", ".", ":!BUGS.md",
+        "pinyon_shift_dirty": _dirty(_git("status", "--porcelain", "--ignore-submodules=dirty", "--", ".", ":!BUGS.md",
                                           ":!docs")),
         "rexglue_commit": _git("rev-parse", "HEAD", cwd=sdk),
         "rexglue_dirty": _dirty(_git("status", "--porcelain", cwd=sdk)),
+        "android_sdk_patches": {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted((ROOT / "cmake" / "patches").glob("shiftglue-fh4droid-*.patch"))
+        },
     }
 
 
@@ -453,8 +458,8 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
     sdl_java = rexsdk_dir() / "thirdparty" / "sdl3" / "android-project" / "app" / "src" / "main" \
         / "java"
     sources = sorted(sdl_java.rglob("*.java")) + sorted((ROOT / "android" / "java").rglob("*.java"))
-    run([tools.javac, "-source", "1.8", "-target", "1.8", "-nowarn", "-Xlint:-options",
-         "-bootclasspath", tools.android_jar, "-classpath", tools.android_jar,
+    run([tools.javac, "--release", "8", "-nowarn", "-Xlint:-options",
+         "-classpath", tools.android_jar,
          "-encoding", "UTF-8", "-d", staging / "classes", *sources])
     # One jar of the classes rather than a path per class: d8 is a .bat on
     # Windows, and cmd.exe refuses a command longer than 8191 characters,
@@ -496,6 +501,11 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
             apk.write(library, f"lib/{CONFIG['abi']}/{library.name}")
         for path, name in bundled_driver_files():
             apk.write(path, name)
+        for path in sorted((ROOT / "android" / "art").rglob("*")):
+            if path.is_file():
+                apk.write(path, "assets/" + path.relative_to(ROOT / "android" / "art").as_posix())
+        apk.write(ROOT / "config" / "supported-extracted-ms-2505.json",
+                  "assets/supported-game.json")
 
     aligned = staging / "aligned.apk"
     run([tools.zipalign, "-P", "16", "-f", "4", unsigned, aligned])

@@ -102,6 +102,13 @@ elseif(ANDROID)
         src/crash_reporter_posix.cpp
     )
     set_target_properties(pinyon_shift PROPERTIES OUTPUT_NAME main)
+    target_sources(pinyon_shift PRIVATE src/android_bridge.cpp)
+    add_library(fh4droid_android SHARED android/native/driver_probe.cpp)
+    target_include_directories(fh4droid_android PRIVATE
+        ${REXSDK_DIR}/thirdparty/vulkan-headers/include)
+    target_link_libraries(fh4droid_android PRIVATE adrenotools android log dl)
+    target_link_options(fh4droid_android PRIVATE -Wl,-z,max-page-size=16384)
+    add_dependencies(pinyon_shift fh4droid_android)
     # Every generated function is a default-visibility weak symbol, so in a
     # shared library each call between them went through the PLT (4-6 % of
     # the guest threads on the Odin, #431). Bind them to their definitions
@@ -221,6 +228,13 @@ add_executable(pinyon_shift_overlay_device_tests EXCLUDE_FROM_ALL
 target_include_directories(pinyon_shift_overlay_device_tests PRIVATE src)
 target_link_libraries(pinyon_shift_overlay_device_tests PRIVATE rex::runtime)
 
+add_executable(pinyon_shift_fh1_raster_scale_tests EXCLUDE_FROM_ALL
+    tests/native_renderer/fh1_raster_scale_test.cpp)
+target_include_directories(pinyon_shift_fh1_raster_scale_tests PRIVATE ${REXSDK_DIR}/include)
+add_executable(pinyon_shift_disc_image_bounds_tests EXCLUDE_FROM_ALL
+    tests/native_renderer/disc_image_bounds_test.cpp)
+target_link_libraries(pinyon_shift_disc_image_bounds_tests PRIVATE rex::runtime)
+
 # Every host-side test, for CI (PINYON_SHIFT_HOST_TESTS_ONLY) and local runs.
 add_custom_target(pinyon_shift_host_tests)
 add_dependencies(pinyon_shift_host_tests
@@ -237,6 +251,8 @@ add_dependencies(pinyon_shift_host_tests
     pinyon_shift_telemetry_tests
     pinyon_shift_overlay_device_tests
     pinyon_shift_fh1_edram_tiles_tests
+    pinyon_shift_fh1_raster_scale_tests
+    pinyon_shift_disc_image_bounds_tests
     pinyon_shift_mod_hello_telemetry)
 
 # These checks use assert; Release must execute them instead of compiling
