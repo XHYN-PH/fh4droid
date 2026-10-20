@@ -100,7 +100,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     // Arguments the game activity adds at every start (1000 Club offline).
     static final String ARGUMENTS_FILE = "state/config/android-arguments.txt";
     // The app shortcut "Get files from PC" opens this screen with the game installed.
-    private static final String SETUP_ACTION = "studio.deimos.pinyonshift.SETUP";
+    private static final String SETUP_ACTION = "ph.xhyn.fh4droid.SETUP";
     // The game's settings, where enabled_mods lives.
     static final String CONFIG_FILE = "state/config/pinyon_shift.toml";
     // enabled_mods to set once the game has written its settings file (a mod
@@ -111,7 +111,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     private static final String MODS_INCOMPLETE = "state/cache/pc-share/mods-incomplete";
     private static final String MODS_INDEX = "state/cache/pc-share/mods-index.json";
     // The system installer's answer for an app update.
-    private static final String INSTALL_STATUS = "studio.deimos.pinyonshift.INSTALL_STATUS";
+    private static final String INSTALL_STATUS = "ph.xhyn.fh4droid.INSTALL_STATUS";
 
     private File base;
     private TextView intro;
@@ -240,7 +240,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         column.setPadding(dp(28), dp(24), dp(28), dp(32));
         scroll.addView(column);
 
-        text(column, "Pinyon Shift", 26, Color.WHITE, true);
+        text(column, "FH4Droid", 26, Color.WHITE, true);
         intro = text(column, "", 15, MUTED, false);
 
         text(column, "From your PC over Wi-Fi", 18, ACCENT, true).setPadding(0, dp(16), 0, 0);
@@ -856,7 +856,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         JSONObject extras = manifest.optJSONObject("extras");
         boolean offeredV4 = extras != null && extras.optBoolean("title_update_v4");
         boolean deviceV4 = new File(base, "state/title-update-v4/default.xexp").isFile();
-        String what = "The PC has a newer build of Pinyon Shift (" + apk.optString("version") + ", built "
+        String what = "The PC has a newer build of FH4Droid (" + apk.optString("version") + ", built "
                 + apk.optString("created_utc").replaceFirst("\\..*$", "").replace('T', ' ')
                 + " UTC; this device has " + installedVersion + "). ";
         if (deviceV4 && !offeredV4) {
@@ -884,7 +884,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
             } catch (Exception error) {
                 Log.w(TAG, "no install permission screen", error);
             }
-            progressText.setText("Allow Pinyon Shift to install apps, come back, and press Install update again.");
+            progressText.setText("Allow FH4Droid to install apps, come back, and press Install update again.");
             return;
         }
         final JSONObject apk = manifest.optJSONObject("apk");
@@ -968,7 +968,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
             return;
         }
         if (result == PackageInstaller.STATUS_SUCCESS) {
-            progressText.setText("Updated. Open Pinyon Shift again.");
+            progressText.setText("Updated. Open FH4Droid again.");
             return;
         }
         String message = status.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
