@@ -99,10 +99,10 @@ class AndroidPortTest(unittest.TestCase):
         game = game[:game.index("</activity>")]
         self.assertIn("android.intent.category.LAUNCHER", setup)
         self.assertNotIn("android.intent.category.LAUNCHER", game)
-        self.assertIn("studio.deimos.pinyonshift.SETUP", setup)
+        self.assertIn(pinyon_android.PACKAGE + ".SETUP", setup)
         self.assertIn('android:usesCleartextTraffic="true"', manifest)
         shortcuts = (ROOT / "android" / "res" / "xml" / "shortcuts.xml").read_text(encoding="utf-8")
-        self.assertIn("studio.deimos.pinyonshift.SETUP", shortcuts)
+        self.assertIn(pinyon_android.PACKAGE + ".SETUP", shortcuts)
 
     def test_setup_writes_only_inside_the_game_and_state_folders(self):
         source = (ROOT / "android" / "java" / "studio" / "deimos" / "pinyonshift"
