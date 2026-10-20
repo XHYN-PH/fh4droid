@@ -224,6 +224,7 @@
         "ANDROID_PLATFORM": "android-33",
         "ANDROID_STL": "c++_shared",
         "CMAKE_SHARED_LINKER_FLAGS": "-Wl,-z,max-page-size=16384",
+        "PINYON_SHIFT_PHYSICAL_HEAP_4K_PAGES": "OFF",
         "PINYON_SHIFT_CPU_BASELINE": "armv8-a",
         "REXSDK_DIR": "${sourceDir}/thirdparty/shiftglue-sdk",
         "REXGLUE_USE_VULKAN": "ON",
