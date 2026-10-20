@@ -1,59 +1,43 @@
 # FH4Droid 0.6.0-r1 — Android test release
 
-An Android-focused fork of Pinyon Shift 0.6.0 for **Forza Horizon (2012), the original Xbox 360 game**. This is a test prerelease. It has not been tested on a physical Android device.
+Play the original Xbox 360 **Forza Horizon (2012)** on compatible Android phones and handhelds. FH4Droid focuses on Android only and is based on Pinyon Shift.
 
-## Install
+**This is an early test release.** It has not been tested on a physical Android device. Expect possible crashes, graphics issues and slowdowns.
 
-1. Install `FH4Droid-0.6.0-r1-arm64.apk` and open **FH4Droid**.
-2. Tap **Choose folder** and select your complete extracted game folder, containing `default.xex` and all the game's media files. Extract an ISO first.
-3. Let the files finish importing, then tap **Play**.
+## What's included
 
-No compilation is needed on the phone. You must supply your own matching USA retail game assets: title ID `4D5309C9`, serial `MS-2505`. The APK contains recompiled executable code; it does not include the game's remaining media assets, disc image or title updates.
-
-This is the base-game build, not title update v4. A save already used with title update v4 cannot be loaded by the base build. Back up existing saves and use a separate test profile.
-
-Keep about 8 GB free for the imported files. Importing a folder already on the phone makes another copy inside the app; both copies use space until you remove the original yourself.
+- Touch controls and physical controller support.
+- Adjustable graphics settings and Android graphics presets.
+- Import your game folder directly in the app.
+- A bundled graphics driver for supported Adreno devices.
+- Installs separately from the original Pinyon Shift app.
 
 ## Requirements
 
-- Android 13+ (API 33), ARM64 and an ARMv8.2 CPU.
-- A Vulkan 1.3-capable GPU and driver.
-- Upstream targets Snapdragon 8 Gen 2 or newer. Device compatibility and speed remain unverified for this build.
+- Android 13 or newer on a compatible 64-bit phone or handheld.
+- Snapdragon 8 Gen 2 or newer is recommended. Other devices are untested.
+- Vulkan 1.3 graphics support.
+- About 8 GB free for the imported game, plus room for the original folder and APK.
+- Your own legally obtained Forza Horizon (2012) Xbox 360 USA retail game files.
 
-## Included
+## How to play
 
-- FH4Droid app name and separate application ID, `ph.xhyn.fh4droid`.
-- Upstream native ARM64 runtime, Vulkan renderer, controller support and touch controls.
-- Extracted-folder importer.
-- Original Turnip Gen8 V37 by StevenMXZ, with its notice and verified archive checksum. Automatic selection applies on supported Adreno GPUs; other GPUs use the system driver.
-- 16 KB-aligned native libraries and dynamic physical-memory mapping. The build does not force a 4 KB-page kernel. Testing on both page sizes is pending.
+1. Download and install `FH4Droid-0.6.0-r1-arm64.apk` from the release page.
+2. Extract your own game on a PC first. Use the complete folder, including `default.xex` and all other game files.
+3. Copy the complete folder to your phone.
+4. Open **FH4Droid**, tap **Choose folder**, and select it.
+5. Wait for the import to finish, then tap **Play**.
 
-The runtime and renderer are from [Pinyon Shift](https://github.com/arcanite24/pinyon-shift) and [ShiftGlue](https://github.com/arcanite24/shiftglue-sdk). No performance improvement over upstream is claimed. This fork focuses on Android only.
+The app makes its own copy of the game files, so you need space for both copies during import. Extract an ISO before choosing the folder; the app cannot import an ISO directly. Game files and game-download links are not provided here.
 
-## Verification and limitations
+**Title Update 4 is not needed for this release.** Saves already used with Update 4 will not work with this APK. Back up your saves and use a separate test profile.
 
-Signature, ARM64 library contents, required native dependencies, 16 KB ELF alignment and APK ZIP alignment passed validation. Android tooling tests passed 22 checks with one Windows-only check skipped on Linux. The documentation built 37 pages and passed the Markdown link check.
+## Reporting a problem
 
-Compilation and packaging checks do not verify gameplay, graphics correctness, thermal behavior or frame rate. Those need physical-device testing.
+Include your phone model, Android version, graphics settings and what happened. Add a screenshot or short video for visual problems, and app logs if available. Remove personal information before sharing a report. Do not attach game files or saves.
 
-APK application version: `0.6.0` (version code `600`). The `r1` suffix identifies this fork's release.
+## Credits
 
-Build source commit: `fb2aa3d1f35e8815521786103c1f1be75bf22e96`.
+[Pinyon Shift](https://github.com/arcanite24/pinyon-shift) and [ShiftGlue](https://github.com/arcanite24/shiftglue-sdk) by arcanite24 and contributors provide the original project and Android port. StevenMXZ and Mesa contributors provide the bundled Turnip graphics driver. Thanks to the other library authors and contributors. XHYN-PH maintains this Android fork and its releases.
 
-Upstream base: `9331e453e9850d0fcc1c1606dee95db834a9d317`.
-
-ShiftGlue SDK: `79d3e6fae4b79e00def48a595c80f0eaa47fd2b6`.
-
-APK SHA-256:
-
-```text
-a03c1a728ad1993b05fc50aa485c55dfeed9a14c8970771b478988417777a4e8
-```
-
-Signing certificate SHA-256:
-
-```text
-113ab182105837ea5776d8efbf8cc84281a5708a630f9a241945d3c7feb5e075
-```
-
-For bug reports, include the device, Android version, GPU driver, graphics preset, relevant logs and the action that triggered the problem. Remove personal information and do not attach game files or saves.
+This unofficial project is not affiliated with Microsoft, Xbox, Turn 10 Studios or Playground Games. Forza Horizon belongs to its respective rights holders.
