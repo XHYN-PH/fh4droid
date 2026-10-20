@@ -123,3 +123,10 @@ Renderer changes are judged against scripted routes, not by playing:
 - **Bisection switches.** Skip draws, null fetches, log draws, dump resolves, and label work for Nsight.
 
 Rules that held: judge final frames, not intermediate targets; never run against the real save; and after two inconclusive trials on one gap, re-rank rather than try a third time.
+
+
+## Android fractional raster resolution
+
+FH4Droid adds 50%, 75% and 100% raster sizes on the Vulkan FH1 executor. Attachment allocation, viewport/scissor, EDRAM transfers and source sampling use the same rational scale. Guest resolve destinations keep their original texture layout, so CPU-visible captures and texture addressing remain at the original guest sizes. Fractional variants use their own shader/pipeline caches and do not load the 100% precompiled SPIR-V pack.
+
+The source, generated shader headers and host bounds/centre tests are implemented. Image correctness, sustained FPS and memory behaviour still need physical-device gameplay tests; no speedup is claimed. [Android setup and limits](android.md#rendering-resolution).
