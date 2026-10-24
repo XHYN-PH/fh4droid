@@ -434,12 +434,15 @@ def bundled_driver_files() -> list[tuple[Path, str]]:
         binary = WORK / "drivers" / name
         notice = ROOT / "android" / "drivers" / name
         found = sorted(binary.glob("*")) if binary.is_dir() else []
-        if not any(path.suffix == ".so" for path in found):
+        if not any(path.is_file() and path.suffix == ".so" for path in found):
             print(f"warning: bundled driver {name} is missing from {binary}; not packaged")
             continue
-        for path in found + sorted(notice.glob("*")):
-            if path.is_file():
-                files.append((path, f"assets/drivers/{name}/{path.name}"))
+        # Recovered packages may already contain the notice. The source notice
+        # takes precedence, and every APK destination must be unique.
+        contents = {path.name: path for path in found + sorted(notice.glob("*"))
+                    if path.is_file()}
+        files.extend((contents[key], f"assets/drivers/{name}/{key}")
+                     for key in sorted(contents))
     return files
 
 
@@ -537,12 +540,15 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
     aligned = staging / "aligned.apk"
     run([tools.zipalign, "-P", "16", "-f", "4", unsigned, aligned])
     output = WORK / "pinyon-shift.apk"
+    signed = staging / "signed.apk"
     if signing is None:
         signing = ["--ks", str(_keystore(tools)), "--ks-pass", "pass:pinyon-local",
                    "--key-pass", "pass:pinyon-local"]
-    run([tools.apksigner, "sign", *signing, "--out", output, aligned])
-    run([tools.apksigner, "verify", "--verbose", output])
-    run([tools.zipalign, "-c", "-P", "16", "4", output])
+    run([tools.apksigner, "sign", *signing, "--out", signed, aligned])
+    run([tools.apksigner, "verify", "--verbose", signed])
+    run([tools.zipalign, "-c", "-P", "16", "4", signed])
+    # A signing/verification error must leave the previous good APK intact.
+    signed.replace(output)
     size = output.stat().st_size
     # What the package holds, for the launchers' Android panels (the same
     # record tools/build-android.ps1 writes after the build).

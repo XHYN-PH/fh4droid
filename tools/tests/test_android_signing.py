@@ -15,6 +15,21 @@ import pinyon_android
 
 
 class ReleaseSigningTests(unittest.TestCase):
+    def test_bundled_driver_notice_has_one_destination(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=pathlib.Path(temp);work=root/"work";binary=work/"drivers/driver";notice=root/"android/drivers/driver"
+            binary.mkdir(parents=True);notice.mkdir(parents=True)
+            (binary/"libdriver.so").write_bytes(b"driver")
+            (binary/"NOTICE.txt").write_text("recovered notice")
+            (notice/"NOTICE.txt").write_text("source notice")
+            with mock.patch.multiple(pinyon_android,ROOT=root,WORK=work,BUNDLED_DRIVERS=["driver"]):
+                files=pinyon_android.bundled_driver_files()
+            destinations=[name for _,name in files]
+            self.assertEqual(len(destinations),len(set(destinations)))
+            selected=[path for path,name in files if name.endswith("/NOTICE.txt")]
+            self.assertEqual(len(selected),1)
+            self.assertEqual(selected[0].read_text(),"source notice")
+
     def test_apk_manifest_hashes_the_shipped_library(self):
         with tempfile.TemporaryDirectory() as temp:
             root=pathlib.Path(temp);build=root/"build";build.mkdir();work=root/"work"
@@ -28,6 +43,7 @@ class ReleaseSigningTests(unittest.TestCase):
                                  storepass_file=root/"storepass",keypass_file=root/"keypass")
             tools=SimpleNamespace(libcxx=build/"libc++_shared.so",android_jar=root/"android.jar",llvm_bin=root/"llvm")
             for name in ("aapt2","javac","d8","strip","zipalign","apksigner"):setattr(tools,name,pathlib.Path(name))
+            fail_sign=False
             def run(command,**kwargs):
                 command=[str(p) for p in command];program=command[0]
                 if program=="aapt2" and command[1]=="link":
@@ -35,7 +51,12 @@ class ReleaseSigningTests(unittest.TestCase):
                 elif program=="d8":(pathlib.Path(command[command.index("--output")+1])/"classes.dex").write_bytes(b"fixture dex")
                 elif program=="strip":pathlib.Path(command[command.index("-o")+1]).write_bytes(b"stripped-"+pathlib.Path(command[-1]).read_bytes())
                 elif program=="zipalign" and "-c" not in command:shutil.copyfile(command[-2],command[-1])
-                elif program=="apksigner" and command[1]=="sign":shutil.copyfile(command[-1],command[command.index("--out")+1])
+                elif program=="apksigner" and command[1]=="sign":
+                    dest=pathlib.Path(command[command.index("--out")+1])
+                    if fail_sign:
+                        dest.write_bytes(b"partial signing output")
+                        raise pinyon_android.AndroidError("simulated signing failure")
+                    shutil.copyfile(command[-1],dest)
             with mock.patch.multiple(pinyon_android,ROOT=root,WORK=work), \
                  mock.patch.object(pinyon_android,"build_directory",return_value=build), \
                  mock.patch.object(pinyon_android,"rexsdk_dir",return_value=root/"sdk"), \
@@ -46,6 +67,10 @@ class ReleaseSigningTests(unittest.TestCase):
                  mock.patch.object(pinyon_android.subprocess,"run",return_value=SimpleNamespace(stdout="LOAD 0x4000\n",returncode=0)), \
                  mock.patch("builtins.print"):
                 self.assertEqual(pinyon_android.package(args,tools),0)
+                good=(work/"pinyon-shift.apk").read_bytes();fail_sign=True
+                with self.assertRaisesRegex(pinyon_android.AndroidError,"signing failure"):
+                    pinyon_android.package(args,tools)
+                self.assertEqual((work/"pinyon-shift.apk").read_bytes(),good)
             with zipfile.ZipFile(work/"pinyon-shift.apk") as apk:
                 shipped=apk.read("lib/arm64-v8a/libmain.so")
                 manifest=json.loads(apk.read("assets/pinyon_shift_build.json"))

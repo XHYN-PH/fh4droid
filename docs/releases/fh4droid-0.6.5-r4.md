@@ -42,7 +42,7 @@ arrows and pedals, and Reports to export logs after reproducing a problem.
 ## Validation and limits
 
 All 343 host Java checks and the native touch tests pass. The Python suite
-passes 549 tests with 90 platform/environment skips, and documentation checks
+passes 550 tests with 88 platform/environment skips, and documentation checks
 pass. The full ARM64 game, driver helper, runtime, GPU plugin, driver hooks and
 FidelityFX library compile and link successfully. Final APK verification is
 recorded with the release artifact.
