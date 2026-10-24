@@ -184,7 +184,8 @@ if(REXSDK_DIR)
     set(PINYON_SHIFT_REXGLUE_CODEGEN
         "${REXSDK_DIR}/out/${_codegen_os}-${_codegen_arch}/Release/rexglue${CMAKE_HOST_EXECUTABLE_SUFFIX}"
         CACHE FILEPATH "The standalone ReXGlue generator")
-    if(NOT EXISTS "${PINYON_SHIFT_REXGLUE_CODEGEN}" AND NOT PINYON_SHIFT_HOST_TESTS_ONLY)
+    if(NOT EXISTS "${PINYON_SHIFT_REXGLUE_CODEGEN}" AND NOT PINYON_SHIFT_HOST_TESTS_ONLY
+       AND NOT PINYON_SHIFT_FROZEN_CODEGEN)
         message(FATAL_ERROR
             "The standalone ReXGlue generator is missing. Run tools/build-preview.ps1 "
             "so it can build the pinned generator before configuring the consumer.")

@@ -3,6 +3,7 @@
 #include "ui/settings_menu.h"
 #include <jni.h>
 #include <rex/cvar.h>
+#include <rex/ui/vulkan/android_gpu_driver.h>
 #include <mutex>
 #include <string>
 #include <unordered_set>
@@ -16,6 +17,7 @@ std::string Read(JNIEnv* env,jstring value){
 }
 }
 namespace pinyon_shift::android {
+void RecordCleanExit(){rex::ui::vulkan::CallAndroidActivityMethod("recordCleanExit");}
 void InstallBridge(std::function<void(bool)> menu,std::function<void()> settings){
   std::lock_guard lock(bridge_mutex);menu_handler=std::move(menu);settings_handler=std::move(settings);
 }

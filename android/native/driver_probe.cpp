@@ -1,7 +1,9 @@
 #include <jni.h>
 #include <dlfcn.h>
 #include <vulkan/vulkan.h>
-#include <adrenotools/driver.h>
+#include <rex/ui/vulkan/android_gpu_driver.h>
+#include <rex/cvar.h>
+#include <filesystem>
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -77,23 +79,26 @@ std::string Probe(void* loader,std::string* first_name=nullptr){
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_studio_deimos_pinyonshift_DriverProbeActivity_nativeProbe(JNIEnv* env,jclass,jstring native_value,jstring folder_value,jstring lib_value){
-    std::string native=Read(env,native_value)+"/",folder=Read(env,folder_value),library=Read(env,lib_value);
+Java_studio_deimos_pinyonshift_DriverProbeActivity_nativeProbe(JNIEnv* env,jclass,jstring native_value,jstring root_value,jstring internal_value,jstring selected_value,jstring environment_value,jboolean no_preamble){
+    rex::cvar::SetFlagByName("android_gpu_driver_env",Read(env,environment_value));
+    rex::cvar::SetFlagByName("android_gpu_driver_no_preamble",no_preamble?"true":"false");
+    const auto root=std::filesystem::path(Read(env,root_value));
+    std::string selection=Read(env,selected_value);
     void* loader=dlopen("/system/lib64/libvulkan.so",RTLD_NOW|RTLD_LOCAL);
     if(!loader)return env->NewStringUTF(Error("The system Vulkan loader could not be opened.").c_str());
-    if(library=="auto"){
-        std::string name;std::string baseline=Probe(loader,&name);
-        if(std::regex_search(name,std::regex("Adreno[^0-9]*[78][0-9]{2}"))){
-            folder+="/turnip-gen8-v37";library="libvulkan_freedreno.so";
-        }else{folder.clear();library.clear();}
+    if(selection=="auto"){
+        std::string name;Probe(loader,&name);
+        selection=std::regex_search(name,std::regex("Adreno[^0-9]*[78][0-9]{2}"))&&
+            std::filesystem::is_directory(root/"turnip-gen8-v37")?"turnip-gen8-v37":"";
     }
-    const std::string effective = folder.empty() ? "" : folder.substr(folder.find_last_of('/')+1);
-    if(!folder.empty()){
-        folder+="/";
-        loader=adrenotools_open_libvulkan(RTLD_NOW|RTLD_LOCAL,ADRENOTOOLS_DRIVER_CUSTOM,folder.c_str(),native.c_str(),folder.c_str(),library.c_str(),nullptr,nullptr);
-        if(!loader)return env->NewStringUTF(Error("The custom driver could not be loaded on this device.").c_str());
+    if(!selection.empty()){
+        dlclose(loader);
+        loader=rex::ui::vulkan::OpenAndroidCustomVulkanDriver(root,
+            Read(env,internal_value),Read(env,native_value),selection);
+        if(!loader)return env->NewStringUTF(Error("The selected custom driver could not be loaded.").c_str());
     }
     std::string report=Probe(loader);
-    if(!report.empty()&&report.back()=='}'){report.pop_back();report+=",\"effective_driver\":"+Quote(effective)+"}";}
+    if(!report.empty()&&report.back()=='}'){report.pop_back();report+=",\"effective_driver\":"+Quote(selection)+"}";}
+    // A fresh process is killed after reporting; do not unload live driver hooks.
     return env->NewStringUTF(report.c_str());
 }

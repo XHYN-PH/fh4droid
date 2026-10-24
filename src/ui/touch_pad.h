@@ -1,11 +1,11 @@
 #pragma once
 
-// The on-screen controller for touch screens (AP-4.2): a steering stick on
+// The on-screen controller for touch screens (AP-4.2): steering arrows or a stick on
 // the left, throttle, brake and the face buttons on the right, and Back and
 // Start at the top, drawn over the game by the host UI and read by the title
 // as a synthetic pad on user 0 beside any real controller. It shows itself on
-// the first touch and hides after a while without one, so a player with a
-// controller never sees it.
+// the first touch, stays visible while held, and hides after an idle interval.
+// A physical controller can hide it according to the saved layout preference.
 
 #include <chrono>
 #include <cstdint>
@@ -54,9 +54,12 @@ class TouchPad final : public rex::ui::WindowInputListener {
   rex::input::X_INPUT_GAMEPAD State() const;
 
  private:
+  friend struct TouchPadTestAccess;
   enum class Control : uint8_t {
     kNone,
     kStick,
+    kSteerLeft,
+    kSteerRight,
     kThrottle,
     kBrake,
     kA,
@@ -72,6 +75,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
     Control control = Control::kNone;
     float origin_x = 0.0f, origin_y = 0.0f;  // the stick's centre
     float x = 0.0f, y = 0.0f;
+    bool arrow = false;
   };
   struct Layout {
     Control control;
@@ -85,10 +89,19 @@ class TouchPad final : public rex::ui::WindowInputListener {
   std::vector<bool> hidden_;
   float opacity_ = 0.55f;
   bool auto_hide_ = true;
+  bool arrow_steering_ = true;
+  bool analog_pedals_ = false;
+  bool high_contrast_ = false;
+  int steering_response_ms_ = 0;
+  mutable float steering_value_ = 0;
+  mutable std::chrono::steady_clock::time_point steering_updated_{};
   bool physical_controller_ = false;
   // A control's centre in window pixels, inside the safe area.
   void Place(const Layout& control, float width, float height, float& x, float& y) const;
   Control Hit(float x, float y, float width, float height) const;
+  bool Enabled(Control control) const;
+  // Event adapter and tests share the same state transitions; mutex_ is held.
+  void HandleTouch(rex::ui::TouchEvent& e, float width, float height);
   void Changed();
 
   mutable std::mutex mutex_;

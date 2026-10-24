@@ -14,16 +14,25 @@ if subprocess.check_output(["git","-C",str(sdk),"rev-parse","HEAD"],text=True).s
     raise SystemExit("Review the SDK pin before regenerating Android patches.")
 diff=subprocess.check_output(["git","-C",str(sdk),"diff","--binary"])
 parts=[b"diff --git "+p for p in diff.split(b"diff --git ")[1:]]
+directory=root/"cmake/patches";directory.mkdir(exist_ok=True)
+driver_patch=directory/"shiftglue-fh4droid-z-driver-preflight.patch"
+driver_paths={line.split(b" b/",1)[1] for line in driver_patch.read_bytes().splitlines()
+              if line.startswith(b"diff --git ")} if driver_patch.exists() else set()
 runtime=[];groups=[];group=b""
 for part in parts:
+    path=part.splitlines()[0].split(b" b/",1)[1]
+    # Keep the separately applied driver changes (and dirty nested gitlinks)
+    # out of the regenerated runtime patch so neither patch overlaps the other.
+    if any(path==p or p.startswith(path+b"/") for p in driver_paths):continue
     if b"src/graphics/shaders/vulkan_spirv/" not in part.splitlines()[0]:
         runtime.append(part);continue
     if group and len(group)+len(part)>4*1024*1024:
         groups.append(group);group=b""
     group+=part
 if group:groups.append(group)
-directory=root/"cmake/patches";directory.mkdir(exist_ok=True)
-for p in directory.glob("shiftglue-fh4droid-*.patch"):p.unlink()
+for p in directory.glob("shiftglue-fh4droid-*.patch"):
+    # The shared driver loader is maintained separately from shader regeneration.
+    if p.name != "shiftglue-fh4droid-z-driver-preflight.patch":p.unlink()
 files={"shiftglue-fh4droid-runtime.patch":b"".join(runtime)}
 files.update({f"shiftglue-fh4droid-spirv-{i+1}.patch":g for i,g in enumerate(groups)})
 for name,data in files.items():

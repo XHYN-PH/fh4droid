@@ -32,8 +32,10 @@ final class FestivalUi {
         GradientDrawable base=primary?new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,new int[]{RED,ORANGE}):surface(a,0xd5302225,12);
         base.setCornerRadius(dp(a,12));if(!primary)base.setStroke(dp(a,1),0xff624247);
         b.setBackgroundTintList(null);
-        b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x55ffffff),base,surface(a,Color.WHITE,12)));
-        b.setMinHeight(dp(a,48));b.setMinimumHeight(dp(a,48));b.setPadding(dp(a,20),dp(a,8),dp(a,20),dp(a,8));
+        GradientDrawable focused=surface(a,primary?0xffffaf70:0xff50302a,12);focused.setStroke(dp(a,3),primary?TEXT:ORANGE);
+        StateListDrawable states=new StateListDrawable();states.addState(new int[]{android.R.attr.state_focused},focused);states.addState(new int[]{android.R.attr.state_selected},focused);states.addState(new int[]{},base);
+        b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x55ffffff),states,surface(a,Color.WHITE,12)));
+        b.setMinHeight(dp(a,48));b.setMinimumHeight(dp(a,48));b.setFocusable(true);b.setPadding(dp(a,20),dp(a,8),dp(a,20),dp(a,8));
         b.setStateListAnimator(null);b.setElevation(0);return b;
     }
     static Button action(Activity a,LinearLayout parent,String title,Runnable run){

@@ -15,7 +15,7 @@ import org.json.JSONObject;
 public final class LauncherActivity extends Activity {
     private static final int ISO=310,SAVE_OUT=311,SAVE_IN=312,DRIVER_ZIP=313,PROBE=314;
     private TextView title,summary,note;private Button play;private boolean busy;
-    private String pendingDriver;private boolean playAfterProbe;private AlertDialog progress;
+    private String pendingDriver;private boolean playAfterProbe;private AlertDialog progress;private FileOperation operation;
     @Override public void onCreate(Bundle state){
         super.onCreate(state);if(state!=null){pendingDriver=state.getString("driver");playAfterProbe=state.getBoolean("play_after_probe");}
         build();FestivalUi.immersive(this);
@@ -23,12 +23,13 @@ public final class LauncherActivity extends Activity {
     }
     @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("driver",pendingDriver);state.putBoolean("play_after_probe",playAfterProbe);}
     @Override protected void onResume(){super.onResume();refresh();recovery();}
+    @Override public void onConfigurationChanged(android.content.res.Configuration config){super.onConfigurationChanged(config);build();refresh();FestivalUi.immersive(this);}
     @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus){FestivalUi.immersive(this);refresh();}}
     private void build(){
         FrameLayout canvas=new FrameLayout(this);canvas.addView(new FestivalUi.Artwork(this),new FrameLayout.LayoutParams(-1,-1));
         LinearLayout root=FestivalUi.column(this);int pad=FestivalUi.dp(this,24);root.setPadding(pad,FestivalUi.dp(this,18),pad,FestivalUi.dp(this,14));
-        canvas.addView(root,new FrameLayout.LayoutParams(-1,-1));
-        root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets safe=insets.getInsets(WindowInsets.Type.displayCutout());
+        ScrollView page=new ScrollView(this);page.setFillViewport(true);page.addView(root);canvas.addView(page,new FrameLayout.LayoutParams(-1,-1));
+        root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets safe=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());
             root.setPadding(pad+safe.left,FestivalUi.dp(this,18)+safe.top,pad+safe.right,FestivalUi.dp(this,14)+safe.bottom);return insets;});
         TextView brand=FestivalUi.text(this,"FH4DROID  /  ANDROID",16,FestivalUi.TEXT);brand.setLetterSpacing(.12f);brand.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         root.addView(brand,new LinearLayout.LayoutParams(-2,-2));
@@ -37,27 +38,29 @@ public final class LauncherActivity extends Activity {
         summary=FestivalUi.text(this,"",14,FestivalUi.MUTED);summary.setPadding(0,FestivalUi.dp(this,8),0,0);
         note=FestivalUi.text(this,"",13,0xffffbca5);note.setPadding(0,FestivalUi.dp(this,8),0,0);
         details.addView(title);details.addView(summary);details.addView(note);
-        root.addView(details,new LinearLayout.LayoutParams(-1,0,1));
-        HorizontalScrollView nav=new HorizontalScrollView(this);nav.setHorizontalScrollBarEnabled(false);
-        LinearLayout actions=new LinearLayout(this);actions.setGravity(Gravity.CENTER_VERTICAL);
-        play=FestivalUi.button(this,"▶  Play",true);play.setOnClickListener(v->play(false));actions.addView(play,new LinearLayout.LayoutParams(FestivalUi.dp(this,170),FestivalUi.dp(this,56)));
+        details.setPadding(0,FestivalUi.dp(this,28),0,0);root.addView(details,new LinearLayout.LayoutParams(-1,-2));
+        boolean wide=getResources().getConfiguration().screenWidthDp>=600&&getResources().getConfiguration().fontScale<1.3f;
+        LinearLayout actions=new LinearLayout(this);actions.setOrientation(wide?LinearLayout.HORIZONTAL:LinearLayout.VERTICAL);actions.setGravity(Gravity.CENTER_VERTICAL);
+        play=FestivalUi.button(this,"▶  Play",true);play.setOnClickListener(v->play(false));actions.addView(play,new LinearLayout.LayoutParams(wide?0:-1,-2,wide?1:0));
         navButton(actions,"Settings",()->{
             if(GameFiles.running(this)){toast("Use the in-game menu to change settings while the game is running.");return;}
             MobileSettings.show(this,null,this::controls,this::drivers);
         });
         navButton(actions,"Game files",this::files);
-        nav.addView(actions);LinearLayout.LayoutParams navParams=new LinearLayout.LayoutParams(-1,-2);navParams.topMargin=FestivalUi.dp(this,18);root.addView(nav,navParams);
-        HorizontalScrollView footer=new HorizontalScrollView(this);footer.setHorizontalScrollBarEnabled(false);LinearLayout links=new LinearLayout(this);
+        LinearLayout.LayoutParams navParams=new LinearLayout.LayoutParams(-1,-2);navParams.topMargin=FestivalUi.dp(this,18);root.addView(actions,navParams);
+        GridLayout links=new GridLayout(this);links.setColumnCount(getResources().getConfiguration().screenWidthDp>=400?2:1);
         link(links,"Saves",this::saves);link(links,"Controls",this::controls);link(links,"Drivers",this::drivers);
         link(links,"Reports",this::reports);link(links,"GitHub ↗",()->startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse("https://github.com/XHYN-PH/fh4droid"))));
-        footer.addView(links);root.addView(footer,new LinearLayout.LayoutParams(-1,-2));
+        root.addView(links,new LinearLayout.LayoutParams(-1,-2));
         setContentView(canvas);FestivalUi.enter(root);
     }
     private void navButton(LinearLayout row,String text,Runnable action){
-        Button b=FestivalUi.button(this,text,false);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-2,FestivalUi.dp(this,56));p.leftMargin=FestivalUi.dp(this,10);row.addView(b,p);b.setOnClickListener(v->action.run());
+        Button b=FestivalUi.button(this,text,false);boolean horizontal=row.getOrientation()==LinearLayout.HORIZONTAL;LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(horizontal?0:-1,-2,horizontal?1:0);if(horizontal)p.leftMargin=FestivalUi.dp(this,10);else p.topMargin=FestivalUi.dp(this,10);row.addView(b,p);b.setOnClickListener(v->action.run());
     }
-    private void link(LinearLayout row,String label,Runnable action){
-        TextView t=FestivalUi.text(this,label,13,FestivalUi.MUTED);t.setGravity(Gravity.CENTER);t.setPadding(FestivalUi.dp(this,12),0,FestivalUi.dp(this,12),0);t.setMinHeight(FestivalUi.dp(this,48));t.setFocusable(true);row.addView(t);t.setOnClickListener(v->action.run());
+    private void link(GridLayout row,String label,Runnable action){
+        Button button=FestivalUi.button(this,label,false);button.setTextSize(14);
+        GridLayout.LayoutParams p=new GridLayout.LayoutParams();p.width=0;p.height=-2;p.columnSpec=GridLayout.spec(GridLayout.UNDEFINED,1f);
+        p.setMargins(FestivalUi.dp(this,4),FestivalUi.dp(this,8),FestivalUi.dp(this,4),0);row.addView(button,p);button.setOnClickListener(v->action.run());
     }
     private void refresh(){
         if(title==null)return;boolean ready=GameFiles.ready(this);
@@ -77,12 +80,18 @@ public final class LauncherActivity extends Activity {
     }
     private boolean canManage(){if(busy)return false;if(GameFiles.running(this)){toast("Quit the game before changing files, saves or drivers.");return false;}return true;}
     private void work(String message,Task task,Runnable success){
-        if(busy)return;busy=true;LinearLayout p=FestivalUi.column(this);p.addView(FestivalUi.text(this,message,16,FestivalUi.TEXT));p.addView(new ProgressBar(this));
-        progress=FestivalUi.dialog(this,"Please wait",p);progress.setCancelable(false);progress.show();
-        new Thread(()->{try{task.run();runOnUiThread(()->{endWork();success.run();refresh();});}
-            catch(Exception e){runOnUiThread(()->{endWork();error(e.getMessage());});}},"FH4DroidFiles").start();
+        if(busy)return;busy=true;LinearLayout p=FestivalUi.column(this);TextView detail=FestivalUi.text(this,message,16,FestivalUi.TEXT);p.addView(detail);
+        ProgressBar bar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);bar.setMax(1000);bar.setIndeterminate(true);p.addView(bar);
+        operation=new FileOperation((name,done,total)->runOnUiThread(()->{if(isFinishing()||isDestroyed())return;
+            detail.setText(name+"\n"+(done/(1024*1024))+" / "+Math.max(1,total/(1024*1024))+" MB");bar.setIndeterminate(total<=0);if(total>0)bar.setProgress((int)Math.min(1000,done*1000/total));}));
+        final FileOperation current=operation;
+        progress=new AlertDialog.Builder(this).setTitle("Please wait").setView(p).setNegativeButton("Cancel",null).create();progress.setCancelable(false);progress.show();
+        progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->{current.cancel();v.setEnabled(false);detail.setText("Stopping after the current read. Completed files are kept.");});
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        new Thread(()->{try(FileOperation scope=current.attach()){task.run();runOnUiThread(()->{endWork();if(isFinishing()||isDestroyed())return;success.run();refresh();});}
+            catch(Exception e){runOnUiThread(()->{endWork();if(isFinishing()||isDestroyed())return;if(current.isCancelled()||e instanceof InterruptedIOException)toast(FileOperation.cancelMessage());else error(e.getMessage());});}},"FH4DroidFiles").start();
     }
-    private void endWork(){busy=false;if(progress!=null){progress.dismiss();progress=null;}}
+    private void endWork(){busy=false;operation=null;if(!isDestroyed())getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);if(progress!=null){progress.dismiss();progress=null;}}
     interface Task{void run()throws Exception;}
     private void play(boolean logging){
         if(busy)return;if(!GameFiles.ready(this)){files();return;}
@@ -121,7 +130,7 @@ public final class LauncherActivity extends Activity {
     }
     private void reports(){
         LinearLayout p=FestivalUi.column(this);p.addView(FestivalUi.text(this,"Reports include device details, settings and recent logs. Review them before sharing.",14,FestivalUi.MUTED));
-        FestivalUi.action(this,p,"Play with logs",()->play(true));FestivalUi.action(this,p,"Share latest problem report",()->ProblemReports.share(this));
+        FestivalUi.action(this,p,"Play with logs",()->play(true));ProblemReports.action(this,p,"Share latest problem report");
         FestivalUi.dialog(this,"Logs & troubleshooting",p).show();
     }
     private void probe(String choice,boolean launch){
@@ -174,6 +183,7 @@ public final class LauncherActivity extends Activity {
                     disc.copy(path,new File(stage,path),expected.hash);
                 }
             }
+            FileOperation.check();
             File incomplete=new File(base,"game/.copy-incomplete");incomplete.createNewFile();
             game.mkdirs();for(String name:GameFiles.EXECUTABLES.keySet())Files.move(new File(stage,name).toPath(),new File(game,name).toPath(),StandardCopyOption.REPLACE_EXISTING);
             for(String path:new String[]{"media/ui/Fonts.zip","media/ui/textures/Horizon.zip","media/audio/AudioEngineConfig.xml","media/audio/AudioMixerSnapshots.xml"}){
@@ -186,5 +196,5 @@ public final class LauncherActivity extends Activity {
     }
     private void toast(String message){Toast.makeText(this,message,Toast.LENGTH_LONG).show();}
     private void error(String message){new AlertDialog.Builder(this).setTitle("FH4Droid").setMessage(message==null?"The operation could not finish.":message).setPositiveButton("Back",null).show();}
-    @Override protected void onDestroy(){if(progress!=null)progress.dismiss();super.onDestroy();}
+    @Override protected void onDestroy(){if(operation!=null)operation.cancel();if(progress!=null)progress.dismiss();super.onDestroy();}
 }

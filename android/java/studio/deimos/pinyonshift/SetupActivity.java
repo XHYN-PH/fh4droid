@@ -122,6 +122,8 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     private LinearLayout groupsBox;
     private TextView spaceText;
     private Button copyButton;
+    private Button cancelCopyButton;
+    private FileOperation operation;
     private ProgressBar progress;
     private TextView progressText;
     private Button folderButton;
@@ -166,6 +168,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     @Override
     protected void onDestroy() {
         discovering = false;
+        if(operation!=null)operation.cancel();
         if (installReceiver != null) unregisterReceiver(installReceiver);
         super.onDestroy();
     }
@@ -266,6 +269,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         spaceText.setVisibility(View.GONE);
         copyButton = button(column, "Copy to this device");
         copyButton.setVisibility(View.GONE);
+        cancelCopyButton=button(column,"Cancel copy");cancelCopyButton.setVisibility(View.GONE);
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(1000);
         progress.setVisibility(View.GONE);
@@ -295,6 +299,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     public void onClick(View view) {
         if (view == connectButton) connect();
         else if (view == copyButton) startCopy();
+        else if(view==cancelCopyButton){if(operation!=null)operation.cancel();cancelCopyButton.setEnabled(false);progressText.setText("Stopping after the current read. Completed files are kept.");}
         else if (view == folderButton) chooseFolder();
         else if (view == playButton) startGame();
         else if (view == updateButton) installUpdate();
@@ -331,6 +336,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         folderButton.setEnabled(!busy);
         copyButton.setEnabled(!busy);
         updateButton.setEnabled(!busy);
+        cancelCopyButton.setVisibility(busy&&operation!=null?View.VISIBLE:View.GONE);
     }
 
     // ---- Discovery and pairing ------------------------------------------
@@ -568,18 +574,20 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         }
         if (chosen.isEmpty()) return;
         busy = true;
+        operation=createOperation();cancelCopyButton.setEnabled(true);
+        final FileOperation current=operation;
         refresh();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         progress.setVisibility(View.VISIBLE);
         new Thread(new Runnable() {
             @Override
             public void run() {
-                try {
+                try (FileOperation scope=current.attach()) {
                     copyFromPc(code, chosen);
                     finish("Done. Press Play.", true);
                 } catch (IOException | JSONException error) {
-                    Log.e(TAG, "copy failed", error);
-                    finish("The copy stopped: " + error.getMessage()
+                    if(!current.isCancelled())Log.e(TAG, "copy failed", error);
+                    finish("The copy stopped: " + (current.isCancelled()?FileOperation.cancelMessage():error.getMessage())
                             + ". Press Copy again to continue where it stopped.", false);
                 }
             }
@@ -587,11 +595,17 @@ public class SetupActivity extends Activity implements View.OnClickListener {
     }
 
     // The end of a copy, on a worker thread.
+    private FileOperation createOperation(){
+        return new FileOperation((name,done,total)->runOnUiThread(()->{if(!busy||isFinishing()||isDestroyed())return;
+            progressText.setText(name+" · "+size(done)+" / "+size(total));progress.setIndeterminate(total<=0);
+            if(total>0)progress.setProgress((int)Math.min(1000,done*1000/total));}));
+    }
     private void finish(final String message, final boolean success) {
-        busy = false;
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                busy=false;operation=null;
+                if(isFinishing()||isDestroyed())return;
                 getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 if (success) progress.setProgress(progress.getMax());
                 progressText.setText(message);
@@ -637,6 +651,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                     + size(base.getUsableSpace()) + " free");
         }
         if (chosen.contains("save")) backUpSave();
+        FileOperation.check();
         File incomplete = new File(base, INCOMPLETE);
         if (game) {
             incomplete.getParentFile().mkdirs();
@@ -647,6 +662,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         long started = System.currentTimeMillis();
         int sinceIndexWrite = 0;
         for (int i = 0; i < files.size(); i++) {
+            FileOperation.check();
             JSONObject file = files.get(i);
             String path = file.getString("path");
             long size = file.getLong("size");
@@ -666,7 +682,13 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                 done[0] += size;
             }
         }
-        if (game) incomplete.delete();
+        if (game) {
+            FileOperation.check();
+            // Only switch modes after every selected game file was copied.
+            if(!getSharedPreferences("mobile",0).edit().remove("iso_uri").commit())
+                throw new IOException("cannot save folder mode; press Copy again to finish");
+            if(!incomplete.delete()&&incomplete.exists())throw new IOException("cannot finalize folder import");
+        }
         if (!mods.isEmpty()) {
             writeModIndex(index);
             finishModSet();
@@ -1008,6 +1030,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         final long before = done[0];
         IOException last = null;
         for (int attempt = 0; attempt < 6; attempt++) {
+            FileOperation.check();
             if (attempt > 0) {
                 try {
                     Thread.sleep(2000L * attempt);
@@ -1047,6 +1070,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
             } catch (RefusedException refused) {
                 throw refused;
             } catch (IOException error) {
+                FileOperation.check();
                 last = error;
                 Log.w(TAG, "retrying " + target, error);
             }
@@ -1140,6 +1164,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         byte[] buffer = new byte[1 << 17];
         long written = 0;
         for (int read; (read = in.read(buffer)) > 0; ) {
+            FileOperation.check();
             out.write(buffer, 0, read);
             written += read;
             if (progress != null) progress.written(written);
@@ -1165,18 +1190,20 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         }
         final Uri tree = data.getData();
         busy = true;
+        operation=createOperation();cancelCopyButton.setEnabled(true);
+        final FileOperation current=operation;
         refresh();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         progress.setVisibility(View.VISIBLE);
         new Thread(new Runnable() {
             @Override
             public void run() {
-                try {
+                try (FileOperation scope=current.attach()) {
                     importFolder(tree);
                     finish("Done. Press Play.", true);
                 } catch (IOException error) {
-                    Log.e(TAG, "folder import failed", error);
-                    finish("The copy stopped: " + error.getMessage() + ". Choose the folder again to continue.",
+                    if(!current.isCancelled())Log.e(TAG, "folder import failed", error);
+                    finish("The copy stopped: " + (current.isCancelled()?FileOperation.cancelMessage():error.getMessage()) + ". Choose the folder again to continue.",
                             false);
                 }
             }
@@ -1227,12 +1254,14 @@ public class SetupActivity extends Activity implements View.OnClickListener {
         if (remaining > Math.max(0, base.getUsableSpace() - (256L << 20))) {
             throw new IOException("not enough free space: " + size(remaining) + " still needs copying");
         }
+        FileOperation.check();
         File incomplete = new File(base, INCOMPLETE);
         incomplete.getParentFile().mkdirs();
         new FileOutputStream(incomplete).close();
         long done = 0;
         final long started = System.currentTimeMillis(), total = remaining;
         for (int i = 0; i < needed.size(); i++) {
+            FileOperation.check();
             GameFiles.Expected expected = needed.get(i);
             Entry source = incoming.get(expected.path.toLowerCase(Locale.ROOT));
             File target = destination("game/base/" + expected.path), part = new File(target.getPath() + ".part");
@@ -1250,11 +1279,12 @@ public class SetupActivity extends Activity implements View.OnClickListener {
             java.nio.file.Files.move(part.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
             done += expected.size;
         }
-        getSharedPreferences("mobile", 0).edit().remove("iso_uri").commit();
+        if(!getSharedPreferences("mobile", 0).edit().remove("iso_uri").commit())throw new IOException("cannot save folder mode; choose the same folder to finish");
         if (!incomplete.delete() && incomplete.exists()) throw new IOException("cannot finalize game import");
     }
 
     private void list(Uri tree, String document, String prefix, List<Entry> out) throws IOException {
+        FileOperation.check();
         Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, document);
         try (Cursor cursor = getContentResolver().query(children, new String[] {
                 DocumentsContract.Document.COLUMN_DOCUMENT_ID,
@@ -1263,6 +1293,7 @@ public class SetupActivity extends Activity implements View.OnClickListener {
                 DocumentsContract.Document.COLUMN_SIZE}, null, null, null)) {
             if (cursor == null) throw new IOException("cannot list the folder");
             while (cursor.moveToNext()) {
+                FileOperation.check();
                 String id = cursor.getString(0);
                 String name = cursor.getString(1);
                 if (name == null || name.isEmpty() || name.equals(".") || name.equals("..")

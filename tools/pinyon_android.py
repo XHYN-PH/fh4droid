@@ -276,6 +276,7 @@ def doctor(args: argparse.Namespace) -> int:
 
 
 def build(args: argparse.Namespace) -> int:
+    _release_signing(args)  # Reject incomplete release credentials before compiling.
     tools = Tools()
     missing = tools.missing()
     if missing:
@@ -332,6 +333,30 @@ def _keystore(tools: Tools) -> Path:
              "-keysize", "3072", "-validity", "10000", "-dname", "CN=Pinyon Shift local build"],
             stdout=subprocess.DEVNULL)
     return keystore
+
+
+def _release_signing(args: argparse.Namespace) -> list[str] | None:
+    """Explicit release signing uses password files, never password arguments."""
+    names = ("keystore", "key_alias", "storepass_file", "keypass_file")
+    values = [getattr(args, name, None) for name in names]
+    if not any(value is not None for value in values):
+        return None
+    if not all(values):
+        raise AndroidError("release signing requires --keystore, --key-alias, "
+                           "--storepass-file and --keypass-file together")
+    keystore, alias, storepass, keypass = values
+    if not all(Path(value).is_file() for value in (keystore, storepass, keypass)):
+        raise AndroidError("the release keystore and both password files must exist")
+    return ["--ks", str(Path(keystore).resolve()), "--ks-key-alias", str(alias),
+            "--ks-pass", "file:" + str(Path(storepass).resolve()),
+            "--key-pass", "file:" + str(Path(keypass).resolve())]
+
+
+def _signing_arguments(parser) -> None:
+    parser.add_argument("--keystore", type=Path, help="existing release signing keystore")
+    parser.add_argument("--key-alias", help="alias of the existing release key")
+    parser.add_argument("--storepass-file", type=Path, help="private file containing the keystore password")
+    parser.add_argument("--keypass-file", type=Path, help="private file containing the key password")
 
 
 def _git(*command: str, cwd: Path = ROOT) -> str:
@@ -419,6 +444,7 @@ def bundled_driver_files() -> list[tuple[Path, str]]:
 
 
 def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
+    signing = _release_signing(args)
     tools = tools or Tools()
     directory = build_directory(args)
     libraries = []
@@ -480,7 +506,8 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
         run([tools.strip, "--strip-debug", "-o", target, library])
         stripped.append(target)
 
-    manifest = _build_manifest(tools, version_name, libraries)
+    # Reports must identify the bytes shipped in the APK, after stripping.
+    manifest = _build_manifest(tools, version_name, stripped)
     (staging / "pinyon_shift_build.json").write_text(json.dumps(manifest, indent=2) + "\n",
                                                      encoding="utf-8")
     # Android 15 devices with 16 KiB pages refuse libraries whose load
@@ -510,9 +537,12 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
     aligned = staging / "aligned.apk"
     run([tools.zipalign, "-P", "16", "-f", "4", unsigned, aligned])
     output = WORK / "pinyon-shift.apk"
-    keystore = _keystore(tools)
-    run([tools.apksigner, "sign", "--ks", keystore, "--ks-pass", "pass:pinyon-local",
-         "--key-pass", "pass:pinyon-local", "--out", output, aligned])
+    if signing is None:
+        signing = ["--ks", str(_keystore(tools)), "--ks-pass", "pass:pinyon-local",
+                   "--key-pass", "pass:pinyon-local"]
+    run([tools.apksigner, "sign", *signing, "--out", output, aligned])
+    run([tools.apksigner, "verify", "--verbose", output])
+    run([tools.zipalign, "-c", "-P", "16", "4", output])
     size = output.stat().st_size
     # What the package holds, for the launchers' Android panels (the same
     # record tools/build-android.ps1 writes after the build).
@@ -863,12 +893,14 @@ def add_parser(commands) -> None:
     parser.add_argument("--accept-licenses", action="store_true",
                         help="answer yes to the Android SDK licenses sdkmanager shows")
     parser = command("build", build, "cross-compile the game and package the APK")
+    _signing_arguments(parser)
     parser.add_argument("--jobs", type=int)
     parser.add_argument("--title-update-v4", action="store_true",
                         help="the v4 title-update build (tools/build-v4.ps1 generates its code)")
     parser.add_argument("--debuggable", action="store_true",
                         help="let adb attach (thread dumps with debuggerd, run-as)")
     parser = command("package", package, "package already built libraries into the APK")
+    _signing_arguments(parser)
     parser.add_argument("--title-update-v4", action="store_true",
                         help="package the v4 title-update build")
     parser.add_argument("--debuggable", action="store_true",

@@ -6,12 +6,12 @@ import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
 import java.io.*;
 
-/** Grants only a read-only view of the one explicitly exported report. */
+/** Grants a read-only view of an explicitly exported, completed report. */
 public final class ReportProvider extends ContentProvider {
     public boolean onCreate(){return true;}
     private File file(Uri uri)throws FileNotFoundException{
-        if(!"/fh4droid-report.zip".equals(uri.getPath()))throw new FileNotFoundException();
-        return new File(getContext().getCacheDir(),"reports/fh4droid-report.zip");
+        String path=uri.getPath();if(path==null||!path.startsWith("/"))throw new FileNotFoundException();
+        return ReportFiles.resolve(getContext().getCacheDir(),path.substring(1));
     }
     public String getType(Uri uri){return "application/zip";}
     public ParcelFileDescriptor openFile(Uri uri,String mode)throws FileNotFoundException{

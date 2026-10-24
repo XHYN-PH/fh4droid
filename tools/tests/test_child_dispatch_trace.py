@@ -76,7 +76,9 @@ class ChildDispatchTraceTests(unittest.TestCase):
             directory = Path(directory)
             cpp = directory / "probe.cpp"
             exe = directory / ("probe.exe" if os.name == "nt" else "probe")
-            cpp.write_text(PRELUDE + source[start:end] + CHECK, encoding="utf-8")
+            before_end = source.index("// Recompiled game code and vtables", start)
+            after_start = source.index("void PinyonShiftTraceChildDispatchAfter(", before_end)
+            cpp.write_text(PRELUDE + source[start:before_end] + source[after_start:end] + CHECK, encoding="utf-8")
             compiled = subprocess.run([str(CXX), "-std=c++23", str(cpp), "-o", str(exe)], capture_output=True, text=True)
             self.assertEqual(compiled.returncode, 0, compiled.stderr)
             for args in ([], ["enabled"]):

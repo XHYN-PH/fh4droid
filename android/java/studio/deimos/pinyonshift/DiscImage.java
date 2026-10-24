@@ -25,6 +25,7 @@ final class DiscImage {
         if(!files.containsKey("default.xex"))throw new IOException("The disc contains no default.xex.");
     }
     private byte[] read(long offset,int count)throws IOException{
+        FileOperation.check();
         if(offset<0||count<0||offset>size-count)throw new IOException("Disc image is truncated.");
         ByteBuffer out=ByteBuffer.allocate(count);while(out.hasRemaining()){int n=channel.read(out,offset+out.position());if(n<=0)throw new IOException("Cannot read this disc image.");}return out.array();
     }
@@ -50,20 +51,20 @@ final class DiscImage {
     void copy(String name,File output,String expectedHash)throws IOException{
         Entry entry=files.get(name.toLowerCase(Locale.ROOT));if(entry==null)throw new IOException("Missing "+name+" on this disc.");
         try{MessageDigest hash=MessageDigest.getInstance("SHA-256");output.getParentFile().mkdirs();
-            try(OutputStream out=new FileOutputStream(output)){long done=0;while(done<entry.size){byte[] b=read(entry.offset+done,(int)Math.min(65536,entry.size-done));hash.update(b);out.write(b);done+=b.length;}}
+            try(OutputStream out=new FileOutputStream(output)){long done=0;while(done<entry.size){byte[] b=read(entry.offset+done,(int)Math.min(65536,entry.size-done));hash.update(b);out.write(b);done+=b.length;FileOperation.progress(name,done,entry.size);}}
             if(!hex(hash.digest()).equalsIgnoreCase(expectedHash)){output.delete();throw new IOException("Unsupported "+name+". Use the supported base-game disc.");}
         }catch(NoSuchAlgorithmException impossible){throw new AssertionError(impossible);}
     }
     String hash(String name)throws IOException{
         Entry entry=files.get(name.toLowerCase(Locale.ROOT));if(entry==null)throw new IOException("Missing "+name+" on this disc.");
         try{MessageDigest d=MessageDigest.getInstance("SHA-256");long done=0;
-            while(done<entry.size){byte[] b=read(entry.offset+done,(int)Math.min(65536,entry.size-done));d.update(b);done+=b.length;}
+            while(done<entry.size){byte[] b=read(entry.offset+done,(int)Math.min(65536,entry.size-done));d.update(b);done+=b.length;FileOperation.progress(name,done,entry.size);}
             return hex(d.digest());
         }catch(NoSuchAlgorithmException e){throw new AssertionError(e);}
     }
     static String hex(byte[] data){StringBuilder s=new StringBuilder();for(byte b:data)s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString();}
     static String hash(File file)throws IOException{
-        try{MessageDigest d=MessageDigest.getInstance("SHA-256");try(InputStream in=new FileInputStream(file)){byte[] b=new byte[65536];for(int n;(n=in.read(b))!=-1;)d.update(b,0,n);}return hex(d.digest());}
+        try{MessageDigest d=MessageDigest.getInstance("SHA-256");try(InputStream in=new FileInputStream(file)){byte[] b=new byte[65536];long done=0;for(int n;(n=in.read(b))!=-1;){d.update(b,0,n);done+=n;FileOperation.progress(file.getName(),done,file.length());}}return hex(d.digest());}
         catch(NoSuchAlgorithmException impossible){throw new AssertionError(impossible);}
     }
 }

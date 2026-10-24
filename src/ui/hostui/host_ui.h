@@ -139,12 +139,15 @@ class HostUi final : public rex::ui::UIDrawer, public rex::ui::WindowInputListen
   };
 
   bool LoadAssets();
+  bool LoadOverlayAssets();
   void DrawMenu(rex::ui::UIDrawContext& context);
   void DrawToasts(rex::ui::UIDrawContext& context);
   void DrawHud(rex::ui::UIDrawContext& context);
   void DrawRallyPace(rex::ui::UIDrawContext& context);
   void DrawOverlay(rex::ui::UIDrawContext& context);
-  void DrawDisc(float x, float y, float radius, uint32_t color);
+  void DrawTouchFrame(float x, float y, float width, float height, bool rectangular,
+                      float thickness, uint32_t fill, uint32_t outline);
+  void DrawTouchStroke(float x0, float y0, float x1, float y1, float thickness, uint32_t color);
   bool HasHud() const;
   // Sets the canvas for this draw; false while there is nothing to draw to.
   bool PrepareCanvas(rex::ui::UIDrawContext& context);

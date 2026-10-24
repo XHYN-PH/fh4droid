@@ -1374,6 +1374,9 @@ bool PinyonShiftApp::OnWindowCloseRequested() {
   pinyon_shift::ui::WaitForPhoto();
   save_backups_.reset();
   RecordShutdownOnce();
+#if defined(__ANDROID__)
+  pinyon_shift::android::RecordCleanExit();
+#endif
 #ifdef PINYON_SHIFT_PGO_GENERATE
   // The SDK's hard exit skips the executable's profile atexit handler.
   const int profile_result = __llvm_profile_dump();

@@ -27,7 +27,7 @@ final class SaveArchive {
             if(!f.isFile())continue;
             if(++budget[0]>FILES||(budget[1]+=f.length())>LIMIT)throw new IOException("Save data exceeds the export limit.");
             zip.putNextEntry(new ZipEntry("user/"+root.toPath().relativize(f.toPath()).toString().replace(File.separatorChar,'/')));
-            Files.copy(f.toPath(),zip);zip.closeEntry();
+            try(InputStream in=new FileInputStream(f)){byte[] b=new byte[65536];long done=0;for(int n;(n=in.read(b))!=-1;){FileOperation.progress(f.getName(),done,f.length());zip.write(b,0,n);done+=n;}}zip.closeEntry();
         }
     }
     static void importInto(File state,InputStream input)throws IOException{
@@ -37,6 +37,7 @@ final class SaveArchive {
             boolean marker=false;long bytes=0;int count=0;Set<String> names=new HashSet<>();byte[] b=new byte[65536];
             try(ZipInputStream zip=new ZipInputStream(input)){
                 for(ZipEntry e;(e=zip.getNextEntry())!=null;){
+                    FileOperation.check();
                     String name=e.getName();if(!names.add(name))throw new IOException("Duplicate save entry.");
                     if(name.equals("fh4droid-save.txt")){
                         ByteArrayOutputStream tag=new ByteArrayOutputStream();int n;
@@ -50,11 +51,12 @@ final class SaveArchive {
                     if(e.isDirectory()){Files.createDirectories(dest);continue;}
                     Files.createDirectories(dest.getParent());
                     try(OutputStream out=Files.newOutputStream(dest,StandardOpenOption.CREATE_NEW)){
-                        for(int n;(n=zip.read(b))!=-1;){if((bytes+=n)>LIMIT)throw new IOException("Save archive is too large.");out.write(b,0,n);}
+                        for(int n;(n=zip.read(b))!=-1;){FileOperation.check();if((bytes+=n)>LIMIT)throw new IOException("Save archive is too large.");out.write(b,0,n);}
                     }
                 }
             }
             if(!marker||bytes==0)throw new IOException("The archive contains no compatible saves.");
+            FileOperation.check();
             File backup=new File(state,"backups/android-import-"+System.currentTimeMillis());backup.getParentFile().mkdirs();
             if(user.exists())Files.move(user.toPath(),backup.toPath(),StandardCopyOption.ATOMIC_MOVE);
             try{Files.move(stage.toPath(),user.toPath(),StandardCopyOption.ATOMIC_MOVE);installed=true;}

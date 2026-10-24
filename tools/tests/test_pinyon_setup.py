@@ -7,6 +7,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,6 +89,25 @@ class DiscImageTests(unittest.TestCase):
             image.write_bytes(b"\0" * (1 << 20))
             with self.assertRaises(pinyon_setup.SetupError):
                 pinyon_setup.DiscImage(image)
+
+    def test_failed_disc_initialization_closes_the_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bad.iso"
+            for data in (b"not a disc", bytes(32 * SECTOR) + pinyon_setup.XDVDFS_MAGIC):
+                path.write_bytes(data)
+                stream = path.open("rb")
+                with mock.patch.object(Path, "open", return_value=stream):
+                    with self.assertRaises(pinyon_setup.SetupError):
+                        pinyon_setup.DiscImage(path)
+                self.assertTrue(stream.closed)
+
+    def test_truncated_root_header_has_a_normal_verification_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "truncated.iso"
+            path.write_bytes(bytes(32 * SECTOR) + pinyon_setup.XDVDFS_MAGIC + b"\0\0")
+            with self.assertRaisesRegex(pinyon_setup.SetupError, "truncated root header") as error:
+                pinyon_setup.DiscImage(path)
+            self.assertEqual(error.exception.stage, "verify")
 
     def test_catalog_check_names_missing_and_extra_files(self):
         expected = {"default.xex": {"guest_path": "default.xex"},

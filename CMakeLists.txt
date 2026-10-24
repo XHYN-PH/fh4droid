@@ -86,6 +86,18 @@ set(PINYON_SHIFT_HOST_SOURCES
     src/native_renderer/shader_capture.cpp
 )
 
+if(ANDROID)
+    add_library(fh4droid_android SHARED android/native/driver_probe.cpp)
+    target_include_directories(fh4droid_android PRIVATE
+        ${REXSDK_DIR}/thirdparty/vulkan-headers/include)
+    target_link_libraries(fh4droid_android PRIVATE rex::runtime android log dl)
+    target_link_options(fh4droid_android PRIVATE -Wl,-z,max-page-size=16384)
+    add_library(pinyon_shift_android_ui_check OBJECT EXCLUDE_FROM_ALL
+        src/android_bridge.cpp src/ui/hostui/host_ui.cpp)
+    target_include_directories(pinyon_shift_android_ui_check PRIVATE src ${REXSDK_DIR}/thirdparty/imgui)
+    target_link_libraries(pinyon_shift_android_ui_check PRIVATE rex::runtime)
+endif()
+
 if(PINYON_SHIFT_HOST_TESTS_ONLY)
     # No game target; the tests and tools below still build.
 elseif(WIN32)
@@ -103,11 +115,6 @@ elseif(ANDROID)
     )
     set_target_properties(pinyon_shift PROPERTIES OUTPUT_NAME main)
     target_sources(pinyon_shift PRIVATE src/android_bridge.cpp)
-    add_library(fh4droid_android SHARED android/native/driver_probe.cpp)
-    target_include_directories(fh4droid_android PRIVATE
-        ${REXSDK_DIR}/thirdparty/vulkan-headers/include)
-    target_link_libraries(fh4droid_android PRIVATE adrenotools android log dl)
-    target_link_options(fh4droid_android PRIVATE -Wl,-z,max-page-size=16384)
     add_dependencies(pinyon_shift fh4droid_android)
     # Every generated function is a default-visibility weak symbol, so in a
     # shared library each call between them went through the PLT (4-6 % of
@@ -237,7 +244,12 @@ target_link_libraries(pinyon_shift_disc_image_bounds_tests PRIVATE rex::runtime)
 
 # Every host-side test, for CI (PINYON_SHIFT_HOST_TESTS_ONLY) and local runs.
 add_custom_target(pinyon_shift_host_tests)
+add_executable(pinyon_shift_touch_pad_tests EXCLUDE_FROM_ALL
+    tests/ui/touch_pad_test.cpp src/ui/touch_pad.cpp)
+target_include_directories(pinyon_shift_touch_pad_tests PRIVATE src)
+target_link_libraries(pinyon_shift_touch_pad_tests PRIVATE rex::runtime)
 add_dependencies(pinyon_shift_host_tests
+    pinyon_shift_touch_pad_tests
     pinyon_shift_fh1_ui_api_tests
     pinyon_shift_fh1_shader_pack_tests
     pinyon_shift_hostui_tests

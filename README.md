@@ -14,7 +14,7 @@
 
 **FH4Droid focuses on Android only.** It brings the original Xbox 360 **Forza Horizon (2012)** to compatible phones and handhelds.
 
-**Testing build: 0.6.1-r2.** This build has not been tested on a physical Android device. Expect possible crashes, graphics issues and slowdowns.
+**Testing build: 0.6.5-r4.** This build has not been tested on a physical Android device. Expect possible crashes, graphics issues and slowdowns.
 
 **You must provide your own legally obtained game files.** Use the supported USA Xbox 360 base-game ISO or complete extracted folder. Game files and game-download links are not provided here.
 
@@ -24,7 +24,7 @@
 - Current graphics settings beneath **Ready to drive**, plus an in-game menu.
 - Graphics, display, audio, controls and gameplay settings, with restart labels.
 - 50%, 75% and 100% rendering resolution options.
-- Movable, resizable touch controls, adjustable opacity and automatic hiding with a controller.
+- Arrow steering, drawn pedal/button icons, an optional steering stick, movable touch controls and controller auto-hide.
 - Save export, import, backups and restoration from your phone.
 - A graphics-driver test before launch, system-driver recovery and shareable problem reports.
 - Direct ISO loading or verified game-folder import with resume and repair.
@@ -60,7 +60,7 @@ The new rendering resolutions, ISO path and menus still need physical-device gam
 
 **Title Update 4 is not needed for this release.** Saves already used with Update 4 will not work with this APK. Back up your saves and use a separate test profile. Game files and saves from the original Pinyon Shift app are not transferred automatically.
 
-See the [release notes](docs/releases/fh4droid-0.6.1-r2.md) for setup and known issues.
+See the [release notes](docs/releases/fh4droid-0.6.5-r4.md) for setup and known issues.
 
 ## Reporting a problem
 

@@ -55,6 +55,7 @@ public class PinyonShiftActivity extends SDLActivity {
     private static native void nativeReloadTouch(String file,boolean controller);
     private static native void nativeController(boolean connected);
     private boolean bridgeLoaded;
+    private boolean touchHaptics;
     private android.app.AlertDialog gameMenu;
     private android.os.ParcelFileDescriptor gameIso;
     private String launchError;
@@ -250,7 +251,7 @@ public class PinyonShiftActivity extends SDLActivity {
             ()->Toast.makeText(this,"Quit to the launcher to change or test drivers.",1).show()));
         FestivalUi.action(this,body,"Edit touch controls",()->startActivity(new Intent(this,TouchEditorActivity.class)));
         FestivalUi.action(this,body,"Advanced game settings",()->{gameMenu.dismiss();nativeOpenSettings();});
-        FestivalUi.action(this,body,"Share problem report",()->ProblemReports.share(this));
+        ProblemReports.action(this,body,"Share problem report");
         FestivalUi.action(this,body,"Quit to launcher",()->new android.app.AlertDialog.Builder(this).setTitle("Quit the game?")
             .setMessage("Wait for the game's save indicator to finish before quitting.").setNegativeButton("Keep playing",null)
             .setPositiveButton("Quit",(d,w)->{gameMenu.dismiss();finish();}).show());
@@ -258,17 +259,24 @@ public class PinyonShiftActivity extends SDLActivity {
         gameMenu.setOnDismissListener(d->{if(bridgeLoaded)nativeHostMenu(false);FestivalUi.immersive(this);});gameMenu.show();
     }
     @Override public void onBackPressed(){if(gameMenu!=null&&gameMenu.isShowing())gameMenu.dismiss();else showGameMenu();}
-    @Override protected void onResume(){super.onResume();if(bridgeLoaded){nativeReloadTouch(TouchLayout.file(this).getAbsolutePath(),hasController());FestivalUi.immersive(this);}}
+    @Override public boolean dispatchTouchEvent(android.view.MotionEvent event){
+        int action=event.getActionMasked();if(touchHaptics&&bridgeLoaded&&(gameMenu==null||!gameMenu.isShowing())&&(action==android.view.MotionEvent.ACTION_DOWN||action==android.view.MotionEvent.ACTION_POINTER_DOWN))
+            getWindow().getDecorView().performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+        return super.dispatchTouchEvent(event);
+    }
+    @Override protected void onResume(){super.onResume();TouchLayout preferences=new TouchLayout();preferences.load(this);touchHaptics=preferences.haptics;if(bridgeLoaded){nativeReloadTouch(TouchLayout.file(this).getAbsolutePath(),hasController());FestivalUi.immersive(this);}}
     @Override protected void onDestroy(){
         if(inputManager!=null)inputManager.unregisterInputDeviceListener(controllers);
         if(gameMenu!=null)gameMenu.dismiss();
+        // SDL may hard-exit inside super.onDestroy(); persist intent first.
+        if(isFinishing())recordCleanExit();
         super.onDestroy();
-        GameSession.record(this,false);
         if(gameIso!=null)try{gameIso.close();}catch(IOException ignored){}
         // SDL and its driver hooks cannot be safely reinitialized in this process.
         // The launcher lives separately and survives game crashes and normal exits.
         android.os.Process.killProcess(android.os.Process.myPid());
     }
+    public void recordCleanExit(){GameSession.record(this,false);}
 
     // enabled_mods from a mod set the setup screen copied before the game had
     // written its settings file; the game reads the list at start.
@@ -324,33 +332,7 @@ public class PinyonShiftActivity extends SDLActivity {
     // Copies each driver folder under the package's assets/drivers into
     // state/drivers, where a file is missing or differs in size.
     private void installBundledDrivers() {
-        try {
-            String[] names = getAssets().list("drivers");
-            if (names == null) return;
-            for (String name : names) {
-                String[] files = getAssets().list("drivers/" + name);
-                if (files == null || files.length == 0) continue;
-                File folder = new File(driversDir, name);
-                folder.mkdirs();
-                for (String file : files) {
-                    File target = new File(folder, file);
-                    long size;
-                    try (InputStream in = getAssets().open("drivers/" + name + "/" + file)) {
-                        size = 0;
-                        byte[] buffer = new byte[65536];
-                        for (int read; (read = in.read(buffer)) > 0; ) size += read;
-                    }
-                    if (target.length() == size) continue;
-                    try (InputStream in = getAssets().open("drivers/" + name + "/" + file);
-                         OutputStream out = new FileOutputStream(target)) {
-                        copy(in, out);
-                    }
-                    Log.i(TAG, "bundled GPU driver " + name + ": " + file + " installed");
-                }
-            }
-        } catch (IOException error) {
-            Log.w(TAG, "bundled GPU drivers not installed", error);
-        }
+        try{DriverStore.installBundled(this);}catch(IOException error){Log.w(TAG,"bundled GPU drivers not installed",error);}
     }
 
     private static void copy(InputStream in, OutputStream out) throws IOException {

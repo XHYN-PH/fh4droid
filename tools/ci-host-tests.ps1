@@ -55,6 +55,7 @@ try {
     $env:PATH = "$artifacts;$env:PATH"
     $failed = @()
     foreach ($test in @(
+            'pinyon_shift_touch_pad_tests',
             'pinyon_shift_fh1_ui_api_tests',
             'pinyon_shift_hostui_tests',
             'pinyon_shift_host_config_tests',

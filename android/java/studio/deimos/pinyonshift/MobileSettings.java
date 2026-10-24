@@ -25,11 +25,11 @@ final class MobileSettings {
     private static final Option[] OPTIONS={
         o("Graphics","fh1_render_scale_percent","Rendering resolution","100",true,"50% = 640 × 360; 75% = 960 × 540. Lower values can improve performance at the cost of sharpness.","50","75","100"),
         o("Graphics","vulkan_texture_max_size","Texture size","0",true,"Smaller textures use less graphics memory. Original preserves the game's detail.","256","512","1024","0"),
-        o("Graphics","anisotropic_override","Texture filtering","-1",false,"Higher filtering keeps roads clearer at an angle and adds GPU work.","-1","0","3","4","5"),
+        o("Graphics","anisotropic_override","Texture filtering","3",false,"Higher filtering keeps roads clearer at an angle and adds GPU work.","-1","0","3","4","5"),
         o("Graphics","texture_mip_lod_bias","Texture sharpness","0",false,"Negative values sharpen textures and can shimmer.","0.5","0","-0.5","-1"),
         s("Graphics","swap_post_effect","Post-process anti-aliasing","none",false,"Smooths jagged edges after rendering. Independent of MSAA.","none","fxaa","fxaa_extreme"),
         o("Graphics","swap_post_effect_scene_only","Keep HUD sharp","true",false,"Limits post-process anti-aliasing to the scene.","false","true"),
-        o("Graphics","pinyon_shift_fh1_shadows","Shadows","true",false,"Turning shadows off reduces graphics work and changes scene lighting.","false","true"),
+        o("Graphics","pinyon_shift_fh1_shadows","Shadows","false",false,"Turning shadows off reduces graphics work and changes scene lighting.","false","true"),
         o("Graphics","pinyon_shift_fh1_env_map_rate","Reflection updates","0.25",false,"Controls how often the environment reflected by cars is redrawn.","0.25","0.5","1"),
         o("Graphics","fh1_untile_predicated_tiling","Single-pass scene","true",false,"Draws the scene with fewer repeated passes. Leave on for normal play.","false","true"),
         o("Graphics","disable_bloom","Bloom","true",false,"Bright light glow.","true","false"),
@@ -73,8 +73,8 @@ final class MobileSettings {
         if(page.equals("Graphics")) {
             Button msaa=FestivalUi.action(a,body,"MSAA · next launch: "+msaa(a),()->{});
             msaa.setOnClickListener(v->FestivalUi.choose(a,"MSAA",new String[]{"Off","2×","4×"},Arrays.asList("Off","2×","4×").indexOf(msaa(a)),n->{
-                put(a,null,"fh1_msaa_single_sample",n==0?"true":"false");
-                put(a,null,"fh1_msaa_2x",n==1?"true":"false");msaa.setText("MSAA · next launch: "+msaa(a));}));
+                Map<String,String> values=new LinkedHashMap<>();values.put("fh1_msaa_single_sample",n==0?"true":"false");values.put("fh1_msaa_2x",n==1?"true":"false");
+                if(save(a,values))msaa.setText("MSAA · next launch: "+msaa(a));}));
         }
         for(Option option:OPTIONS)if(option.page.equals(page)) {
             String suffix=option.restart?" · next launch":"";
@@ -83,8 +83,8 @@ final class MobileSettings {
             b.setOnClickListener(v->{String[] labels=new String[option.values.length];for(int i=0;i<labels.length;i++)labels[i]=label(option,option.values[i]);
                 int selected=Arrays.asList(option.values).indexOf(MobileConfig.get(a,option.key,option.initial));
                 FestivalUi.choose(a,option.title,labels,selected,n->{String value=option.values[n];
-                    put(a,option.restart?null:runtime,option.key,option.string?MobileConfig.quote(value):value);
-                    b.setText(option.title+suffix+": "+label(option,value));});});
+                    if(put(a,option.restart?null:runtime,option.key,option.string?MobileConfig.quote(value):value))
+                        b.setText(option.title+suffix+": "+label(option,value));});});
         }
         if(page.equals("Controls"))FestivalUi.action(a,body,"Edit layout, opacity and controller auto-hide",controls);
         if(page.equals("Display")) {
@@ -99,17 +99,27 @@ final class MobileSettings {
     }
     private static void presets(Activity a,Runtime runtime) {
         FestivalUi.choose(a,"Performance preset",new String[]{"Lower power · 30 FPS target","Balanced · 30 FPS target","Higher frame limit · 60 FPS target"},-1,n->{
-            put(a,runtime,"pinyon_shift_fh1_render_fps_limit",n==2?"60":"30");
-            put(a,null,"fh1_render_scale_percent",n==0?"50":n==1?"75":"100");
-            put(a,null,"fh1_msaa_single_sample","true");put(a,null,"fh1_msaa_2x","false");
-            put(a,runtime,"present_effect","\"bilinear\"");put(a,runtime,"pinyon_shift_fh1_shadows",n==0?"false":"true");
-            put(a,null,"vulkan_texture_max_size",n==0?"256":n==1?"512":"0");
+            Map<String,String> values=new LinkedHashMap<>();
+            values.put("pinyon_shift_fh1_render_fps_limit",n==2?"60":"30");
+            values.put("fh1_render_scale_percent",n==0?"50":n==1?"75":"100");
+            values.put("fh1_msaa_single_sample","true");values.put("fh1_msaa_2x","false");
+            values.put("present_effect",MobileConfig.quote("bilinear"));
+            values.put("pinyon_shift_fh1_shadows",n==0?"false":"true");
+            values.put("vulkan_texture_max_size",n==0?"256":n==1?"512":"0");
+            if(!save(a,values))return;
+            if(runtime!=null){runtime.changed("pinyon_shift_fh1_render_fps_limit",values.get("pinyon_shift_fh1_render_fps_limit"));
+                runtime.changed("present_effect","bilinear");runtime.changed("pinyon_shift_fh1_shadows",values.get("pinyon_shift_fh1_shadows"));}
             Toast.makeText(a,"Preset saved. Restart to apply resolution and texture changes.",1).show();});
     }
-    private static void put(Activity a,Runtime runtime,String key,String literal) {
-        try{MobileConfig.put(a,key,literal);if(runtime!=null){String value=literal;
-            if(value.startsWith("\"")&&value.endsWith("\""))value=value.substring(1,value.length()-1);runtime.changed(key,value);}}
-        catch(IOException error){Toast.makeText(a,"Could not save settings: "+error.getMessage(),1).show();}
+    private static boolean save(Activity a,Map<String,String> values){
+        try{MobileConfig.putAll(a,values);return true;}
+        catch(IOException error){Toast.makeText(a,"Settings were not saved: "+error.getMessage(),1).show();return false;}
+    }
+    private static boolean put(Activity a,Runtime runtime,String key,String literal) {
+        if(!save(a,Collections.singletonMap(key,literal)))return false;
+        if(runtime!=null){String value=literal;
+            if(value.startsWith("\"")&&value.endsWith("\""))value=value.substring(1,value.length()-1);runtime.changed(key,value);}
+        return true;
     }
     private static String label(Option o,String value) {
         if(value.equals("true")||value.equals("false")) {

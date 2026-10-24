@@ -1,0 +1,88 @@
+diff --git a/include/rex/ui/vulkan/android_gpu_driver.h b/include/rex/ui/vulkan/android_gpu_driver.h
+--- a/include/rex/ui/vulkan/android_gpu_driver.h
++++ b/include/rex/ui/vulkan/android_gpu_driver.h
+@@ -20,6 +20,10 @@
+ // libvulkan.so, or nullptr to use the system driver. "auto" takes the driver
+ // the app recommends for the device's GPU (REX_ANDROID_RECOMMENDED_DRIVER).
+ void* OpenAndroidCustomVulkanDriver(const std::filesystem::path& drivers_root);
++// The preflight process supplies its paths without initializing SDL.
++void* OpenAndroidCustomVulkanDriver(const std::filesystem::path& drivers_root,
++    const std::filesystem::path& internal, const std::filesystem::path& hooks,
++    const std::string& selection);
+
+ // The custom driver loaded at startup (its folder name), or empty for the
+ // system driver.
+diff --git a/src/ui/vulkan/android_gpu_driver.cpp b/src/ui/vulkan/android_gpu_driver.cpp
+--- a/src/ui/vulkan/android_gpu_driver.cpp
++++ b/src/ui/vulkan/android_gpu_driver.cpp
+@@ -310,7 +310,16 @@
+ }
+
+ void* OpenAndroidCustomVulkanDriver(const std::filesystem::path& drivers_root) {
+-  std::string name = REXCVAR_GET(android_gpu_driver);
++  const char* internal = SDL_GetAndroidInternalStoragePath();
++  return OpenAndroidCustomVulkanDriver(drivers_root, internal ? internal : "",
++      NativeLibraryFolder(), REXCVAR_GET(android_gpu_driver));
++}
++
++void* OpenAndroidCustomVulkanDriver(const std::filesystem::path& drivers_root,
++    const std::filesystem::path& internal, const std::filesystem::path& hooks,
++    const std::string& selection) {
++  g_loaded_driver.clear();
++  std::string name = selection;
+   if (name == "auto") {
+     const char* recommended = std::getenv("REX_ANDROID_RECOMMENDED_DRIVER");
+     std::error_code exists_error;
+@@ -325,16 +334,15 @@
+   if (name.empty()) {
+     return nullptr;
+   }
++  if (name == "." || name == ".." || name.find_first_of("/\\") != std::string::npos) return nullptr;
+   const std::filesystem::path source = drivers_root / name;
+-  const char* internal = SDL_GetAndroidInternalStoragePath();
+-  const std::filesystem::path hooks = NativeLibraryFolder();
+-  if (!internal || hooks.empty()) {
++  if (internal.empty() || hooks.empty()) {
+     REXLOG_ERROR("Custom GPU driver {}: no internal storage or library folder", name);
+     return nullptr;
+   }
+   // dlopen refuses libraries on shared storage: copy the package into the
+   // app's internal storage, where only the app can write.
+-  const std::filesystem::path target = std::filesystem::path(internal) / "gpu_drivers" / name;
++  const std::filesystem::path target = internal / "gpu_drivers" / name;
+   std::error_code error;
+   std::filesystem::remove_all(target, error);
+   std::filesystem::create_directories(target, error);
+diff --git a/src/ui/vulkan/vulkan_instance.cpp b/src/ui/vulkan/vulkan_instance.cpp
+--- a/src/ui/vulkan/vulkan_instance.cpp
++++ b/src/ui/vulkan/vulkan_instance.cpp
+@@ -93,6 +93,16 @@
+     if (void* driver = OpenAndroidCustomVulkanDriver(*drivers)) {
+       vulkan_instance->loader_.Adopt(driver);
+       loader_loaded = true;
++    } else {
++      const std::string selected = rex::cvar::GetFlagByName("android_gpu_driver");
++      const auto recommended = rex::platform::env::get("REX_ANDROID_RECOMMENDED_DRIVER");
++      std::error_code error;
++      const bool required = !selected.empty() && (selected != "auto" ||
++          (recommended && std::filesystem::is_directory(std::filesystem::path(*drivers) / *recommended, error)));
++      if (required) {
++        REXLOG_ERROR("The selected custom driver could not be loaded; refusing a silent system fallback");
++        return nullptr;
++      }
+     }
+   }
+   if (!loader_loaded)
+diff --git a/thirdparty/libadrenotools/src/hook/hook_impl.cpp b/thirdparty/libadrenotools/src/hook/hook_impl.cpp
+--- a/thirdparty/libadrenotools/src/hook/hook_impl.cpp
++++ b/thirdparty/libadrenotools/src/hook/hook_impl.cpp
+@@ -129,7 +129,8 @@
+         void *handle{android_dlopen_ext(hook_params->customDriverName.c_str(), flags, &newExtinfo)};
+         if (!handle) {
+             LOGI("hook_android_dlopen_ext: hook failed: failed to load custom driver: %s!", dlerror());
+-            return fallback();
++            // A failed custom driver must not pass preflight as the system driver.
++            return nullptr;
+         }
+
+         return handle;

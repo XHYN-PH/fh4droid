@@ -420,16 +420,23 @@ class DiscImage:
     def __init__(self, path: Path):
         self.path = path
         self.stream = path.open("rb")
-        self.offset = None
-        for offset in PARTITION_OFFSETS:
-            self.stream.seek(offset + 32 * SECTOR)
-            if self.stream.read(len(XDVDFS_MAGIC)) == XDVDFS_MAGIC:
-                self.offset = offset
-                break
-        if self.offset is None:
-            raise SetupError("this is not an Xbox 360 disc image", "verify")
-        self.stream.seek(self.offset + 32 * SECTOR + 20)
-        self.root_sector, self.root_size = struct.unpack("<II", self.stream.read(8))
+        try:
+            self.offset = None
+            for offset in PARTITION_OFFSETS:
+                self.stream.seek(offset + 32 * SECTOR)
+                if self.stream.read(len(XDVDFS_MAGIC)) == XDVDFS_MAGIC:
+                    self.offset = offset
+                    break
+            if self.offset is None:
+                raise SetupError("this is not an Xbox 360 disc image", "verify")
+            self.stream.seek(self.offset + 32 * SECTOR + 20)
+            header = self.stream.read(8)
+            if len(header) != 8:
+                raise SetupError("the disc image has a truncated root header", "verify")
+            self.root_sector, self.root_size = struct.unpack("<II", header)
+        except BaseException:
+            self.stream.close()
+            raise
 
     def close(self) -> None:
         self.stream.close()
@@ -1057,10 +1064,12 @@ def run_setup(args: argparse.Namespace) -> int:
                 if args.verify_only:
                     _, expected = load_catalog()
                     disc = DiscImage(args.iso)
-                    mismatches = check_paths([entry for entry in disc.files()
-                                              if not entry[0].lower().startswith(
-                                                  SYSTEM_UPDATE.lower())], expected)
-                    disc.close()
+                    try:
+                        mismatches = check_paths([entry for entry in disc.files()
+                                                  if not entry[0].lower().startswith(
+                                                      SYSTEM_UPDATE.lower())], expected)
+                    finally:
+                        disc.close()
                     if mismatches:
                         raise SetupError(f"Not the supported dump: {mismatches[0]}", "verify")
                     progress("verify", 100, "The disc image has the supported dump's files")

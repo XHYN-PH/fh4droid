@@ -9,8 +9,10 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.zip.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 final class ProblemReports {
+    private static final AtomicBoolean EXPORTING=new AtomicBoolean();
     static void write(Context c,OutputStream output)throws IOException{
         try(ZipOutputStream zip=new ZipOutputStream(output)){
             StringBuilder info=new StringBuilder("FH4Droid problem report\n");
@@ -55,15 +57,32 @@ final class ProblemReports {
             default:return "Android exit reason "+reason;
         }
     }
-    static void share(Activity a){
-        new Thread(()->{try{
-            File dir=new File(a.getCacheDir(),"reports");dir.mkdirs();File file=new File(dir,"fh4droid-report.zip");
-            try(OutputStream out=new FileOutputStream(file)){write(a,out);}
-            a.runOnUiThread(()->{Uri uri=Uri.parse("content://"+a.getPackageName()+".reports/fh4droid-report.zip");
+    static void action(Activity a,android.widget.LinearLayout parent,String title){
+        android.widget.Button button=FestivalUi.action(a,parent,title,()->{});button.setOnClickListener(v->share(a,button));
+    }
+    static void share(Activity a){share(a,null);}
+    private static void share(Activity a,android.widget.Button button){
+        if(a.isFinishing()||a.isDestroyed())return;
+        if(!EXPORTING.compareAndSet(false,true)){android.widget.Toast.makeText(a,"A report is already being prepared.",0).show();return;}
+        final CharSequence label=button==null?null:button.getText();
+        if(button!=null){button.setEnabled(false);button.setText("Preparing report…");}
+        final Context app=a.getApplicationContext();
+        new Thread(()->{
+            File result=null;String failure=null;
+            try{result=ReportFiles.create(app.getCacheDir(),out->write(app,out));}
+            catch(IOException|RuntimeException error){failure=error.getMessage()==null?"The report could not be created.":error.getMessage();}
+            final File file=result;final String error=failure;
+            a.runOnUiThread(()->{
+                EXPORTING.set(false);
+                if(a.isFinishing()||a.isDestroyed())return;
+                if(button!=null){button.setEnabled(true);button.setText(label);}
+                if(error!=null){android.widget.Toast.makeText(a,error,1).show();return;}
+                Uri uri=new Uri.Builder().scheme("content").authority(a.getPackageName()+".reports").appendPath(file.getName()).build();
                 Intent send=new Intent(Intent.ACTION_SEND).setType("application/zip").putExtra(Intent.EXTRA_STREAM,uri)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);send.setClipData(ClipData.newRawUri("FH4Droid report",uri));
-                try{a.startActivity(Intent.createChooser(send,"Share problem report"));}catch(ActivityNotFoundException e){android.widget.Toast.makeText(a,"No app available for sharing.",1).show();}});
-        }catch(IOException error){a.runOnUiThread(()->android.widget.Toast.makeText(a,error.getMessage(),1).show());}},"ReportExport").start();
+                try{a.startActivity(Intent.createChooser(send,"Share problem report"));}catch(ActivityNotFoundException e){android.widget.Toast.makeText(a,"No app available for sharing.",1).show();}
+            });
+        },"ReportExport").start();
     }
     private ProblemReports(){}
 }

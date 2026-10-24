@@ -2,7 +2,7 @@
 
 ## FH4Droid Android-only fork
 
-FH4Droid focuses on Android only. Its `0.6.0-r1` test release provides a prebuilt APK with application ID `ph.xhyn.fh4droid`. Install it, choose your own complete extracted USA retail game folder, wait for import, then play. A PC is needed to extract an ISO if your game is not already extracted; the phone does not compile the game. See the [fork release notes](releases/fh4droid-0.6.0-r1.md) for requirements and limitations. This build has not been tested on a physical Android device.
+FH4Droid focuses on Android only. The `0.6.5-r4` testing build uses application ID `ph.xhyn.fh4droid`. Install the APK and choose your own supported USA retail ISO or complete extracted game folder; the phone does not compile the game. See the [fork release notes](releases/fh4droid-0.6.5-r4.md) for requirements and limitations. This build has not been tested on a physical Android device.
 
 The build and Wi-Fi instructions below are inherited from upstream. Its private-build distribution policy describes upstream Pinyon Shift; this fork's prebuilt APK release is separate and contains compiled game translations. Raw game files, generated source, native build products and signing keys remain excluded from the source repository.
 
@@ -231,11 +231,43 @@ crash reports and route output to `.local/android/device-logs/`.
 ## Controls
 
 A controller (built in, Bluetooth or USB) works as on the PC. On a touch
-screen, on-screen controls appear at the first touch: a steering stick
-wherever the left thumb lands, throttle (RT) and brake (LT) under the right
-thumb, A, B, X, Y, the bumpers, Back and Start. They hide 20 seconds after the
-last touch, so a controller player never sees them
-(`pinyon_shift_touch_controls` turns them off).
+screen, the default controls have separate left/right steering arrows,
+accelerator (RT) and brake (LT) pedal pictograms, A, B, X, Y, the bumpers,
+Back and Start. Both arrows held together give neutral steering. Controls →
+Steering in the touch editor switches between Arrows and the original Stick,
+keeping saved positions for both. Icons use shared drawn paths rather than
+game fonts. Held controls stay visible; idle controls hide 20 seconds after
+release. Controller auto-hide can be changed in the editor
+(`pinyon_shift_touch_controls` turns the overlay off).
+
+The editor also provides immediate/120 ms/240 ms arrow response, optional sliding
+pedals (half input initially; slide up for more or down for less), high contrast,
+and optional touch vibration. Tools are grouped under Placement, Driving and
+Appearance; the page scrolls when needed. Position, size, opacity and response
+values are visible, including effective high-contrast opacity. Position updates
+while dragging. Select control and Move buttons support editing without drag
+gestures, with accessible value feedback. These changes have host tests and Android compilation
+checks; on-device gameplay and accessibility validation remain pending.
+
+Problem-report exports use separate completed ZIP files. Repeat export taps are
+blocked while a report is being prepared; a later export does not replace an
+already shared report. Advanced driver environment settings decode quoted TOML
+escapes before preflight, matching the saved string values.
+
+For maintainer releases, the Python Android build/package commands accept
+`--keystore`, `--key-alias`, `--storepass-file` and `--keypass-file` together to
+reuse an existing signing key. Passwords are read by the signer from private
+files. Incomplete release-signing arguments fail before compilation; they do not
+fall back to a new local key. APK packaging verifies signatures and 16 KiB ZIP
+alignment after signing. Before publishing an update, compare its certificate,
+application ID and version code with the previous APK. Keep keys, password files
+and signing backups outside the public source and release assets.
+
+When configuring an existing, reviewed generated-code snapshot, set
+`PINYON_SHIFT_FROZEN_CODEGEN=ON`. This uses the complete saved modules and stamp
+without requiring the standalone generator. It does not regenerate changed game
+inputs or generator settings; use matching source and SDK revisions, and retain
+the normal generator requirement for builds which regenerate code.
 
 Android's Back button or gesture opens SETTINGS, and inside the menus it steps
 back; tap a row to open or change it. SETTINGS also holds the trainer (with

@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.zip.*;
+import java.util.concurrent.*;
 
 /** Runs real archive and disc operations on temporary files; no Android device needed. */
 public final class MobileStorageTest {
@@ -79,10 +80,94 @@ public final class MobileStorageTest {
         check(restored.hidden[2]&&!restored.autoHide&&Math.abs(restored.opacity-.8f)<.0001f,"layout preferences round trip");
         restored.parse("RT NaN 0.5 0.1 0\nLT 5 -9 100 0\nopacity Infinity\n");
         check(Float.isFinite(restored.values[0][0])&&restored.values[1][0]==1&&restored.values[1][1]==0&&restored.values[1][2]<=.24f,"invalid layout values are bounded");
+        int left=Arrays.asList(TouchLayout.LABELS).indexOf("LEFT"),right=Arrays.asList(TouchLayout.LABELS).indexOf("RIGHT"),stick=Arrays.asList(TouchLayout.LABELS).indexOf("LS");
+        check(restored.steering.equals("arrows")&&restored.enabled(left)&&restored.enabled(right)&&!restored.enabled(stick),"arrows are the default steering mode");
+        restored.values[left][0]=.32f;restored.steering="stick";
+        TouchLayout saved=new TouchLayout();saved.parse(restored.serialize());
+        check(saved.steering.equals("stick")&&saved.enabled(stick)&&!saved.enabled(left),"steering mode round trip");
+        check(Math.abs(saved.values[left][0]-.32f)<.00001f,"inactive arrow position is preserved");
+        saved.parse("steering unknown\n");check(saved.steering.equals("stick"),"invalid steering keeps the valid choice");
+        saved.reset();check(saved.steering.equals("arrows")&&saved.autoHide,"reset restores arrows and controller hiding");
+        saved.steeringResponseMs=240;saved.analogPedals=true;saved.highContrast=true;saved.haptics=true;
+        TouchLayout tuned=new TouchLayout();tuned.parse(saved.serialize());
+        check(tuned.steeringResponseMs==240&&tuned.analogPedals&&tuned.highContrast&&tuned.haptics,"driving and accessibility preferences round trip");
+        tuned.parse("steering_response_ms 9999\n");check(tuned.steeringResponseMs==500,"steering response is bounded");
+        TouchLayout legacy=new TouchLayout();legacy.parse("RT 0.8 0.8 0.1 0\nLS 0.2 0.7 0.15 0\n");
+        check(legacy.steering.equals("arrows")&&Math.abs(legacy.values[0][0]-.8f)<.00001f&&Math.abs(legacy.values[stick][2]-.15f)<.00001f,"legacy positions survive the new layout format");
+        check(Arrays.equals(TouchLayout.LABELS,TouchIcons.NAMES),"every editor control has a matching vector icon");
+        TouchLayout upgraded=new TouchLayout();upgraded.parse("steering_buttons 1\nLEFT 0.6 0.5 0.045 0\nRIGHT 0.7 0.5 0.045 0\nSTEER-L 0.1 0.8 0.08 0\nSTEER-R 0.28 0.8 0.08 0\n");
+        check(upgraded.steering.equals("arrows")&&Math.abs(upgraded.values[left][0]-.1f)<.00001f&&Math.abs(upgraded.values[right][0]-.28f)<.00001f,"upgrade keeps steering positions separate from old D-pad positions");
+        upgraded.parse("steering_buttons 0\n");check(upgraded.steering.equals("stick"),"upgrade preserves the previous stick selection");
+        TouchLayout resaved=new TouchLayout();resaved.parse(upgraded.serialize());check(resaved.steering.equals("stick")&&Math.abs(resaved.values[left][0]-.1f)<.00001f,"migrated layout round trips without changing arrow positions");
+        for(int i=0;i<TouchIcons.NAMES.length;i++){
+            check(TouchIcons.LINES[i].length>=4&&TouchIcons.LINES[i].length%4==0,"icon contains complete segments: "+TouchIcons.NAMES[i]);
+            for(int j=0;j<TouchIcons.LINES[i].length;j++)check(Float.isFinite(TouchIcons.LINES[i][j])&&Math.abs(TouchIcons.LINES[i][j])<TouchIcons.BOUNDS[i][j%2],"icon is inside its hit target: "+TouchIcons.NAMES[i]);
+        }
+    }
+    private static void settings(Path temp)throws Exception{
+        File file=temp.resolve("config/settings.toml").toFile();file.getParentFile().mkdirs();
+        Files.write(file.toPath(),"# keep\ncustom = 77\nvsync = true\n".getBytes(StandardCharsets.UTF_8));
+        Map<String,String> values=new LinkedHashMap<>();values.put("vsync","false");values.put("pinyon_shift_fh1_shadows","false");
+        MobileConfig.putFile(file,values);String text=new String(Files.readAllBytes(file.toPath()),StandardCharsets.UTF_8);
+        check(text.contains("custom = 77")&&text.contains("vsync = false")&&text.contains("pinyon_shift_fh1_shadows = false"),"settings transaction preserves unrelated values");
+        byte[] before=Files.readAllBytes(file.toPath());values.put("bad key","true");
+        rejects(()->MobileConfig.putFile(file,values),"invalid batch is rejected");
+        check(Arrays.equals(before,Files.readAllBytes(file.toPath())),"invalid setting leaves entire file untouched");
+        File directory=temp.resolve("config/not-a-file").toFile();directory.mkdirs();Files.write(directory.toPath().resolve("keep"),new byte[]{1});
+        rejects(()->MobileConfig.putFile(directory,Collections.singletonMap("vsync","true")),"failed atomic replacement is reported");
+        check(Files.exists(directory.toPath().resolve("keep")),"failed save preserves previous destination");
+        File[] parts=file.getParentFile().listFiles(f->f.getName().endsWith(".android-part"));check(parts!=null&&parts.length==0,"failed settings save cleans staging");
+        check(MobileConfig.defaults().contains("anisotropic_override = 3")&&MobileConfig.defaults().contains("pinyon_shift_fh1_shadows = false"),"new Android config uses native defaults");
+        for(String value:new String[]{"TU_DEBUG=sysmem","CACHE=C:\\cache","LABEL=\"custom\"","VALUE=#inside","", "line\nbreak\tand\rreturn\b\f", "\0\u007f", "café 🚗"}){
+            MobileConfig.putFile(file,Collections.singletonMap("android_gpu_driver_env",MobileConfig.quote(value)));
+            check(value.equals(MobileConfig.readFile(file).get("android_gpu_driver_env")),"driver setting string round trip: "+value);
+        }
+        Files.write(file.toPath(),("quoted = \"a#b\\\"c\" # comment\nliteral = 'C:\\cache#here'\nunicode = \"\\u00e9\\U0001f697\"\ninvalid = \"\\q\"\nsurrogate = \"\\uD800\"\n").getBytes(StandardCharsets.UTF_8));
+        Map<String,String> read=MobileConfig.readFile(file);
+        check("a#b\"c".equals(read.get("quoted")),"quoted hash and escaped quote are preserved");
+        check("C:\\cache#here".equals(read.get("literal")),"TOML literal strings keep backslashes and hashes");
+        check("é🚗".equals(read.get("unicode")),"TOML Unicode escapes are decoded");
+        check(!read.containsKey("invalid")&&!read.containsKey("surrogate"),"invalid TOML escapes are not used as settings");
+    }
+    private static void reports(Path temp)throws Exception{
+        File cache=temp.resolve("report-cache").toFile();
+        File first=ReportFiles.create(cache,out->out.write(new byte[]{1,2,3}));
+        check(ReportFiles.resolve(cache,first.getName()).equals(first),"completed report can be resolved");
+        rejects(()->ReportFiles.resolve(cache,"../escape.zip"),"report URI cannot escape the report folder");
+        rejects(()->ReportFiles.resolve(cache,"report-draft.part"),"incomplete reports cannot be shared");
+        rejects(()->ReportFiles.create(cache,out->{out.write(9);throw new IOException("simulated write failure");}),"report write failure is reported");
+        check(Arrays.equals(Files.readAllBytes(first.toPath()),new byte[]{1,2,3}),"failed export preserves an existing shared report");
+        CountDownLatch ready=new CountDownLatch(2),release=new CountDownLatch(1);ExecutorService pool=Executors.newFixedThreadPool(2);
+        try{
+            Callable<File> export=()->ReportFiles.create(cache,out->{ready.countDown();try{if(!release.await(5,TimeUnit.SECONDS))throw new IOException("test timeout");}catch(InterruptedException e){throw new IOException(e);}out.write(7);});
+            Future<File> one=pool.submit(export),two=pool.submit(export);
+            check(ready.await(5,TimeUnit.SECONDS),"concurrent reports reach their independent staging files");
+            File[] completed=new File(cache,"reports").listFiles(f->f.getName().endsWith(".zip"));
+            check(completed!=null&&completed.length==1,"reports are only visible after completion");
+            release.countDown();File a=one.get(5,TimeUnit.SECONDS),b=two.get(5,TimeUnit.SECONDS);
+            check(!a.equals(b),"concurrent reports have distinct names");
+            check(Files.readAllBytes(a.toPath())[0]==7&&Files.readAllBytes(b.toPath())[0]==7,"concurrent report contents are complete");
+        }finally{release.countDown();pool.shutdownNow();}
+        File[] parts=new File(cache,"reports").listFiles(f->f.getName().endsWith(".part"));check(parts!=null&&parts.length==0,"report staging is cleaned after success and failure");
+    }
+    private static void operations(Path temp)throws Exception{
+        File session=temp.resolve("session/logs/android-session.txt").toFile();
+        GameSession.recordFile(session,true);check(GameSession.interruptedFile(session)>0,"running session is recoverable");
+        GameSession.recordFile(session,false);check(GameSession.interruptedFile(session)==0,"intentional exit clears recovery marker");
+        FileOperation cancelled=new FileOperation(null);cancelled.cancel();
+        check(cancelled.isCancelled(),"cancellation status survives alternative IO exception types");
+        rejects(()->{try(FileOperation scope=cancelled.attach()){FileOperation.check();}},"operation cancelled before start cannot write");
+        check(!Thread.currentThread().isInterrupted(),"cancelled scope does not leak interrupt state");
+        try(FileOperation scope=new FileOperation(null).attach()){
+            byte[] before=Files.readAllBytes(session.toPath());scope.cancel();
+            rejects(()->DiscImage.hash(session),"hash work can be cancelled");
+            check(Arrays.equals(before,Files.readAllBytes(session.toPath())),"cancelled checks do not modify input");
+        }
+        check(!Thread.currentThread().isInterrupted(),"finished scope clears its cancellation interrupt");
     }
     public static void main(String[] args)throws Exception{
         Path temp=Files.createTempDirectory("fh4droid-storage-test-");
-        try{saves(temp);discs(temp);layouts();System.out.println("PASS: "+checks+" mobile storage, ISO and layout checks");}
+        try{saves(temp);discs(temp);layouts();settings(temp);operations(temp);reports(temp);System.out.println("PASS: "+checks+" mobile storage, ISO, settings, operation, report and layout checks");}
         finally{SaveArchive.delete(temp.toFile());}
     }
 }

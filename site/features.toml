@@ -272,7 +272,7 @@ cells = ["yes", "yes", "yes", "yes"]
 [[platform]]
 feature = "Android launcher and touch editor"
 link = "android.md#launcher"
-cells = ["n/a", "n/a", "n/a", "partly: implemented; physical-device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: arrow/stick steering, sliding pedals, grouped accessible editor with value feedback and drawn icons; physical-device testing pending"]
 
 [[platform]]
 feature = "Direct ISO loading"
@@ -282,4 +282,4 @@ cells = ["n/a", "n/a", "n/a", "partly: base game; host support files cached; dev
 [[platform]]
 feature = "Phone save import/export and reports"
 link = "android.md#saves"
-cells = ["n/a", "n/a", "n/a", "partly: standard base-game profile; device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: standard base-game profile; separate completed report ZIPs; device testing pending"]

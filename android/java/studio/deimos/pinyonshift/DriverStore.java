@@ -13,10 +13,16 @@ final class DriverStore {
         for(String name:names){File dir=new File(root(c),name);dir.mkdirs();String[] entries=c.getAssets().list("drivers/"+name);if(entries==null)continue;
             for(String entry:entries){File to=new File(dir,entry);
                 // Always finish the complete copy before replacing an older asset.
-                if(to.isFile())continue;
+                if(to.isFile()){
+                    try(InputStream asset=c.getAssets().open("drivers/"+name+"/"+entry)){
+                        if(GameFiles.hash(asset).equals(DiscImage.hash(to)))continue;
+                    }
+                }
                 File temp=File.createTempFile("driver-",".install-part",dir);
-                try(InputStream in=c.getAssets().open("drivers/"+name+"/"+entry);OutputStream out=new FileOutputStream(temp)){byte[] b=new byte[65536];for(int n;(n=in.read(b))!=-1;)out.write(b,0,n);}
-                Files.move(temp.toPath(),to.toPath(),StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE);
+                try{
+                    try(InputStream in=c.getAssets().open("drivers/"+name+"/"+entry);OutputStream out=new FileOutputStream(temp)){byte[] b=new byte[65536];for(int n;(n=in.read(b))!=-1;)out.write(b,0,n);}
+                    Files.move(temp.toPath(),to.toPath(),StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE);
+                }finally{Files.deleteIfExists(temp.toPath());}
             }
         }
     }
@@ -24,11 +30,12 @@ final class DriverStore {
         root(c).mkdirs();File stage=Files.createTempDirectory(root(c).toPath(),".import-").toFile();boolean installed=false;
         try{long total=0;int count=0;Set<String> names=new HashSet<>();byte[] b=new byte[65536];
             try(ZipInputStream zip=new ZipInputStream(input)){for(ZipEntry e;(e=zip.getNextEntry())!=null;){
+                FileOperation.check();
                 if(++count>64)throw new IOException("Too many driver files.");String name=e.getName();
                 Path dest=stage.toPath().resolve(name).normalize();
                 if(name.indexOf('\\')>=0||name.indexOf('\0')>=0||dest.equals(stage.toPath())||!dest.startsWith(stage.toPath())||!names.add(dest.toString()))throw new IOException("Invalid driver package path.");
                 if(e.isDirectory()){Files.createDirectories(dest);continue;}Files.createDirectories(dest.getParent());
-                try(OutputStream out=Files.newOutputStream(dest,StandardOpenOption.CREATE_NEW)){for(int n;(n=zip.read(b))!=-1;){if((total+=n)>256L*1024*1024)throw new IOException("Driver ZIP is too large.");out.write(b,0,n);}}
+                try(OutputStream out=Files.newOutputStream(dest,StandardOpenOption.CREATE_NEW)){for(int n;(n=zip.read(b))!=-1;){FileOperation.check();if((total+=n)>256L*1024*1024)throw new IOException("Driver ZIP is too large.");out.write(b,0,n);}}
             }}
             library(stage);String name="imported-"+UUID.randomUUID().toString().substring(0,8);
             Files.move(stage.toPath(),new File(root(c),name).toPath(),StandardCopyOption.ATOMIC_MOVE);installed=true;return name;
