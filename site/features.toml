@@ -272,7 +272,7 @@ cells = ["yes", "yes", "yes", "yes"]
 [[platform]]
 feature = "Android launcher and touch editor"
 link = "android.md#launcher"
-cells = ["n/a", "n/a", "n/a", "partly: arrow/stick steering, sliding pedals, grouped accessible editor with value feedback and drawn icons; physical-device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: 20 editable controls with driving icons and vector Xbox hints, independent D-pad/look stick/stick clicks, arrow/stick steering and sliding pedals; updated controls await device testing"]
 
 [[platform]]
 feature = "Direct ISO loading"

@@ -8,7 +8,8 @@ final class TouchLayout {
     static final String[] LABELS=TouchIcons.NAMES;
     static final float[][] DEFAULTS={{.905f,.78f,.13f},{.745f,.84f,.10f},{.83f,.52f,.075f},{.93f,.43f,.075f},{.73f,.43f,.075f},
         {.83f,.34f,.075f},{.07f,.20f,.075f},{.93f,.20f,.075f},{.40f,.08f,.06f},{.60f,.08f,.06f},{.16f,.74f,.11f},
-        {.075f,.80f,.10f},{.215f,.80f,.10f}};
+        {.075f,.80f,.10f},{.215f,.80f,.10f},
+        {.535f,.80f,.085f},{.30f,.33f,.05f},{.30f,.55f,.05f},{.24f,.44f,.05f},{.36f,.44f,.05f},{.10f,.43f,.05f},{.535f,.53f,.05f}};
     final float[][] values=new float[LABELS.length][3];final boolean[] hidden=new boolean[LABELS.length];float opacity=.55f;boolean autoHide=true;
     String steering="arrows";
     int steeringResponseMs;boolean analogPedals,highContrast,haptics;
@@ -28,13 +29,13 @@ final class TouchLayout {
             else if(words.length==2&&words[0].equals("analog_pedals"))analogPedals=words[1].equals("1");
             else if(words.length==2&&words[0].equals("high_contrast"))highContrast=words[1].equals("1");
             else if(words.length==2&&words[0].equals("haptics"))haptics=words[1].equals("1");
-            else if(words.length==5){if(extended&&(words[0].equals("LEFT")||words[0].equals("RIGHT")))continue;
-                String name=words[0].equals("STEER-L")?"LEFT":words[0].equals("STEER-R")?"RIGHT":words[0];
+            else if(words.length==5){
+                String name=extended&&words[0].equals("LEFT")?"DPAD_LEFT":extended&&words[0].equals("RIGHT")?"DPAD_RIGHT":words[0].equals("STEER-L")?"LEFT":words[0].equals("STEER-R")?"RIGHT":words[0];
                 int i=Arrays.asList(LABELS).indexOf(name);float x=Float.parseFloat(words[1]),y=Float.parseFloat(words[2]),r=Float.parseFloat(words[3]);
                 if(i>=0&&Float.isFinite(x)&&Float.isFinite(y)&&Float.isFinite(r)){values[i][0]=Math.max(0,Math.min(1,x));values[i][1]=Math.max(0,Math.min(1,y));values[i][2]=Math.max(.035f,Math.min(.24f,r));hidden[i]=words[4].equals("1");}}
         }catch(NumberFormatException ignored){}}
     }
-    String serialize(){StringBuilder text=new StringBuilder("# FH4Droid touch layout v2\nopacity "+opacity+"\nauto_hide "+(autoHide?1:0)+"\nsteering "+steering+"\n");
+    String serialize(){StringBuilder text=new StringBuilder("# FH4Droid touch layout v3\nopacity "+opacity+"\nauto_hide "+(autoHide?1:0)+"\nsteering "+steering+"\n");
         text.append("steering_response_ms ").append(steeringResponseMs).append("\nanalog_pedals ").append(analogPedals?1:0).append("\nhigh_contrast ").append(highContrast?1:0).append("\nhaptics ").append(haptics?1:0).append('\n');
         for(int i=0;i<values.length;i++)text.append(String.format(Locale.ROOT,"%s %.6f %.6f %.6f %d%n",LABELS[i],values[i][0],values[i][1],values[i][2],hidden[i]?1:0));return text.toString();}
     static File file(android.content.Context c){return new File(MobileConfig.base(c),"state/config/touch-layout.txt");}

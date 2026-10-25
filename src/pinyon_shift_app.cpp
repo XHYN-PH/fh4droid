@@ -902,7 +902,7 @@ bool PinyonShiftApp::EnsureHostUi() {
         discs.push_back({shape.x, shape.y, shape.radius, shape.stick ? "" : shape.label,
                          shape.pressed && !shape.stick, pad.Opacity()});
         if (shape.stick) {
-          discs.push_back({shape.stick_x, shape.stick_y, shape.radius * 0.45f, "",
+          discs.push_back({shape.stick_x, shape.stick_y, shape.radius * 0.55f, shape.label,
                            shape.pressed, pad.Opacity()});
         }
       }

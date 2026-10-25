@@ -91,7 +91,7 @@ int main() {
   pad.LoadLayout(layout);
   CHECK(!Has(pad, "LEFT") && !Has(pad, "RIGHT"));
   CHECK(std::abs(Find(pad, "RT").x - 1024.f) < 0.01f);
-  for (auto shape : pad.Shapes(1280, 720)) if (shape.stick) {
+  for (auto shape : pad.Shapes(1280, 720)) if (shape.label == "LS") {
     CHECK(std::abs(shape.radius - 108.f) < .01f);
     Access::Touch(pad, 1, Action::kDown, shape.x, shape.y);
     Access::Touch(pad, 1, Action::kMove, shape.x + shape.radius, shape.y);
@@ -111,6 +111,8 @@ int main() {
   pad.LoadLayout(layout);
   CHECK(std::abs(Find(pad, "LEFT").x - 128.f) < .01f);
   CHECK(std::abs(Find(pad, "RIGHT").x - 358.4f) < .01f);
+  CHECK(std::abs(Find(pad, "DPAD_LEFT").x - 768.f) < .01f);
+  CHECK(std::abs(Find(pad, "DPAD_RIGHT").x - 896.f) < .01f);
   Press(pad, 1, "LEFT"); CHECK(pad.State().thumb_lx == -32767); Release(pad, 1);
   { std::ofstream out(layout); out << "steering_buttons 0\n"; }
   pad.LoadLayout(layout); CHECK(Has(pad, "LS") && !Has(pad, "LEFT"));
@@ -135,14 +137,68 @@ int main() {
   pad.SetSuspended(true); CHECK(pad.State().left_trigger == 0 && pad.State().thumb_lx == 0);
   pad.SetSuspended(false);
 
-  // Every active control has drawable artwork without loading a game font.
+  // The complete controller stays independent of racing steering arrows.
+  pad.LoadLayout(root / "default-full-controller.txt");
+  CHECK(Has(pad, "RS") && Has(pad, "UP") && Has(pad, "DOWN") &&
+        Has(pad, "DPAD_LEFT") && Has(pad, "DPAD_RIGHT") && Has(pad, "L3") && Has(pad, "R3"));
+  const struct { const char* name; uint16_t bit; } buttons[] = {
+      {"A", rex::input::X_INPUT_GAMEPAD_A}, {"B", rex::input::X_INPUT_GAMEPAD_B},
+      {"X", rex::input::X_INPUT_GAMEPAD_X}, {"Y", rex::input::X_INPUT_GAMEPAD_Y},
+      {"LB", rex::input::X_INPUT_GAMEPAD_LEFT_SHOULDER},
+      {"RB", rex::input::X_INPUT_GAMEPAD_RIGHT_SHOULDER},
+      {"BACK", rex::input::X_INPUT_GAMEPAD_BACK}, {"START", rex::input::X_INPUT_GAMEPAD_START},
+      {"UP", rex::input::X_INPUT_GAMEPAD_DPAD_UP}, {"DOWN", rex::input::X_INPUT_GAMEPAD_DPAD_DOWN},
+      {"DPAD_LEFT", rex::input::X_INPUT_GAMEPAD_DPAD_LEFT},
+      {"DPAD_RIGHT", rex::input::X_INPUT_GAMEPAD_DPAD_RIGHT},
+      {"L3", rex::input::X_INPUT_GAMEPAD_LEFT_THUMB}, {"R3", rex::input::X_INPUT_GAMEPAD_RIGHT_THUMB},
+  };
+  for (const auto& button : buttons) {
+    Press(pad, 1, button.name);
+    CHECK(pad.State().buttons == button.bit && pad.State().thumb_lx == 0 && pad.State().thumb_rx == 0);
+    Release(pad, 1); CHECK(pad.State().buttons == 0);
+  }
+  Press(pad, 1, "UP"); Press(pad, 2, "DPAD_RIGHT"); Press(pad, 3, "LEFT");
+  CHECK(pad.State().buttons == (rex::input::X_INPUT_GAMEPAD_DPAD_UP | rex::input::X_INPUT_GAMEPAD_DPAD_RIGHT));
+  CHECK(pad.State().thumb_lx == -32767);
+  const auto down = Find(pad, "DOWN");
+  Access::Touch(pad, 1, Action::kMove, down.x, down.y);
+  CHECK(pad.State().buttons == (rex::input::X_INPUT_GAMEPAD_DPAD_DOWN | rex::input::X_INPUT_GAMEPAD_DPAD_RIGHT));
+  Press(pad, 4, "UP");
+  CHECK(pad.State().buttons == rex::input::X_INPUT_GAMEPAD_DPAD_RIGHT);
+  Access::Touch(pad, 1, Action::kMove, 640, 200);
+  CHECK(pad.State().buttons == (rex::input::X_INPUT_GAMEPAD_DPAD_UP | rex::input::X_INPUT_GAMEPAD_DPAD_RIGHT));
+  Access::Touch(pad, 1, Action::kCancel, 0, 0);
+  CHECK(pad.State().buttons == 0 && pad.State().thumb_lx == 0);
+  Press(pad, 1, "DPAD_LEFT"); Press(pad, 2, "DPAD_RIGHT");
+  CHECK(pad.State().buttons == 0);
+  Release(pad, 1); CHECK(pad.State().buttons == rex::input::X_INPUT_GAMEPAD_DPAD_RIGHT);
+  Release(pad, 2);
+
+  const auto look = Find(pad, "RS");
+  Press(pad, 1, "RS"); Press(pad, 2, "LEFT"); Press(pad, 3, "RT");
+  Access::Touch(pad, 1, Action::kMove, look.x + look.radius, look.y - look.radius);
+  CHECK(pad.State().thumb_rx == 32767 && pad.State().thumb_ry == 32767);
+  CHECK(pad.State().thumb_lx == -32767 && pad.State().right_trigger == 255);
+  Press(pad, 4, "RS");  // Another finger cannot steal the held look stick.
+  CHECK(pad.State().thumb_rx == 32767 && pad.State().thumb_ry == 32767);
+  Release(pad, 4); Release(pad, 1);
+  CHECK(pad.State().thumb_rx == 0 && pad.State().thumb_ry == 0);
+  CHECK(pad.State().thumb_lx == -32767 && pad.State().right_trigger == 255);
+  pad.SetSuspended(true); CHECK(pad.State().thumb_lx == 0 && pad.State().right_trigger == 0);
+  pad.SetSuspended(false);
+
+  // Every active control has drawable artwork and prompt hints without fonts.
   for (const auto& shape : pad.Shapes(1280, 720)) {
     const auto* icon = pinyon_shift::ui::FindTouchIcon(shape.label);
     CHECK(icon && !icon->lines.empty());
-    if (icon) for (const auto& line : icon->lines) {
+    if (icon) for (auto paths : {icon->lines, icon->hints}) for (const auto& line : paths) {
       CHECK(std::isfinite(line.x0) && std::isfinite(line.y0) && std::isfinite(line.x1) && std::isfinite(line.y1));
       CHECK(std::abs(line.x0) < icon->width && std::abs(line.x1) < icon->width);
       CHECK(std::abs(line.y0) < icon->height && std::abs(line.y1) < icon->height);
+      if (!icon->rectangular) {
+        CHECK(std::hypot(line.x0 / icon->width, line.y0 / icon->height) < .98f);
+        CHECK(std::hypot(line.x1 / icon->width, line.y1 / icon->height) < .98f);
+      }
     }
   }
   std::filesystem::remove_all(root);

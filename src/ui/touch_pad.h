@@ -70,12 +70,20 @@ class TouchPad final : public rex::ui::WindowInputListener {
     kRightBumper,
     kBack,
     kStart,
+    kRightStick,
+    kDpadUp,
+    kDpadDown,
+    kDpadLeft,
+    kDpadRight,
+    kLeftStickClick,
+    kRightStickClick,
   };
   struct Finger {
     Control control = Control::kNone;
     float origin_x = 0.0f, origin_y = 0.0f;  // the stick's centre
     float x = 0.0f, y = 0.0f;
     bool arrow = false;
+    bool dpad = false;
   };
   struct Layout {
     Control control;
@@ -100,6 +108,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
   void Place(const Layout& control, float width, float height, float& x, float& y) const;
   Control Hit(float x, float y, float width, float height) const;
   bool Enabled(Control control) const;
+  static bool IsDpad(Control control);
   // Event adapter and tests share the same state transitions; mutex_ is held.
   void HandleTouch(rex::ui::TouchEvent& e, float width, float height);
   void Changed();

@@ -97,11 +97,16 @@ public final class MobileStorageTest {
         check(Arrays.equals(TouchLayout.LABELS,TouchIcons.NAMES),"every editor control has a matching vector icon");
         TouchLayout upgraded=new TouchLayout();upgraded.parse("steering_buttons 1\nLEFT 0.6 0.5 0.045 0\nRIGHT 0.7 0.5 0.045 0\nSTEER-L 0.1 0.8 0.08 0\nSTEER-R 0.28 0.8 0.08 0\n");
         check(upgraded.steering.equals("arrows")&&Math.abs(upgraded.values[left][0]-.1f)<.00001f&&Math.abs(upgraded.values[right][0]-.28f)<.00001f,"upgrade keeps steering positions separate from old D-pad positions");
+        int dpadLeft=Arrays.asList(TouchLayout.LABELS).indexOf("DPAD_LEFT"),dpadRight=Arrays.asList(TouchLayout.LABELS).indexOf("DPAD_RIGHT");
+        check(Math.abs(upgraded.values[dpadLeft][0]-.6f)<.00001f&&Math.abs(upgraded.values[dpadRight][0]-.7f)<.00001f,"upgrade also retains the independent D-pad positions");
         upgraded.parse("steering_buttons 0\n");check(upgraded.steering.equals("stick"),"upgrade preserves the previous stick selection");
         TouchLayout resaved=new TouchLayout();resaved.parse(upgraded.serialize());check(resaved.steering.equals("stick")&&Math.abs(resaved.values[left][0]-.1f)<.00001f,"migrated layout round trips without changing arrow positions");
         for(int i=0;i<TouchIcons.NAMES.length;i++){
             check(TouchIcons.LINES[i].length>=4&&TouchIcons.LINES[i].length%4==0,"icon contains complete segments: "+TouchIcons.NAMES[i]);
-            for(int j=0;j<TouchIcons.LINES[i].length;j++)check(Float.isFinite(TouchIcons.LINES[i][j])&&Math.abs(TouchIcons.LINES[i][j])<TouchIcons.BOUNDS[i][j%2],"icon is inside its hit target: "+TouchIcons.NAMES[i]);
+            for(float[] paths:new float[][]{TouchIcons.LINES[i],TouchIcons.HINTS[i]})
+                for(int j=0;j<paths.length;j++)check(Float.isFinite(paths[j])&&Math.abs(paths[j])<TouchIcons.BOUNDS[i][j%2],"icon and prompt hint stay inside their hit target: "+TouchIcons.NAMES[i]);
+            if(!TouchIcons.RECT[i])for(float[] paths:new float[][]{TouchIcons.LINES[i],TouchIcons.HINTS[i]})
+                for(int j=0;j<paths.length;j+=2)check(Math.hypot(paths[j]/TouchIcons.BOUNDS[i][0],paths[j+1]/TouchIcons.BOUNDS[i][1])<.98,"round button does not clip its icon or prompt hint: "+TouchIcons.NAMES[i]);
         }
     }
     private static void settings(Path temp)throws Exception{

@@ -797,11 +797,14 @@ void HostUi::DrawOverlay(rex::ui::UIDrawContext& context) {
                    disc.radius * (icon ? icon->height : 1.f), icon && icon->rectangular,
                    stroke, Rgba(12, 10, 12, int(180 * opacity)), outline);
     if (icon) {
-      for (const auto& line : icon->lines) {
-        DrawTouchStroke(disc.x + line.x0 * disc.radius, disc.y + line.y0 * disc.radius,
-                        disc.x + line.x1 * disc.radius, disc.y + line.y1 * disc.radius,
-                        stroke * 1.25f, outline);
-      }
+      const auto lines = [&](std::span<const ui::TouchLine> paths, float thickness) {
+        for (const auto& line : paths)
+          DrawTouchStroke(disc.x + line.x0 * disc.radius, disc.y + line.y0 * disc.radius,
+                          disc.x + line.x1 * disc.radius, disc.y + line.y1 * disc.radius,
+                          thickness, outline);
+      };
+      lines(icon->lines, stroke * 1.25f);
+      lines(icon->hints, stroke * .6f);
     }
   }
   Flush();

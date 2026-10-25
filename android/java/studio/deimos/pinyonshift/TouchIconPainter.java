@@ -21,11 +21,15 @@ final class TouchIconPainter {
         canvas.drawRoundRect(x-w+stroke/2,y-h+stroke/2,x+w-stroke/2,y+h-stroke/2,
             Math.max(0,corner-stroke/2),Math.max(0,corner-stroke/2),paint);
         paint.setPathEffect(null);paint.setStrokeWidth(stroke*1.25f);paint.setStrokeCap(Paint.Cap.BUTT);
-        float[] lines=TouchIcons.LINES[icon];
+        drawLines(canvas,paint,TouchIcons.LINES[icon],x,y,radius);
+        paint.setStrokeWidth(stroke*.6f);
+        drawLines(canvas,paint,TouchIcons.HINTS[icon],x,y,radius);
+        paint.setStyle(Paint.Style.FILL);paint.setAlpha(255);
+    }
+    private static void drawLines(Canvas canvas,Paint paint,float[] lines,float x,float y,float radius){
         for(int i=0;i<lines.length;i+=4)
             canvas.drawLine(x+lines[i]*radius,y+lines[i+1]*radius,
                 x+lines[i+2]*radius,y+lines[i+3]*radius,paint);
-        paint.setStyle(Paint.Style.FILL);paint.setAlpha(255);
     }
     private TouchIconPainter(){}
 }

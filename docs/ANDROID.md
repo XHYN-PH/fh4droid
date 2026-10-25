@@ -233,10 +233,17 @@ crash reports and route output to `.local/android/device-logs/`.
 A controller (built in, Bluetooth or USB) works as on the PC. On a touch
 screen, the default controls have separate left/right steering arrows,
 accelerator (RT) and brake (LT) pedal pictograms, A, B, X, Y, the bumpers,
-Back and Start. Both arrows held together give neutral steering. Controls →
+Back and Start, a right look stick, four separate D-pad directions and both
+stick clicks. Both arrows held together give neutral steering. Controls →
 Steering in the touch editor switches between Arrows and the original Stick,
 keeping saved positions for both. Icons use shared drawn paths rather than
-game fonts. Held controls stay visible; idle controls hide 20 seconds after
+game fonts. Driving symbols show handbrake (A), shift up (B), shift down (X),
+rewind (Y), clutch (LB), camera (RB), map (Back) and pause (Start), with small
+drawn Xbox hints for menu prompts. These action names assume default game
+bindings. The D-pad remains independent of steering; L3/R3 press the stick
+buttons and the right stick controls the camera. All 20 editable controls,
+including the optional left steering stick, have shared vector artwork.
+Held controls stay visible; idle controls hide 20 seconds after
 release. Controller auto-hide can be changed in the editor
 (`pinyon_shift_touch_controls` turns the overlay off).
 
