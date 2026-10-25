@@ -44,7 +44,7 @@ Controls opens a full-screen touch editor with a movable, collapsible toolbar an
 
 **Steering: Arrows / Stick** is available both in Touch settings and the editor. Switching preserves positions for both. The left and right sticks each offer floating, fixed and invisible modes. Invisible sticks use the corresponding lower screen region; visible buttons take priority. The independent D-pad and look stick remain available. Older layouts retain their positions, including the hotfix's separate D-pad and steering controls.
 
-Local named layouts, left/right-handed templates, compact driving and full-controller templates help configure the pad. Switching between driving and controller styles remembers each style separately. Layout document import/export is not provided.
+Local named layouts, left/right-handed templates, compact driving and full-controller templates help configure the pad. Full controller selects stick steering and Xbox labels; driving templates use arrows and racing artwork. Switching between driving and controller styles remembers each style separately. Layout document import/export is not provided.
 
 Held controls remain visible. Global and per-control idle timers control fading; controller auto-hide is optional. Cancellation, menus, controller changes and lifecycle suspension release touch input. Driving options include immediate/120 ms/240 ms arrow response, optional sliding pedals, high contrast, drawn Xbox prompt hints and touch haptics. Action icons assume default game bindings and do not remap buttons.
 

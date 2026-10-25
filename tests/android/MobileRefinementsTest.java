@@ -52,7 +52,9 @@ public final class MobileRefinementsTest {
       check(restored.steering.equals("stick")&&restored.leftMode==2&&restored.rightMode==1,"steering and both stick modes survive saving");
       check(restored.timeout[5]==3&&restored.idleSeconds==0&&!restored.drivingLabels&&!restored.buttonHints&&restored.highContrast&&restored.analogPedals,"new and existing touch preferences roundtrip together");
       restored.parse("timeout Y NaN\nidle_seconds Infinity\nleft_mode 999\nright_mode -9\n");check(restored.timeout[5]==3&&restored.idleSeconds==0&&restored.leftMode==2&&restored.rightMode==0,"invalid timers and modes are rejected or bounded");
-      TouchLayout compact=LayoutProfiles.template(false,true),full=LayoutProfiles.template(false,false),left=LayoutProfiles.template(true,false);
+      TouchLayout compact=LayoutProfiles.template(false,true),full=LayoutProfiles.controllerTemplate(),left=LayoutProfiles.template(true,false);
+      check(full.steering.equals("stick")&&!full.drivingLabels,"full controller template uses a steering stick and Xbox labels");
+      check(compact.steering.equals("arrows")&&compact.drivingLabels,"driving template retains arrows and racing artwork");
       for(int i=0;i<TouchLayout.LABELS.length;i++)check(Math.abs(left.values[i][0]-(1-full.values[i][0]))<.00001f,"handed template mirrors every control");
       int look=Arrays.asList(TouchLayout.LABELS).indexOf("RS");check(compact.hidden[look]&&!full.hidden[look],"compact preset keeps optional full-controller buttons selectable");
       boolean invalid=false;try{LayoutProfiles.name("../outside");}catch(IOException expected){invalid=true;}check(invalid,"named layouts cannot escape their folder");

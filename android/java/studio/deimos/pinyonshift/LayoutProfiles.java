@@ -36,7 +36,7 @@ final class LayoutProfiles {
       FestivalUi.action(a,body,(left?"Left":"Right")+"-handed driving template",()->apply(a,template(left,false)));
     }
     FestivalUi.action(a,body,"Compact driving template",()->apply(a,template(false,true)));
-    FestivalUi.action(a,body,"Full controller template",()->apply(a,template(false,false)));
+    FestivalUi.action(a,body,"Full controller template",()->apply(a,controllerTemplate()));
     File[] files=folder(a).listFiles(f->f.isFile()&&!Files.isSymbolicLink(f.toPath())&&f.getName().endsWith(".layout"));
     if(files!=null){
       Arrays.sort(files,Comparator.comparing(File::getName));
@@ -63,6 +63,12 @@ final class LayoutProfiles {
     if(left)for(float[] point:layout.values)point[0]=1-point[0];
     if(compact)for(int i=0;i<TouchLayout.LABELS.length;i++)
       if(Arrays.asList("RS","UP","DOWN","DPAD_LEFT","DPAD_RIGHT","L3","R3").contains(TouchLayout.LABELS[i]))layout.hidden[i]=true;
+    return layout;
+  }
+  static TouchLayout controllerTemplate(){
+    TouchLayout layout=template(false,false);
+    layout.steering="stick";
+    layout.drivingLabels=false;
     return layout;
   }
   private static void apply(Activity a,TouchLayout layout){
