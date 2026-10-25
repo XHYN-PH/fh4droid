@@ -4,7 +4,7 @@
 #include <string_view>
 namespace pinyon_shift::ui {
 struct TouchLine { float x0, y0, x1, y1; };
-struct TouchIcon { std::string_view name; float width, height; bool rectangular; std::span<const TouchLine> lines, hints; };
+struct TouchIcon { std::string_view name; float width, height; bool rectangular; std::span<const TouchLine> lines, hints, classic; };
 inline constexpr TouchLine kTouchLinesRT[] = {
     {-0.330000f,-0.660000f,0.330000f,-0.660000f},
     {0.330000f,-0.660000f,0.330000f,0.360000f},
@@ -24,6 +24,17 @@ inline constexpr TouchLine kTouchHintsRT[] = {
     {0.048000f,0.640000f,0.240000f,0.640000f},
     {0.144000f,0.640000f,0.144000f,0.880000f},
 };
+inline constexpr TouchLine kTouchClassicRT[] = {
+    {-0.406000f,0.203000f,-0.406000f,-0.203000f},
+    {-0.406000f,-0.203000f,-0.182700f,-0.203000f},
+    {-0.182700f,-0.203000f,-0.081200f,-0.121800f},
+    {-0.081200f,-0.121800f,-0.081200f,-0.060900f},
+    {-0.081200f,-0.060900f,-0.182700f,0.000000f},
+    {-0.182700f,0.000000f,-0.406000f,0.000000f},
+    {-0.243600f,0.000000f,-0.081200f,0.203000f},
+    {0.081200f,-0.203000f,0.406000f,-0.203000f},
+    {0.243600f,-0.203000f,0.243600f,0.203000f},
+};
 inline constexpr TouchLine kTouchLinesLT[] = {
     {-0.580000f,-0.430000f,0.580000f,-0.430000f},
     {0.580000f,-0.430000f,0.580000f,0.120000f},
@@ -37,6 +48,12 @@ inline constexpr TouchLine kTouchHintsLT[] = {
     {-0.240000f,0.600000f,-0.048000f,0.600000f},
     {0.048000f,0.360000f,0.240000f,0.360000f},
     {0.144000f,0.360000f,0.144000f,0.600000f},
+};
+inline constexpr TouchLine kTouchClassicLT[] = {
+    {-0.630000f,-0.315000f,-0.630000f,0.315000f},
+    {-0.630000f,0.315000f,-0.126000f,0.315000f},
+    {0.126000f,-0.315000f,0.630000f,-0.315000f},
+    {0.378000f,-0.315000f,0.378000f,0.315000f},
 };
 inline constexpr TouchLine kTouchLinesA[] = {
     {-0.120000f,0.280000f,-0.120000f,-0.440000f},
@@ -57,6 +74,11 @@ inline constexpr TouchLine kTouchHintsA[] = {
     {0.000000f,0.640000f,0.096000f,0.880000f},
     {-0.057600f,0.784000f,0.057600f,0.784000f},
 };
+inline constexpr TouchLine kTouchClassicA[] = {
+    {-0.280000f,0.350000f,0.000000f,-0.350000f},
+    {0.000000f,-0.350000f,0.280000f,0.350000f},
+    {-0.168000f,0.070000f,0.168000f,0.070000f},
+};
 inline constexpr TouchLine kTouchLinesB[] = {
     {0.000000f,0.300000f,0.000000f,-0.540000f},
     {-0.380000f,-0.160000f,0.000000f,-0.540000f},
@@ -74,6 +96,18 @@ inline constexpr TouchLine kTouchHintsB[] = {
     {0.096000f,0.676000f,0.036000f,0.640000f},
     {0.036000f,0.640000f,-0.096000f,0.640000f},
 };
+inline constexpr TouchLine kTouchClassicB[] = {
+    {-0.280000f,-0.350000f,-0.280000f,0.350000f},
+    {-0.280000f,0.350000f,0.105000f,0.350000f},
+    {0.105000f,0.350000f,0.280000f,0.210000f},
+    {0.280000f,0.210000f,0.280000f,0.105000f},
+    {0.280000f,0.105000f,0.105000f,0.000000f},
+    {0.105000f,0.000000f,-0.280000f,0.000000f},
+    {0.105000f,0.000000f,0.280000f,-0.140000f},
+    {0.280000f,-0.140000f,0.280000f,-0.245000f},
+    {0.280000f,-0.245000f,0.105000f,-0.350000f},
+    {0.105000f,-0.350000f,-0.280000f,-0.350000f},
+};
 inline constexpr TouchLine kTouchLinesX[] = {
     {0.000000f,-0.540000f,0.000000f,0.300000f},
     {-0.380000f,-0.080000f,0.000000f,0.300000f},
@@ -82,6 +116,10 @@ inline constexpr TouchLine kTouchLinesX[] = {
 inline constexpr TouchLine kTouchHintsX[] = {
     {-0.096000f,0.640000f,0.096000f,0.880000f},
     {0.096000f,0.640000f,-0.096000f,0.880000f},
+};
+inline constexpr TouchLine kTouchClassicX[] = {
+    {-0.280000f,-0.350000f,0.280000f,0.350000f},
+    {0.280000f,-0.350000f,-0.280000f,0.350000f},
 };
 inline constexpr TouchLine kTouchLinesY[] = {
     {-0.080000f,-0.520000f,-0.650000f,-0.100000f},
@@ -95,6 +133,11 @@ inline constexpr TouchLine kTouchHintsY[] = {
     {-0.096000f,0.640000f,0.000000f,0.760000f},
     {0.000000f,0.760000f,0.096000f,0.640000f},
     {0.000000f,0.760000f,0.000000f,0.880000f},
+};
+inline constexpr TouchLine kTouchClassicY[] = {
+    {-0.280000f,-0.350000f,0.000000f,0.000000f},
+    {0.000000f,0.000000f,0.280000f,-0.350000f},
+    {0.000000f,0.000000f,0.000000f,0.350000f},
 };
 inline constexpr TouchLine kTouchLinesLB[] = {
     {-0.450000f,-0.480000f,0.300000f,-0.480000f},
@@ -120,6 +163,20 @@ inline constexpr TouchLine kTouchHintsLB[] = {
     {0.240000f,0.412000f,0.240000f,0.376000f},
     {0.240000f,0.376000f,0.180000f,0.340000f},
     {0.180000f,0.340000f,0.048000f,0.340000f},
+};
+inline constexpr TouchLine kTouchClassicLB[] = {
+    {-0.700000f,-0.350000f,-0.700000f,0.350000f},
+    {-0.700000f,0.350000f,-0.140000f,0.350000f},
+    {0.140000f,-0.350000f,0.140000f,0.350000f},
+    {0.140000f,0.350000f,0.525000f,0.350000f},
+    {0.525000f,0.350000f,0.700000f,0.210000f},
+    {0.700000f,0.210000f,0.700000f,0.105000f},
+    {0.700000f,0.105000f,0.525000f,0.000000f},
+    {0.525000f,0.000000f,0.140000f,0.000000f},
+    {0.525000f,0.000000f,0.700000f,-0.140000f},
+    {0.700000f,-0.140000f,0.700000f,-0.245000f},
+    {0.700000f,-0.245000f,0.525000f,-0.350000f},
+    {0.525000f,-0.350000f,0.140000f,-0.350000f},
 };
 inline constexpr TouchLine kTouchLinesRB[] = {
     {-0.660000f,-0.320000f,-0.250000f,-0.320000f},
@@ -155,6 +212,25 @@ inline constexpr TouchLine kTouchHintsRB[] = {
     {0.240000f,0.412000f,0.240000f,0.376000f},
     {0.240000f,0.376000f,0.180000f,0.340000f},
     {0.180000f,0.340000f,0.048000f,0.340000f},
+};
+inline constexpr TouchLine kTouchClassicRB[] = {
+    {-0.700000f,0.350000f,-0.700000f,-0.350000f},
+    {-0.700000f,-0.350000f,-0.315000f,-0.350000f},
+    {-0.315000f,-0.350000f,-0.140000f,-0.210000f},
+    {-0.140000f,-0.210000f,-0.140000f,-0.105000f},
+    {-0.140000f,-0.105000f,-0.315000f,0.000000f},
+    {-0.315000f,0.000000f,-0.700000f,0.000000f},
+    {-0.420000f,0.000000f,-0.140000f,0.350000f},
+    {0.140000f,-0.350000f,0.140000f,0.350000f},
+    {0.140000f,0.350000f,0.525000f,0.350000f},
+    {0.525000f,0.350000f,0.700000f,0.210000f},
+    {0.700000f,0.210000f,0.700000f,0.105000f},
+    {0.700000f,0.105000f,0.525000f,0.000000f},
+    {0.525000f,0.000000f,0.140000f,0.000000f},
+    {0.525000f,0.000000f,0.700000f,-0.140000f},
+    {0.700000f,-0.140000f,0.700000f,-0.245000f},
+    {0.700000f,-0.245000f,0.525000f,-0.350000f},
+    {0.525000f,-0.350000f,0.140000f,-0.350000f},
 };
 inline constexpr TouchLine kTouchLinesBACK[] = {
     {-0.650000f,-0.480000f,-0.220000f,-0.650000f},
@@ -193,6 +269,31 @@ inline constexpr TouchLine kTouchHintsBACK[] = {
     {0.440000f,0.580000f,0.280000f,0.680000f},
     {0.280000f,0.680000f,0.440000f,0.780000f},
 };
+inline constexpr TouchLine kTouchClassicBACK[] = {
+    {-0.700000f,-0.159091f,-0.700000f,0.159091f},
+    {-0.700000f,0.159091f,-0.525000f,0.159091f},
+    {-0.525000f,0.159091f,-0.445455f,0.095455f},
+    {-0.445455f,0.095455f,-0.445455f,0.047727f},
+    {-0.445455f,0.047727f,-0.525000f,0.000000f},
+    {-0.525000f,0.000000f,-0.700000f,0.000000f},
+    {-0.525000f,0.000000f,-0.445455f,-0.063636f},
+    {-0.445455f,-0.063636f,-0.445455f,-0.111364f},
+    {-0.445455f,-0.111364f,-0.525000f,-0.159091f},
+    {-0.525000f,-0.159091f,-0.700000f,-0.159091f},
+    {-0.318182f,0.159091f,-0.190909f,-0.159091f},
+    {-0.190909f,-0.159091f,-0.063636f,0.159091f},
+    {-0.267273f,0.031818f,-0.114545f,0.031818f},
+    {0.318182f,-0.127273f,0.254545f,-0.159091f},
+    {0.254545f,-0.159091f,0.127273f,-0.159091f},
+    {0.127273f,-0.159091f,0.063636f,-0.095455f},
+    {0.063636f,-0.095455f,0.063636f,0.095455f},
+    {0.063636f,0.095455f,0.127273f,0.159091f},
+    {0.127273f,0.159091f,0.254545f,0.159091f},
+    {0.254545f,0.159091f,0.318182f,0.127273f},
+    {0.445455f,-0.159091f,0.445455f,0.159091f},
+    {0.700000f,-0.159091f,0.445455f,0.000000f},
+    {0.445455f,0.000000f,0.700000f,0.159091f},
+};
 inline constexpr TouchLine kTouchLinesSTART[] = {
     {-0.240000f,-0.550000f,-0.240000f,0.300000f},
     {0.240000f,-0.550000f,0.240000f,0.300000f},
@@ -220,6 +321,30 @@ inline constexpr TouchLine kTouchHintsSTART[] = {
     {0.240000f,0.680000f,0.320000f,0.780000f},
     {0.400000f,0.580000f,0.560000f,0.580000f},
     {0.480000f,0.580000f,0.480000f,0.780000f},
+};
+inline constexpr TouchLine kTouchClassicSTART[] = {
+    {-0.500000f,-0.100000f,-0.550000f,-0.125000f},
+    {-0.550000f,-0.125000f,-0.650000f,-0.125000f},
+    {-0.650000f,-0.125000f,-0.700000f,-0.075000f},
+    {-0.700000f,-0.075000f,-0.650000f,0.000000f},
+    {-0.650000f,0.000000f,-0.550000f,0.000000f},
+    {-0.550000f,0.000000f,-0.500000f,0.075000f},
+    {-0.500000f,0.075000f,-0.550000f,0.125000f},
+    {-0.550000f,0.125000f,-0.700000f,0.125000f},
+    {-0.400000f,-0.125000f,-0.200000f,-0.125000f},
+    {-0.300000f,-0.125000f,-0.300000f,0.125000f},
+    {-0.100000f,0.125000f,0.000000f,-0.125000f},
+    {0.000000f,-0.125000f,0.100000f,0.125000f},
+    {-0.060000f,0.025000f,0.060000f,0.025000f},
+    {0.200000f,0.125000f,0.200000f,-0.125000f},
+    {0.200000f,-0.125000f,0.337500f,-0.125000f},
+    {0.337500f,-0.125000f,0.400000f,-0.075000f},
+    {0.400000f,-0.075000f,0.400000f,-0.037500f},
+    {0.400000f,-0.037500f,0.337500f,0.000000f},
+    {0.337500f,0.000000f,0.200000f,0.000000f},
+    {0.300000f,0.000000f,0.400000f,0.125000f},
+    {0.500000f,-0.125000f,0.700000f,-0.125000f},
+    {0.600000f,-0.125000f,0.600000f,0.125000f},
 };
 inline constexpr TouchLine kTouchLinesLS[] = {
     {0.000000f,-0.620000f,0.300000f,-0.540000f},
@@ -249,11 +374,31 @@ inline constexpr TouchLine kTouchHintsLS[] = {
     {0.240000f,0.832000f,0.192000f,0.880000f},
     {0.192000f,0.880000f,0.048000f,0.880000f},
 };
+inline constexpr TouchLine kTouchClassicLS[] = {
+    {-0.700000f,-0.350000f,-0.700000f,0.350000f},
+    {-0.700000f,0.350000f,-0.140000f,0.350000f},
+    {0.700000f,-0.280000f,0.560000f,-0.350000f},
+    {0.560000f,-0.350000f,0.280000f,-0.350000f},
+    {0.280000f,-0.350000f,0.140000f,-0.210000f},
+    {0.140000f,-0.210000f,0.280000f,0.000000f},
+    {0.280000f,0.000000f,0.560000f,0.000000f},
+    {0.560000f,0.000000f,0.700000f,0.210000f},
+    {0.700000f,0.210000f,0.560000f,0.350000f},
+    {0.560000f,0.350000f,0.140000f,0.350000f},
+};
 inline constexpr TouchLine kTouchLinesLEFT[] = {
     {0.250000f,-0.450000f,-0.250000f,0.000000f},
     {-0.250000f,0.000000f,0.250000f,0.450000f},
 };
+inline constexpr TouchLine kTouchClassicLEFT[] = {
+    {0.250000f,-0.450000f,-0.250000f,0.000000f},
+    {-0.250000f,0.000000f,0.250000f,0.450000f},
+};
 inline constexpr TouchLine kTouchLinesRIGHT[] = {
+    {-0.250000f,-0.450000f,0.250000f,0.000000f},
+    {0.250000f,0.000000f,-0.250000f,0.450000f},
+};
+inline constexpr TouchLine kTouchClassicRIGHT[] = {
     {-0.250000f,-0.450000f,0.250000f,0.000000f},
     {0.250000f,0.000000f,-0.250000f,0.450000f},
 };
@@ -288,7 +433,29 @@ inline constexpr TouchLine kTouchHintsRS[] = {
     {0.240000f,0.832000f,0.192000f,0.880000f},
     {0.192000f,0.880000f,0.048000f,0.880000f},
 };
+inline constexpr TouchLine kTouchClassicRS[] = {
+    {-0.700000f,0.350000f,-0.700000f,-0.350000f},
+    {-0.700000f,-0.350000f,-0.315000f,-0.350000f},
+    {-0.315000f,-0.350000f,-0.140000f,-0.210000f},
+    {-0.140000f,-0.210000f,-0.140000f,-0.105000f},
+    {-0.140000f,-0.105000f,-0.315000f,0.000000f},
+    {-0.315000f,0.000000f,-0.700000f,0.000000f},
+    {-0.420000f,0.000000f,-0.140000f,0.350000f},
+    {0.700000f,-0.280000f,0.560000f,-0.350000f},
+    {0.560000f,-0.350000f,0.280000f,-0.350000f},
+    {0.280000f,-0.350000f,0.140000f,-0.210000f},
+    {0.140000f,-0.210000f,0.280000f,0.000000f},
+    {0.280000f,0.000000f,0.560000f,0.000000f},
+    {0.560000f,0.000000f,0.700000f,0.210000f},
+    {0.700000f,0.210000f,0.560000f,0.350000f},
+    {0.560000f,0.350000f,0.140000f,0.350000f},
+};
 inline constexpr TouchLine kTouchLinesUP[] = {
+    {0.000000f,0.480000f,0.000000f,-0.480000f},
+    {-0.350000f,-0.100000f,0.000000f,-0.480000f},
+    {0.000000f,-0.480000f,0.350000f,-0.100000f},
+};
+inline constexpr TouchLine kTouchClassicUP[] = {
     {0.000000f,0.480000f,0.000000f,-0.480000f},
     {-0.350000f,-0.100000f,0.000000f,-0.480000f},
     {0.000000f,-0.480000f,0.350000f,-0.100000f},
@@ -298,12 +465,27 @@ inline constexpr TouchLine kTouchLinesDOWN[] = {
     {-0.350000f,0.100000f,0.000000f,0.480000f},
     {0.000000f,0.480000f,0.350000f,0.100000f},
 };
+inline constexpr TouchLine kTouchClassicDOWN[] = {
+    {0.000000f,-0.480000f,0.000000f,0.480000f},
+    {-0.350000f,0.100000f,0.000000f,0.480000f},
+    {0.000000f,0.480000f,0.350000f,0.100000f},
+};
 inline constexpr TouchLine kTouchLinesDPAD_LEFT[] = {
     {0.480000f,0.000000f,-0.480000f,0.000000f},
     {-0.100000f,-0.350000f,-0.480000f,0.000000f},
     {-0.480000f,0.000000f,-0.100000f,0.350000f},
 };
+inline constexpr TouchLine kTouchClassicDPAD_LEFT[] = {
+    {0.480000f,0.000000f,-0.480000f,0.000000f},
+    {-0.100000f,-0.350000f,-0.480000f,0.000000f},
+    {-0.480000f,0.000000f,-0.100000f,0.350000f},
+};
 inline constexpr TouchLine kTouchLinesDPAD_RIGHT[] = {
+    {-0.480000f,0.000000f,0.480000f,0.000000f},
+    {0.100000f,-0.350000f,0.480000f,0.000000f},
+    {0.480000f,0.000000f,0.100000f,0.350000f},
+};
+inline constexpr TouchLine kTouchClassicDPAD_RIGHT[] = {
     {-0.480000f,0.000000f,0.480000f,0.000000f},
     {0.100000f,-0.350000f,0.480000f,0.000000f},
     {0.480000f,0.000000f,0.100000f,0.350000f},
@@ -331,6 +513,17 @@ inline constexpr TouchLine kTouchHintsL3[] = {
     {0.192000f,0.760000f,0.240000f,0.832000f},
     {0.240000f,0.832000f,0.192000f,0.880000f},
     {0.192000f,0.880000f,0.048000f,0.880000f},
+};
+inline constexpr TouchLine kTouchClassicL3[] = {
+    {-0.700000f,-0.350000f,-0.700000f,0.350000f},
+    {-0.700000f,0.350000f,-0.140000f,0.350000f},
+    {0.140000f,-0.350000f,0.560000f,-0.350000f},
+    {0.560000f,-0.350000f,0.700000f,-0.210000f},
+    {0.700000f,-0.210000f,0.560000f,0.000000f},
+    {0.560000f,0.000000f,0.280000f,0.000000f},
+    {0.560000f,0.000000f,0.700000f,0.210000f},
+    {0.700000f,0.210000f,0.560000f,0.350000f},
+    {0.560000f,0.350000f,0.140000f,0.350000f},
 };
 inline constexpr TouchLine kTouchLinesR3[] = {
     {0.000000f,-0.650000f,0.000000f,-0.180000f},
@@ -361,27 +554,43 @@ inline constexpr TouchLine kTouchHintsR3[] = {
     {0.240000f,0.832000f,0.192000f,0.880000f},
     {0.192000f,0.880000f,0.048000f,0.880000f},
 };
+inline constexpr TouchLine kTouchClassicR3[] = {
+    {-0.700000f,0.350000f,-0.700000f,-0.350000f},
+    {-0.700000f,-0.350000f,-0.315000f,-0.350000f},
+    {-0.315000f,-0.350000f,-0.140000f,-0.210000f},
+    {-0.140000f,-0.210000f,-0.140000f,-0.105000f},
+    {-0.140000f,-0.105000f,-0.315000f,0.000000f},
+    {-0.315000f,0.000000f,-0.700000f,0.000000f},
+    {-0.420000f,0.000000f,-0.140000f,0.350000f},
+    {0.140000f,-0.350000f,0.560000f,-0.350000f},
+    {0.560000f,-0.350000f,0.700000f,-0.210000f},
+    {0.700000f,-0.210000f,0.560000f,0.000000f},
+    {0.560000f,0.000000f,0.280000f,0.000000f},
+    {0.560000f,0.000000f,0.700000f,0.210000f},
+    {0.700000f,0.210000f,0.560000f,0.350000f},
+    {0.560000f,0.350000f,0.140000f,0.350000f},
+};
 inline constexpr TouchIcon kTouchIcons[] = {
-    {"RT",0.580000f,1.000000f,true,kTouchLinesRT,kTouchHintsRT},
-    {"LT",0.900000f,0.720000f,true,kTouchLinesLT,kTouchHintsLT},
-    {"A",1.000000f,1.000000f,false,kTouchLinesA,kTouchHintsA},
-    {"B",1.000000f,1.000000f,false,kTouchLinesB,kTouchHintsB},
-    {"X",1.000000f,1.000000f,false,kTouchLinesX,kTouchHintsX},
-    {"Y",1.000000f,1.000000f,false,kTouchLinesY,kTouchHintsY},
-    {"LB",1.000000f,0.700000f,true,kTouchLinesLB,kTouchHintsLB},
-    {"RB",1.000000f,0.700000f,true,kTouchLinesRB,kTouchHintsRB},
-    {"BACK",1.000000f,1.000000f,false,kTouchLinesBACK,kTouchHintsBACK},
-    {"START",1.000000f,1.000000f,false,kTouchLinesSTART,kTouchHintsSTART},
-    {"LS",1.000000f,1.000000f,false,kTouchLinesLS,kTouchHintsLS},
-    {"LEFT",1.000000f,0.850000f,true,kTouchLinesLEFT,{}},
-    {"RIGHT",1.000000f,0.850000f,true,kTouchLinesRIGHT,{}},
-    {"RS",1.000000f,1.000000f,false,kTouchLinesRS,kTouchHintsRS},
-    {"UP",0.850000f,0.850000f,true,kTouchLinesUP,{}},
-    {"DOWN",0.850000f,0.850000f,true,kTouchLinesDOWN,{}},
-    {"DPAD_LEFT",0.850000f,0.850000f,true,kTouchLinesDPAD_LEFT,{}},
-    {"DPAD_RIGHT",0.850000f,0.850000f,true,kTouchLinesDPAD_RIGHT,{}},
-    {"L3",1.000000f,1.000000f,false,kTouchLinesL3,kTouchHintsL3},
-    {"R3",1.000000f,1.000000f,false,kTouchLinesR3,kTouchHintsR3},
+    {"RT",0.580000f,1.000000f,true,kTouchLinesRT,kTouchHintsRT,kTouchClassicRT},
+    {"LT",0.900000f,0.720000f,true,kTouchLinesLT,kTouchHintsLT,kTouchClassicLT},
+    {"A",1.000000f,1.000000f,false,kTouchLinesA,kTouchHintsA,kTouchClassicA},
+    {"B",1.000000f,1.000000f,false,kTouchLinesB,kTouchHintsB,kTouchClassicB},
+    {"X",1.000000f,1.000000f,false,kTouchLinesX,kTouchHintsX,kTouchClassicX},
+    {"Y",1.000000f,1.000000f,false,kTouchLinesY,kTouchHintsY,kTouchClassicY},
+    {"LB",1.000000f,0.700000f,true,kTouchLinesLB,kTouchHintsLB,kTouchClassicLB},
+    {"RB",1.000000f,0.700000f,true,kTouchLinesRB,kTouchHintsRB,kTouchClassicRB},
+    {"BACK",1.000000f,1.000000f,false,kTouchLinesBACK,kTouchHintsBACK,kTouchClassicBACK},
+    {"START",1.000000f,1.000000f,false,kTouchLinesSTART,kTouchHintsSTART,kTouchClassicSTART},
+    {"LS",1.000000f,1.000000f,false,kTouchLinesLS,kTouchHintsLS,kTouchClassicLS},
+    {"LEFT",1.000000f,0.850000f,true,kTouchLinesLEFT,{},kTouchClassicLEFT},
+    {"RIGHT",1.000000f,0.850000f,true,kTouchLinesRIGHT,{},kTouchClassicRIGHT},
+    {"RS",1.000000f,1.000000f,false,kTouchLinesRS,kTouchHintsRS,kTouchClassicRS},
+    {"UP",0.850000f,0.850000f,true,kTouchLinesUP,{},kTouchClassicUP},
+    {"DOWN",0.850000f,0.850000f,true,kTouchLinesDOWN,{},kTouchClassicDOWN},
+    {"DPAD_LEFT",0.850000f,0.850000f,true,kTouchLinesDPAD_LEFT,{},kTouchClassicDPAD_LEFT},
+    {"DPAD_RIGHT",0.850000f,0.850000f,true,kTouchLinesDPAD_RIGHT,{},kTouchClassicDPAD_RIGHT},
+    {"L3",1.000000f,1.000000f,false,kTouchLinesL3,kTouchHintsL3,kTouchClassicL3},
+    {"R3",1.000000f,1.000000f,false,kTouchLinesR3,kTouchHintsR3,kTouchClassicR3},
 };
 inline const TouchIcon* FindTouchIcon(std::string_view name) {
     for (const auto& icon : kTouchIcons) if (icon.name == name) return &icon;

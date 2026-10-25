@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <limits>
 
 namespace pinyon_shift::ui {
 struct TouchPadTestAccess {
@@ -21,6 +22,11 @@ struct TouchPadTestAccess {
   static void AdvanceSteering(TouchPad& pad, int ms) {
     std::lock_guard lock(pad.mutex_);
     pad.steering_updated_ -= std::chrono::milliseconds(ms);
+  }
+  static void AgeAll(TouchPad& pad,int seconds){
+    std::lock_guard lock(pad.mutex_);
+    pad.last_touch_-=std::chrono::seconds(seconds);
+    for(auto& stamp:pad.activity_)if(stamp!=std::chrono::steady_clock::time_point{})stamp-=std::chrono::seconds(seconds);
   }
 };
 }
@@ -191,7 +197,7 @@ int main() {
   for (const auto& shape : pad.Shapes(1280, 720)) {
     const auto* icon = pinyon_shift::ui::FindTouchIcon(shape.label);
     CHECK(icon && !icon->lines.empty());
-    if (icon) for (auto paths : {icon->lines, icon->hints}) for (const auto& line : paths) {
+    if (icon) for (auto paths : {icon->lines, icon->hints, icon->classic}) for (const auto& line : paths) {
       CHECK(std::isfinite(line.x0) && std::isfinite(line.y0) && std::isfinite(line.x1) && std::isfinite(line.y1));
       CHECK(std::abs(line.x0) < icon->width && std::abs(line.x1) < icon->width);
       CHECK(std::abs(line.y0) < icon->height && std::abs(line.y1) < icon->height);
@@ -201,6 +207,38 @@ int main() {
       }
     }
   }
+  // Independent visibility timers never hide a held button.
+  {std::ofstream out(layout);out<<"idle_seconds 0\ntimeout Y 1\ndriving_labels 0\nbutton_hints 0\n";}
+  pad.LoadLayout(layout);Press(pad,1,"Y");Release(pad,1);Access::AgeAll(pad,2);
+  CHECK(pad.Visible()&&Find(pad,"Y").opacity==0&&!Find(pad,"A").driving_icons);
+  Press(pad,1,"Y");Access::AgeAll(pad,2);CHECK(Find(pad,"Y").opacity==1&&pad.State().buttons==rex::input::X_INPUT_GAMEPAD_Y);Release(pad,1);
+  CHECK(Find(pad,"Y").opacity>.9f);
+
+  // Fixed sticks use the saved centre; floating sticks start at the touch.
+  {std::ofstream out(layout);out<<"steering stick\nleft_mode 1\nidle_seconds 0\n";}
+  pad.LoadLayout(layout);const auto fixed=Find(pad,"LS");
+  Access::Touch(pad,1,Action::kDown,fixed.x+fixed.radius*.5f,fixed.y);
+  CHECK(pad.State().thumb_lx>16000&&pad.State().thumb_lx<17000);Release(pad,1);
+  {std::ofstream out(layout);out<<"steering stick\nleft_mode 0\n";}
+  pad.LoadLayout(layout);Access::Touch(pad,1,Action::kDown,fixed.x+fixed.radius*.5f,fixed.y);
+  CHECK(pad.State().thumb_lx==0);Release(pad,1);
+
+  // Invisible steering/look zones respect button precedence and axis ownership.
+  {std::ofstream out(layout);out<<"steering stick\nleft_mode 2\nright_mode 2\n";}
+  pad.LoadLayout(layout);CHECK(!Has(pad,"LS")&&!Has(pad,"RS"));
+  Access::Touch(pad,1,Action::kDown,512,662);Access::Touch(pad,1,Action::kMove,612,662);
+  Access::Touch(pad,2,Action::kDown,832,684);Access::Touch(pad,2,Action::kMove,832,584);
+  CHECK(pad.State().thumb_lx==32767&&pad.State().thumb_ry==32767);
+  Release(pad,1);Release(pad,2);Press(pad,3,"RT");CHECK(pad.State().right_trigger==255&&pad.State().thumb_rx==0);Release(pad,3);
+  pad.SetPhoneSteering(.7f,true);CHECK(pad.State().thumb_lx>22000);
+  Access::Touch(pad,1,Action::kDown,512,662);CHECK(pad.State().thumb_lx==0);Release(pad,1);
+  pad.SetPhysicalController(true);CHECK(pad.State().thumb_lx==0);pad.SetPhysicalController(false);
+  pad.SetSuspended(true);CHECK(pad.State().thumb_lx==0);pad.SetSuspended(false);
+  pad.SetPhoneSteering(std::numeric_limits<float>::quiet_NaN(),true);CHECK(pad.State().thumb_lx==0);
+  uint16_t rumbleLeft=0,rumbleRight=0;
+  pad.SetRumbleCallback([&](uint16_t l,uint16_t r){rumbleLeft=l;rumbleRight=r;});
+  pad.Rumble(123,456);CHECK(rumbleLeft==123&&rumbleRight==456);
+  pad.SetSuspended(true);CHECK(rumbleLeft==0&&rumbleRight==0);pad.SetSuspended(false);pad.SetRumbleCallback({});
   std::filesystem::remove_all(root);
   std::printf("Touch controls: %d failures\n", failures);
   return failures ? 1 : 0;

@@ -16,7 +16,7 @@ platforms = ["Windows", "Linux and Steam Deck", "macOS", "Android"]
 feature = "Resolution"
 link = "playing.md#graphics-presets"
 xbox = "1280 × 720"
-pinyon = "Android adds 50%, 75% and 100% raster resolution (device testing pending); desktop has 1x to 4x internal resolution; bilinear, CAS or FSR 1 output scaling, temporal FSR 2 and 3 (built in on Linux, macOS and Android, with the FidelityFX runtime on Windows); ultrawide with a 16:9 HUD"
+pinyon = "Android adds 25–100% raster resolution (device testing pending); desktop has 1x to 4x internal resolution; bilinear, CAS or FSR 1 output scaling, temporal FSR 2 and 3 (built in on Linux, macOS and Android, with the FidelityFX runtime on Windows); ultrawide with a 16:9 HUD"
 
 [[original]]
 feature = "Frame rate"
@@ -267,12 +267,12 @@ cells = [
 [[platform]]
 feature = "Save backups and photos"
 link = "playing.md#saves"
-cells = ["yes", "yes", "yes", "yes"]
+cells = ["yes", "yes", "yes", "partly: save backups; Android photo capture omitted"]
 
 [[platform]]
 feature = "Android launcher and touch editor"
 link = "android.md#launcher"
-cells = ["n/a", "n/a", "n/a", "partly: 20 editable controls with driving icons and vector Xbox hints, independent D-pad/look stick/stick clicks, arrow/stick steering and sliding pedals; updated controls await device testing"]
+cells = ["n/a", "n/a", "n/a", "partly: 20 racing-icon controls, explicit arrows/stick, floating/fixed/invisible sticks, local named layouts and per-control fading; updated controls await device testing"]
 
 [[platform]]
 feature = "Direct ISO loading"
@@ -282,4 +282,4 @@ cells = ["n/a", "n/a", "n/a", "partly: base game; host support files cached; dev
 [[platform]]
 feature = "Phone save import/export and reports"
 link = "android.md#saves"
-cells = ["n/a", "n/a", "n/a", "partly: standard base-game profile; separate completed report ZIPs; device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: normal base-game profile; separate trainer profile; CSV headers and session/build-labelled completed report ZIPs; device testing pending"]

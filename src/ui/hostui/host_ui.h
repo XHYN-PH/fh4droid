@@ -96,6 +96,7 @@ class HostUi final : public rex::ui::UIDrawer, public rex::ui::WindowInputListen
     std::string label;
     bool pressed = false;
     float opacity = 0.55f;
+    bool driving_icons = true, button_hints = true;
   };
   void SetOverlaySource(std::function<std::vector<OverlayDisc>()> source) {
     overlay_source_ = std::move(source);

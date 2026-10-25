@@ -127,6 +127,6 @@ Rules that held: judge final frames, not intermediate targets; never run against
 
 ## Android fractional raster resolution
 
-FH4Droid adds 50%, 75% and 100% raster sizes on the Vulkan FH1 executor. Attachment allocation, viewport/scissor, EDRAM transfers and source sampling use the same rational scale. Guest resolve destinations keep their original texture layout, so CPU-visible captures and texture addressing remain at the original guest sizes. Fractional variants use their own shader/pipeline caches and do not load the 100% precompiled SPIR-V pack.
+FH4Droid adds 25–100% raster sizes in one-percent steps on the Vulkan FH1 executor. Attachment allocation, viewport/scissor, EDRAM transfers and source sampling use the same rational scale. Guest resolve destinations keep their original texture layout, so CPU-visible captures and texture addressing remain at the original guest sizes. Fractional variants use their own shader/pipeline caches and do not load the 100% precompiled SPIR-V pack.
 
-The source, generated shader headers and host bounds/centre tests are implemented. Image correctness, sustained FPS and memory behaviour still need physical-device gameplay tests; no speedup is claimed. [Android setup and limits](android.md#rendering-resolution).
+Bounds/centre tests and 953,854 software Vulkan colour/depth readbacks pass across the supported scales. Phone rendering, sustained FPS and memory behaviour still need physical-device gameplay tests; no speedup is claimed. [Android setup and limits](android.md#rendering-resolution).

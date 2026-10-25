@@ -12,3 +12,6 @@
 # Patch exports preserve the rebased source diffs byte-for-byte, including
 # whitespace-only added lines. Do not normalize or flag those payload lines.
 patches/rexglue/*.patch -text whitespace=-blank-at-eol,-blank-at-eof
+
+# Unified diffs carry context spaces before the original indentation.
+cmake/patches/*.patch whitespace=-blank-at-eol,-space-before-tab

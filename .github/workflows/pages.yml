@@ -1,11 +1,10 @@
 name: Docs site
 
-# Builds site/ from dev, which the site documents ahead of the latest
-# release, and publishes it to GitHub Pages. A release rebuilds it so the
-# overview's download link names the new version.
+# Build the requested branch or published release's source. This fork uses
+# main; upstream dev pushes remain supported.
 on:
   push:
-    branches: [dev]
+    branches: [main, dev]
     paths:
       - "site/**"
       - ".github/workflows/pages.yml"
@@ -32,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: dev
+          ref: ${{ github.event.release.tag_name || github.ref }}
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"

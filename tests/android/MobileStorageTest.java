@@ -103,9 +103,9 @@ public final class MobileStorageTest {
         TouchLayout resaved=new TouchLayout();resaved.parse(upgraded.serialize());check(resaved.steering.equals("stick")&&Math.abs(resaved.values[left][0]-.1f)<.00001f,"migrated layout round trips without changing arrow positions");
         for(int i=0;i<TouchIcons.NAMES.length;i++){
             check(TouchIcons.LINES[i].length>=4&&TouchIcons.LINES[i].length%4==0,"icon contains complete segments: "+TouchIcons.NAMES[i]);
-            for(float[] paths:new float[][]{TouchIcons.LINES[i],TouchIcons.HINTS[i]})
+            for(float[] paths:new float[][]{TouchIcons.LINES[i],TouchIcons.HINTS[i],TouchIcons.CLASSIC[i]})
                 for(int j=0;j<paths.length;j++)check(Float.isFinite(paths[j])&&Math.abs(paths[j])<TouchIcons.BOUNDS[i][j%2],"icon and prompt hint stay inside their hit target: "+TouchIcons.NAMES[i]);
-            if(!TouchIcons.RECT[i])for(float[] paths:new float[][]{TouchIcons.LINES[i],TouchIcons.HINTS[i]})
+            if(!TouchIcons.RECT[i])for(float[] paths:new float[][]{TouchIcons.LINES[i],TouchIcons.HINTS[i],TouchIcons.CLASSIC[i]})
                 for(int j=0;j<paths.length;j+=2)check(Math.hypot(paths[j]/TouchIcons.BOUNDS[i][0],paths[j+1]/TouchIcons.BOUNDS[i][1])<.98,"round button does not clip its icon or prompt hint: "+TouchIcons.NAMES[i]);
         }
     }

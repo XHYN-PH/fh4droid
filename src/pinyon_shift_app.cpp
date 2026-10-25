@@ -66,6 +66,8 @@
 #include "ui/touch_pad.h"
 #if defined(__ANDROID__)
 #include "android_bridge.h"
+#include "android_achievement_art.h"
+#include <rex/system/util/xdbf_utils.h>
 #include <rex/kernel/xam/module.h>
 #endif
 #include "ui/music.h"
@@ -900,10 +902,10 @@ bool PinyonShiftApp::EnsureHostUi() {
       for (const auto& shape : pad.Shapes(float(window()->GetActualPhysicalWidth()),
                                           float(window()->GetActualPhysicalHeight()))) {
         discs.push_back({shape.x, shape.y, shape.radius, shape.stick ? "" : shape.label,
-                         shape.pressed && !shape.stick, pad.Opacity()});
+                         shape.pressed && !shape.stick, pad.Opacity()*shape.opacity,shape.driving_icons,shape.button_hints});
         if (shape.stick) {
           discs.push_back({shape.stick_x, shape.stick_y, shape.radius * 0.55f, shape.label,
-                           shape.pressed, pad.Opacity()});
+                           shape.pressed, pad.Opacity()*shape.opacity,shape.driving_icons,shape.button_hints});
         }
       }
       return discs;
@@ -1001,18 +1003,7 @@ void PinyonShiftApp::ApplyMapView(bool open) {
 }
 
 void PinyonShiftApp::OnPostSetup() {
-#if defined(__ANDROID__)
-  pinyon_shift::ui::TouchPad::Get().LoadLayout(
-      pinyon_shift::diagnostics::StateRoot() / "config/touch-layout.txt");
-  pinyon_shift::android::InstallBridge([this](bool active) {
-    if (android_menu_active_.exchange(active) == active) return;
-    if (active) AcquireGuestInputCapture(); else ReleaseGuestInputCapture();
-    pinyon_shift::ui::TouchPad::Get().SetSuspended(active);
-    rex::kernel::xam::xeXamSetHostUIActive(active);
-  }, [this] {
-    if (window()) window()->app_context().CallInUIThreadDeferred([this] { OpenSettingsMenu(); });
-  });
-#endif
+
   // Launcher DLC selection is shared by normal and isolated modded profiles.
   // Saved games still use the active user root chosen in OnConfigurePaths.
   runtime()->kernel_state()->content_manager()->SetMarketplaceRoot(
@@ -1251,6 +1242,44 @@ void PinyonShiftApp::OnPostSetup() {
     }
   }
 #endif
+#if defined(__ANDROID__)
+  pinyon_shift::ui::TouchPad::Get().LoadLayout(
+      pinyon_shift::diagnostics::StateRoot() / "config/touch-layout.txt");
+  pinyon_shift::android::InstallBridge([this](bool active) {
+    if (android_menu_active_.exchange(active) == active) return;
+    if (active) AcquireGuestInputCapture(); else ReleaseGuestInputCapture();
+    pinyon_shift::ui::TouchPad::Get().SetSuspended(active);
+    rex::kernel::xam::xeXamSetHostUIActive(active);
+  }, [this] {
+    if (window()) window()->app_context().CallInUIThreadDeferred([this] { OpenSettingsMenu(); });
+  }, [this] {
+    auto quote=[](const std::string& value){
+      std::string out="\"";constexpr char hex[]="0123456789abcdef";
+      for(unsigned char c:value){
+        if(c=='"'||c=='\\'){out+='\\';out+=char(c);}
+        else if(c<32){out+="\\u00";out+=hex[c>>4];out+=hex[c&15];}
+        else out+=char(c);
+      }return out+'"';
+    };
+    std::string json="{\"achievements\":[";bool first=true;
+    for(const auto& item:achievements().ListAchievements()){
+      if(!first)json+=',';first=false;const bool unlocked=achievements().IsUnlocked(item.id);
+      json+="{\"id\":"+std::to_string(item.id)+",\"name\":"+quote(item.label)+
+        ",\"description\":"+quote(!unlocked&&!item.unachieved_description.empty()?item.unachieved_description:item.description)+
+        ",\"score\":"+std::to_string(item.gamerscore)+",\"unlocked\":"+(unlocked?"true":"false")+
+        ",\"unlocked_ms\":"+std::to_string(achievements().GetUnlockTime(item.id)>116444736000000000ULL
+          ? (achievements().GetUnlockTime(item.id)-116444736000000000ULL)/10000ULL : 0ULL)+"}";
+      const auto database = runtime() && runtime()->kernel_state()
+          ? runtime()->kernel_state()->title_xdbf() : rex::system::util::XdbfGameData(nullptr, 0);
+      const auto image = database.is_valid() && item.image_id != 0
+          ? database.GetEntry(rex::system::util::XdbfSection::kImage, uint64_t(item.image_id))
+          : rex::system::util::XdbfBlock{nullptr, 0};
+      pinyon_shift::android::CacheAchievementArt(item.id, item.icon_path, game_data_root(),
+          pinyon_shift::diagnostics::StateRoot() / "cache/achievement-icons",
+          image ? std::span<const uint8_t>(image.buffer,image.size) : std::span<const uint8_t>{});
+    }return json+"],\"modded\":"+(pinyon_shift::mod::ModdedProfile()?"true":"false")+"}";
+  });
+#endif
   pinyon_shift::guest_native::RetireGuestCode(runtime() ? runtime()->memory() : nullptr);
   pinyon_shift::diagnostics::RecordEvent(
       "runtime.setup.complete",
@@ -1322,6 +1351,11 @@ void PinyonShiftApp::OnPreLaunchModule() {
   pinyon_shift::mod::NotifyModuleLaunched();
   PinyonShiftInstallRallySeriesLoader(runtime()->function_dispatcher());
   PinyonShiftInstallCarChallengeProbe(runtime()->function_dispatcher());
+#if defined(__ANDROID__)
+  pinyon_shift::android::RefreshAchievements();
+  android_achievement_listener_=achievements().RegisterUnlockCallback(
+      [](const rex::system::AchievementEvent&){pinyon_shift::android::RefreshAchievements();});
+#endif
   // Unlocks arrive on guest threads; the toast is drawn on the UI thread.
   achievement_listener_ = achievements().RegisterNotificationCallback(
       [this](const rex::system::AchievementEvent& event) {
@@ -1388,6 +1422,7 @@ bool PinyonShiftApp::OnWindowCloseRequested() {
 
 void PinyonShiftApp::OnShutdown() {
 #if defined(__ANDROID__)
+  if(android_achievement_listener_){achievements().UnregisterCallback(android_achievement_listener_);android_achievement_listener_=0;}
   pinyon_shift::android::ClearBridge();
   if (android_menu_active_.exchange(false)) {
     ReleaseGuestInputCapture();

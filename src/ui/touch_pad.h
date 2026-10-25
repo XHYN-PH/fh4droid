@@ -32,6 +32,8 @@ class TouchPad final : public rex::ui::WindowInputListener {
     bool pressed = false;
     bool stick = false;
     float stick_x = 0.0f, stick_y = 0.0f;  // the knob, for the stick
+    float opacity = 1.f;
+    bool driving_icons = true, button_hints = true;
   };
 
   static TouchPad& Get();
@@ -46,6 +48,9 @@ class TouchPad final : public rex::ui::WindowInputListener {
   void LoadLayout(const std::filesystem::path& path);
   void SetPhysicalController(bool connected);
   float Opacity() const;
+  void SetPhoneSteering(float steering, bool enabled);
+  void SetRumbleCallback(std::function<void(uint16_t,uint16_t)> callback);
+  void Rumble(uint16_t left,uint16_t right);
 
   void OnTouchEvent(rex::ui::TouchEvent& e) override;
 
@@ -95,12 +100,19 @@ class TouchPad final : public rex::ui::WindowInputListener {
   static const std::vector<Layout>& Controls();
   std::vector<Layout> controls_;
   std::vector<bool> hidden_;
+  std::vector<float> timeouts_;
+  std::vector<std::chrono::steady_clock::time_point> activity_;
   float opacity_ = 0.55f;
   bool auto_hide_ = true;
   bool arrow_steering_ = true;
   bool analog_pedals_ = false;
   bool high_contrast_ = false;
   int steering_response_ms_ = 0;
+  float idle_seconds_ = 20.f;
+  int left_mode_ = 0, right_mode_ = 0;
+  bool driving_icons_ = true, button_hints_ = true, phone_enabled_ = false;
+  float phone_steering_ = 0;
+  std::function<void(uint16_t,uint16_t)> rumble_;
   mutable float steering_value_ = 0;
   mutable std::chrono::steady_clock::time_point steering_updated_{};
   bool physical_controller_ = false;
@@ -109,6 +121,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
   Control Hit(float x, float y, float width, float height) const;
   bool Enabled(Control control) const;
   static bool IsDpad(Control control);
+  float Alpha(size_t index) const;
   // Event adapter and tests share the same state transitions; mutex_ is held.
   void HandleTouch(rex::ui::TouchEvent& e, float width, float height);
   void Changed();

@@ -12,10 +12,12 @@ out=root/".local/android/mobile-tests"
 out.mkdir(parents=True,exist_ok=True)
 sources=sorted((root/"android/java").rglob("*.java"))
 sources+=sorted((pinyon_android.rexsdk_dir()/"thirdparty/sdl3/android-project/app/src/main/java").rglob("*.java"))
-sources.append(root/"tests/android/MobileStorageTest.java")
+tests=sorted((root/"tests/android").glob("*Test.java"))
+sources+=tests
 subprocess.run([str(tools.javac),"--release","8","-nowarn","-classpath",str(tools.android_jar),
-    "-encoding","UTF-8","-d",str(out),*map(str,sources)],check=True)
+    "-encoding","UTF-8","-d",str(out),*map(str,sources)],check=True,timeout=180)
 java=tools.javac.with_name("java")
 import os
-subprocess.run([str(java),"-cp",str(out)+os.pathsep+str(tools.android_jar),
-    "studio.deimos.pinyonshift.MobileStorageTest"],check=True)
+for test in tests:
+    subprocess.run([str(java),"-cp",str(out)+os.pathsep+str(tools.android_jar),
+        "studio.deimos.pinyonshift."+test.stem],check=True,timeout=60)

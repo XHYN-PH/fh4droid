@@ -93,7 +93,7 @@ if(ANDROID)
     target_link_libraries(fh4droid_android PRIVATE rex::runtime android log dl)
     target_link_options(fh4droid_android PRIVATE -Wl,-z,max-page-size=16384)
     add_library(pinyon_shift_android_ui_check OBJECT EXCLUDE_FROM_ALL
-        src/android_bridge.cpp src/ui/hostui/host_ui.cpp)
+        src/android_bridge.cpp src/android_achievement_art.cpp src/ui/hostui/host_ui.cpp)
     target_include_directories(pinyon_shift_android_ui_check PRIVATE src ${REXSDK_DIR}/thirdparty/imgui)
     target_link_libraries(pinyon_shift_android_ui_check PRIVATE rex::runtime)
 endif()
@@ -114,7 +114,7 @@ elseif(ANDROID)
         src/crash_reporter_posix.cpp
     )
     set_target_properties(pinyon_shift PROPERTIES OUTPUT_NAME main)
-    target_sources(pinyon_shift PRIVATE src/android_bridge.cpp)
+    target_sources(pinyon_shift PRIVATE src/android_bridge.cpp src/android_achievement_art.cpp)
     add_dependencies(pinyon_shift fh4droid_android)
     # Every generated function is a default-visibility weak symbol, so in a
     # shared library each call between them went through the PLT (4-6 % of

@@ -1,0 +1,80 @@
+diff --git a/include/rex/input/input_driver.h b/include/rex/input/input_driver.h
+--- a/include/rex/input/input_driver.h
++++ b/include/rex/input/input_driver.h
+@@ -84,6 +84,9 @@
+     return host_read_ || !is_active_callback_ || is_active_callback_();
+   }
+
++  // Physical calibration must not alter host-menu navigation.
++  bool is_host_read() const { return host_read_; }
++
+  private:
+   friend class InputSystem;
+   static inline thread_local bool host_read_ = false;
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -41,6 +41,26 @@
+                      "Tilt steering sensitivity in percent: 100 reaches full lock at 45 degrees "
+                      "of tilt, 200 at 22.5")
+     .range(25, 400)
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++
++#if defined(__ANDROID__)
++extern "C" __attribute__((used,visibility("default"))) const char fh4droid_runtime_input_abi[] =
++    "fh4droid-runtime-input:r3-hotfix-v1";
++#endif
++REXCVAR_DEFINE_DOUBLE(fh4droid_pad_inner, 0.0, "Input", "FH4Droid physical controller calibration")
++    .range(0.0, 0.3)
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++REXCVAR_DEFINE_DOUBLE(fh4droid_pad_outer, 1.0, "Input", "FH4Droid physical controller calibration")
++    .range(0.6, 1.0)
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++REXCVAR_DEFINE_DOUBLE(fh4droid_pad_curve, 1.0, "Input", "FH4Droid physical controller calibration")
++    .range(0.5, 2.0)
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++REXCVAR_DEFINE_DOUBLE(fh4droid_trigger_inner, 0.0, "Input", "FH4Droid physical controller calibration")
++    .range(0.0, 0.3)
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++REXCVAR_DEFINE_DOUBLE(fh4droid_trigger_outer, 1.0, "Input", "FH4Droid physical controller calibration")
++    .range(0.6, 1.0)
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+
+ namespace rex::input::sdl {
+@@ -368,6 +384,36 @@
+     pad.thumb_lx = ShapeWheelSteering(static_cast<int16_t>(pad.thumb_lx), shaping);
+     pad.left_trigger = ShapeWheelPedal(pad.left_trigger, shaping);
+     pad.right_trigger = ShapeWheelPedal(pad.right_trigger, shaping);
++  }
++  // Optional calibration applies only to physical gamepads, leaving host
++  // menu navigation, synthetic touch input and racing-wheel shaping intact.
++  if (!is_host_read() && !controller->wheel_type && !IsListedWheel(controller->guid)) {
++    const float inner = float(REXCVAR_GET(fh4droid_pad_inner));
++    const float outer = float(REXCVAR_GET(fh4droid_pad_outer));
++    const float curve = float(REXCVAR_GET(fh4droid_pad_curve));
++    const float trigger_inner = float(REXCVAR_GET(fh4droid_trigger_inner));
++    const float trigger_outer = float(REXCVAR_GET(fh4droid_trigger_outer));
++    auto& pad = out_state->gamepad;
++    if (inner != 0 || outer != 1 || curve != 1) {
++      const auto shape = [=](int16_t sample) {
++        const float raw = sample < 0 ? sample / 32768.f : sample / 32767.f;
++        float value = std::clamp((std::abs(raw) - inner) / std::max(.05f, outer - inner), 0.f, 1.f);
++        if (curve != 1) value = std::pow(value, curve);
++        return int16_t(std::lround(std::copysign(value, raw) * (raw < 0 ? 32768.f : 32767.f)));
++      };
++      pad.thumb_lx = shape(int16_t(pad.thumb_lx));
++      pad.thumb_ly = shape(int16_t(pad.thumb_ly));
++      pad.thumb_rx = shape(int16_t(pad.thumb_rx));
++      pad.thumb_ry = shape(int16_t(pad.thumb_ry));
++    }
++    if (trigger_inner != 0 || trigger_outer != 1) {
++      const auto shape = [=](uint8_t sample) {
++        return uint8_t(std::lround(std::clamp((sample / 255.f - trigger_inner) /
++            std::max(.05f, trigger_outer - trigger_inner), 0.f, 1.f) * 255.f));
++      };
++      pad.left_trigger = shape(pad.left_trigger);
++      pad.right_trigger = shape(pad.right_trigger);
++    }
+   }
+   if (!is_active) {
+     // Simulate an "untouched" controller. When we become active again the

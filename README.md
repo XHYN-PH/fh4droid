@@ -14,17 +14,19 @@
 
 **FH4Droid focuses on Android only.** It brings the original Xbox 360 **Forza Horizon (2012)** to compatible phones and handhelds.
 
-**Testing build: 0.6.5-r4.** This build has not been tested on a physical Android device. Expect possible crashes, graphics issues and slowdowns.
+**Testing build: 0.6.6-r5.** This build has not been tested on a physical Android device. Expect possible crashes, graphics issues and slowdowns.
 
 **You must provide your own legally obtained game files.** Use the supported USA Xbox 360 base-game ISO or complete extracted folder. Game files and game-download links are not provided here.
 
 ## Features
 
-- A new launcher with the driving background, transparent logo, red-to-orange theme and optional animations.
-- Current graphics settings beneath **Ready to drive**, plus an in-game menu.
-- Graphics, display, audio, controls and gameplay settings, with restart labels.
-- 50%, 75% and 100% rendering resolution options.
-- Arrow steering, drawn pedal/button icons, an optional steering stick, movable touch controls and controller auto-hide.
+- Compact launcher, brighter branding, right-side settings and an in-game drawer with Resume.
+- Searchable settings, pinned favourites, section resets, undo and active/saved value labels.
+- Graphics presets, screen modes, FSR profiles, custom values and restart labels.
+- 25–100% rendering resolution in one-percent steps; performance depends on the device.
+- Racing icons for all 20 touch controls, explicit **Arrows / Stick** steering, named local layouts, handed templates, per-control fading and floating/fixed/invisible sticks.
+- Controller calibration, optional phone tilt and rumble, achievements and a trainer on a separate profile.
+- Opt-in sustained mode, driver diagnostics, graphics-cache management and labelled performance reports.
 - Save export, import, backups and restoration from your phone.
 - A graphics-driver test before launch, system-driver recovery and shareable problem reports.
 - Direct ISO loading or verified game-folder import with resume and repair.
@@ -54,13 +56,13 @@ Keep the ISO accessible while playing. ISO mode caches only the menu and audio c
 
 While playing, tap **☰** or press Android Back for the in-game menu. Choose **Advanced game settings** for the full game settings and controller mapping. **Controls** on the launcher opens the touch editor.
 
-Use **Saves** to export or restore the standard base-game profile while the game is closed. Mods or cheats can use separate profiles managed in Advanced game settings. Use **Reports → Play with logs** when reproducing a problem, then **Share latest problem report**.
+Use **Saves** to export or restore the standard base-game profile while the game is closed. The trainer uses a separate modded profile; normal save exports do not include it. Use **Settings → Performance → Record a performance comparison** when reproducing a problem, then **More → Report a problem**. Normal play leaves detailed profiling off.
 
-The new rendering resolutions, ISO path and menus still need physical-device gameplay testing. First visits to a scene may pause while graphics are prepared. Performance targets are not guaranteed frame rates.
+The expanded UI, controls and rendering options still need physical-device gameplay testing. First visits to a scene may pause while graphics are prepared. Performance targets are not guaranteed frame rates.
 
 **Title Update 4 is not needed for this release.** Saves already used with Update 4 will not work with this APK. Back up your saves and use a separate test profile. Game files and saves from the original Pinyon Shift app are not transferred automatically.
 
-See the [release notes](docs/releases/fh4droid-0.6.5-r4.md) for setup and known issues.
+See the [release notes](docs/releases/fh4droid-0.6.6-r5.md) for setup and known issues.
 
 ## Reporting a problem
 

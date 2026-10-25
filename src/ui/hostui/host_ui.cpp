@@ -789,7 +789,8 @@ void HostUi::DrawOverlay(rex::ui::UIDrawContext& context) {
                 float(context.render_target_height()));
   for (const auto& disc : discs) {
     const auto* icon = ui::FindTouchIcon(disc.label);
-    const float opacity = std::clamp(disc.opacity, 0.2f, 1.0f);
+    const float opacity = std::clamp(disc.opacity, 0.f, 1.f);
+    if(opacity<=0)continue;
     const uint32_t outline = disc.pressed ? Rgba(255, 136, 59, int(255 * opacity))
                                          : Rgba(255, 245, 239, int(255 * opacity));
     const float stroke = std::max(2.0f, disc.radius * 0.065f);
@@ -803,8 +804,8 @@ void HostUi::DrawOverlay(rex::ui::UIDrawContext& context) {
                           disc.x + line.x1 * disc.radius, disc.y + line.y1 * disc.radius,
                           thickness, outline);
       };
-      lines(icon->lines, stroke * 1.25f);
-      lines(icon->hints, stroke * .6f);
+      lines(disc.driving_icons ? icon->lines : icon->classic, stroke * 1.25f);
+      if(disc.driving_icons && disc.button_hints) lines(icon->hints, stroke * .6f);
     }
   }
   Flush();

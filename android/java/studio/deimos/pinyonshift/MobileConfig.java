@@ -51,6 +51,16 @@ final class MobileConfig {
         putAll(c,Collections.singletonMap(key,literal));
     }
     static synchronized void putAll(Context c,Map<String,String> updates)throws IOException{putFile(file(c),updates);}
+    static synchronized void recordChange(Context c,String key,String literal,boolean live){
+        try{
+            File log=new File(base(c),"state/logs/android-settings-changes.jsonl");
+            Files.createDirectories(log.getParentFile().toPath());
+            if(log.length()>262144)Files.move(log.toPath(),new File(log.getPath()+".old").toPath(),StandardCopyOption.REPLACE_EXISTING);
+            org.json.JSONObject event=new org.json.JSONObject();event.put("time_ms",System.currentTimeMillis());
+            event.put("setting",key);event.put("value",literal);event.put("application",live?"live requested":"next launch");
+            try(FileOutputStream out=new FileOutputStream(log,true)){out.write((event.toString()+"\n").getBytes(StandardCharsets.UTF_8));}
+        }catch(Exception error){android.util.Log.w("FH4Droid","Could not record settings change",error);}
+    }
     static void putFile(File f,Map<String,String> updates)throws IOException{
         for(Map.Entry<String,String> e:updates.entrySet())if(!e.getKey().matches("[a-zA-Z0-9_]+")||e.getValue()==null||e.getValue().indexOf('\n')>=0||e.getValue().indexOf('\r')>=0)throw new IOException("Invalid setting");
         Files.createDirectories(f.getParentFile().toPath());

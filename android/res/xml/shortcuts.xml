@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Long-press the app icon: the setup screen with the game installed, to
-     copy title update v4, DLC, Rally data or a save from the PC. -->
+<!-- Open local game-file setup from the app icon. -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut
         android:shortcutId="setup"

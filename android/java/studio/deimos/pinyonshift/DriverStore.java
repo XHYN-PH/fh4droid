@@ -1,8 +1,12 @@
 package studio.deimos.pinyonshift;
 import android.content.Context;
 import org.json.JSONObject;
+import org.json.JSONArray;
+import android.app.Activity;
+import android.widget.LinearLayout;
 import java.io.*;
 import java.nio.file.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.zip.*;
 
@@ -56,6 +60,79 @@ final class DriverStore {
     static String[] choices(Context c){
         File[] dirs=root(c).listFiles(f->f.isDirectory()&&!f.getName().startsWith("."));List<String> result=new ArrayList<>();result.add("");result.add("auto");
         if(dirs!=null){Arrays.sort(dirs,Comparator.comparing(File::getName));for(File f:dirs)result.add(f.getName());}return result.toArray(new String[0]);
+    }
+    static String displayName(Context context, String str) {
+        String str2 = "";
+        if (str == null || str.isEmpty()) {
+            return "System driver · built into your phone";
+        }
+        if (str.equals("auto")) {
+            return "Automatic · recommended";
+        }
+        if (str.equals("turnip-gen8-v37")) {
+            return "Turnip Gen 8 · v37 (Adreno)";
+        }
+        try {
+            File file = new File(root(context), str + "/meta.json");
+            if (file.isFile() && file.length() < 65536) {
+                JSONObject jSONObject = new JSONObject(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+                String strTrim = jSONObject.optString("name", "").trim();
+                String strTrim2 = jSONObject.optString("version", "").trim();
+                if (!strTrim.isEmpty()) {
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(strTrim);
+                    if (!strTrim2.isEmpty() && !strTrim.contains(strTrim2)) {
+                        str2 = " · " + strTrim2;
+                    }
+                    sb.append(str2);
+                    return sb.toString();
+                }
+            }
+        } catch (Exception unused) {
+        }
+        if (!str.startsWith("imported-")) {
+            return str.replace('-', ' ').replace('_', ' ');
+        }
+        return "Imported driver · " + str.substring(9);
+    }
+    static String apiName(int i) {
+        return ((i >>> 22) & 127) + "." + ((i >>> 12) & 1023) + "." + (i & 4095);
+    }
+    static void addReport(Activity activity, LinearLayout linearLayout, String str) {
+        try {
+            JSONObject jSONObject = new JSONObject(str);
+            boolean zOptBoolean = jSONObject.optBoolean("ok", false);
+            LinearLayout linearLayoutCard = FestivalUi.card(activity, linearLayout, zOptBoolean ? "✓  Startup checks passed" : "Driver needs attention", zOptBoolean ? "The driver passed the startup checks. This is not a gameplay or performance guarantee." : jSONObject.optString("error", "The test did not finish."));
+            linearLayoutCard.addView(FestivalUi.text(activity, jSONObject.optString("gpu", "GPU not reported"), 17, -2577));
+            if (jSONObject.has("api")) {
+                linearLayoutCard.addView(FestivalUi.text(activity, "Vulkan " + apiName(jSONObject.optInt("api")), 14, -3819341));
+            }
+            JSONArray jSONArrayOptJSONArray = jSONObject.optJSONArray("checks");
+            if (jSONArrayOptJSONArray != null) {
+                for (int i = 0; i < jSONArrayOptJSONArray.length(); i++) {
+                    JSONObject jSONObjectOptJSONObject = jSONArrayOptJSONArray.optJSONObject(i);
+                    if (jSONObjectOptJSONObject != null) {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append(jSONObjectOptJSONObject.optBoolean("ok") ? "✓  " : "!  ");
+                        sb.append(jSONObjectOptJSONObject.optString("name"));
+                        sb.append(" · ");
+                        sb.append(jSONObjectOptJSONObject.optString("detail"));
+                        linearLayoutCard.addView(FestivalUi.text(activity, sb.toString(), 13, -3819341));
+                    }
+                }
+            }
+            if (jSONObject.has("effective_driver")) {
+                linearLayoutCard.addView(FestivalUi.text(activity, displayName(activity, jSONObject.optString("effective_driver")), 14, -3819341));
+            }
+        } catch (Exception unused) {
+            linearLayout.addView(FestivalUi.text(activity, "No completed driver test is available yet.", 14, -3819341));
+        }
+    }
+    static void removeImported(Context c,String name)throws IOException{
+        if(!name.matches("imported-[a-f0-9]{8}"))throw new IOException("Only imported drivers can be removed.");
+        File folder=new File(root(c),name);if(Files.isSymbolicLink(folder.toPath()))throw new IOException("Linked driver folder is not supported.");
+        if(MobileConfig.get(c,"android_gpu_driver","auto").equals(name))MobileConfig.put(c,"android_gpu_driver",MobileConfig.quote(""));
+        SaveArchive.delete(folder);
     }
     private DriverStore(){}
 }

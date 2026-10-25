@@ -97,8 +97,8 @@ class ReleaseSigningTests(unittest.TestCase):
             args = SimpleNamespace(keystore=paths[0], key_alias="release",
                                    storepass_file=paths[1], keypass_file=paths[2])
             flags = pinyon_android._release_signing(args)
-            self.assertIn("file:" + str(paths[1]), flags)
-            self.assertIn("file:" + str(paths[2]), flags)
+            self.assertIn("file:" + str(paths[1].resolve()), flags)
+            self.assertIn("file:" + str(paths[2].resolve()), flags)
             self.assertNotIn("test-only-secret", " ".join(flags))
             paths[2].unlink()
             with self.assertRaisesRegex(pinyon_android.AndroidError, "must exist"):

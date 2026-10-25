@@ -8,6 +8,10 @@ import android.graphics.Paint;
 final class TouchIconPainter {
     static void draw(Canvas canvas, Paint paint, int icon, float x, float y, float radius,
                      float opacity, boolean pressed, boolean hidden) {
+        draw(canvas,paint,icon,x,y,radius,opacity,pressed,hidden,true,true);
+    }
+    static void draw(Canvas canvas,Paint paint,int icon,float x,float y,float radius,
+                     float opacity,boolean pressed,boolean hidden,boolean driving,boolean hints){
         float w=TouchIcons.BOUNDS[icon][0]*radius, h=TouchIcons.BOUNDS[icon][1]*radius;
         float corner=TouchIcons.RECT[icon]?Math.min(w,h)*.25f:Math.min(w,h);
         float stroke=Math.max(2, radius*.065f);
@@ -21,9 +25,9 @@ final class TouchIconPainter {
         canvas.drawRoundRect(x-w+stroke/2,y-h+stroke/2,x+w-stroke/2,y+h-stroke/2,
             Math.max(0,corner-stroke/2),Math.max(0,corner-stroke/2),paint);
         paint.setPathEffect(null);paint.setStrokeWidth(stroke*1.25f);paint.setStrokeCap(Paint.Cap.BUTT);
-        drawLines(canvas,paint,TouchIcons.LINES[icon],x,y,radius);
+        drawLines(canvas,paint,driving?TouchIcons.LINES[icon]:TouchIcons.CLASSIC[icon],x,y,radius);
         paint.setStrokeWidth(stroke*.6f);
-        drawLines(canvas,paint,TouchIcons.HINTS[icon],x,y,radius);
+        if(driving&&hints)drawLines(canvas,paint,TouchIcons.HINTS[icon],x,y,radius);
         paint.setStyle(Paint.Style.FILL);paint.setAlpha(255);
     }
     private static void drawLines(Canvas canvas,Paint paint,float[] lines,float x,float y,float radius){

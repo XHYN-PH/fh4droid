@@ -12,12 +12,12 @@ sdk=root/"thirdparty/shiftglue-sdk"
 pin="79d3e6fae4b79e00def48a595c80f0eaa47fd2b6"
 if subprocess.check_output(["git","-C",str(sdk),"rev-parse","HEAD"],text=True).strip()!=pin:
     raise SystemExit("Review the SDK pin before regenerating Android patches.")
-diff=subprocess.check_output(["git","-C",str(sdk),"diff","--binary"])
+diff=subprocess.check_output(["git","-C",str(sdk),"diff","--binary","--ignore-submodules=all"])
 parts=[b"diff --git "+p for p in diff.split(b"diff --git ")[1:]]
 directory=root/"cmake/patches";directory.mkdir(exist_ok=True)
-driver_patch=directory/"shiftglue-fh4droid-z-driver-preflight.patch"
-driver_paths={line.split(b" b/",1)[1] for line in driver_patch.read_bytes().splitlines()
-              if line.startswith(b"diff --git ")} if driver_patch.exists() else set()
+independent={"shiftglue-fh4droid-z-driver-preflight.patch","shiftglue-fh4droid-input.patch"}
+driver_paths={line.split(b" b/",1)[1] for name in independent if (directory/name).exists()
+              for line in (directory/name).read_bytes().splitlines() if line.startswith(b"diff --git ")}
 runtime=[];groups=[];group=b""
 for part in parts:
     path=part.splitlines()[0].split(b" b/",1)[1]
@@ -32,7 +32,7 @@ for part in parts:
 if group:groups.append(group)
 for p in directory.glob("shiftglue-fh4droid-*.patch"):
     # The shared driver loader is maintained separately from shader regeneration.
-    if p.name != "shiftglue-fh4droid-z-driver-preflight.patch":p.unlink()
+    if p.name not in independent:p.unlink()
 files={"shiftglue-fh4droid-runtime.patch":b"".join(runtime)}
 files.update({f"shiftglue-fh4droid-spirv-{i+1}.patch":g for i,g in enumerate(groups)})
 for name,data in files.items():

@@ -6,17 +6,17 @@ description: FH4Droid launcher, game files, settings, controls and troubleshooti
 ---
 
 
-FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The 0.6.5-r4 shell and renderer changes use the fresh source and have not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
+FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The 0.6.6-r5 shell and renderer changes use the fresh source and have not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
 
 ## Launcher
 
-The launcher uses the supplied driving background, the transparent logo at the upper right and a red-to-orange accent. The line beneath Ready to drive shows saved resolution, frame limit and driver. Menu animations respect Android's animator setting and can be disabled in Settings → Display. There is no continuous launcher animation during gameplay.
+The compact launcher puts Play and the main actions at the lower left, with brighter branding and a settings summary. Pages open on the right on wide screens and fill the window on narrow screens or with large text. In-game pages use a right-side drawer with a sticky Resume action. Back returns through the page stack and restores scroll and focus. Menu scale is adjustable from 70% to 105%; optional transitions honour Android's animator setting.
 
-Settings groups Graphics, Display, Audio, Controls and Gameplay. Changes save automatically. Restart-labelled options apply on the next launch. Drivers are tested in a fresh helper process before activation and again before Play. A native driver crash or timeout leaves the launcher separate from that process. Recovery offers the system driver; a successful preflight does not prove rendering compatibility.
+Settings has categories, search and pinned favourites. Rows distinguish active runtime values from saved next-launch changes. Section resets require confirmation, and Undo restores the last section change. Presets write as one atomic transaction; failed writes leave the displayed value unchanged. Advanced quoted settings decode TOML escapes before preflight.
 
-The launcher scrolls on short screens and stacks its main buttons on narrow screens or with larger text. It recalculates navigation when the window size or orientation changes. Keyboard/controller focus has a visible outline. Settings presets and MSAA choices are written in one atomic transaction; a failed write leaves the displayed value unchanged. Missing shadows/filtering settings show the Android runtime defaults rather than a different menu default. Quoted advanced settings decode TOML escapes, including quotes, backslashes and Unicode, so driver preflight receives the saved string values.
+Drivers are tested in a fresh helper process before activation and before Play. Results show device/API information, required feature checks and a small render/readback test. Preflight and gameplay share the custom loader and saved environment. Failed custom loads do not silently select the system driver. Readable imported-driver names and confirmed removal are available; removing the active imported driver selects System. A successful probe does not establish gameplay compatibility.
 
-Preflight and gameplay share the custom-driver loader: both copy into internal storage, rename packaged library identities, and use the saved driver environment options. A failed custom-driver load is rejected rather than silently passing as the system driver. Bundled driver updates compare content before replacement, even when file sizes match.
+Graphics cache management lists only recognized shader and raster caches, and requires the game to be closed before deletion. It never selects saves, imported game files or the Rally adapter. First visits after clearing can pause while graphics are prepared.
 
 ## Game files
 
@@ -30,21 +30,29 @@ For PC sharing, choose Game files → Copy from PC over Wi-Fi. The original pair
 
 ## Rendering resolution
 
-Graphics offers 50%, 75% and 100% raster resolution. Native attachment dimensions, viewport/scissor coordinates, transfers and source reads scale together. Resolves retain the guest texture layout; guest code and game timing do not change. The default is 100%.
+Graphics offers raster resolution from 25% to 100% in one-percent steps, custom frame limits, FSR output profiles, screen modes and graphics presets. Presets coordinate related values and clear incompatible settings from the previous preset. The default raster scale is 100%.
 
-Fractional resolutions use separate shader/pipeline cache directories. The existing precompiled SPIR-V pack is used at 100%; lower resolutions translate their own variants and reuse their caches on subsequent launches. No FPS gain has been established for this build. Compare the same route, captures and thermal conditions before recommending a preset. Bilinear remains the inexpensive default output filter; sharper filters add GPU work.
+Native attachment dimensions, viewport/scissor, depth/colour transfers and source reads scale together. Guest resolve destinations retain their original layout. Fractional resolutions use separate raster-v3 shader/pipeline caches; the precompiled SPIR-V pack is used only at 100%. Shader preparation is scheduled with bounded concurrency, and detailed GPU timestamp profiling is opt-in.
+
+A software Vulkan readback suite checked 953,854 colour/depth values across every supported scale, including generic and specialized paths. Vulkan 1.2 extension and 1.3 core probe paths passed on that software driver. These checks establish neither phone-driver compatibility nor sustained FPS. No performance gain is claimed. Compare the same route, captures, duration and thermal conditions before recommending a preset.
 
 ## Controls
 
 Touch steering defaults to separate left and right arrow buttons. Holding both gives neutral steering; sliding between them changes direction, and moving outside them releases steering. Every control has drawn artwork: pedals, handbrake, shifting, rewind, clutch, camera, map and pause. Small vector Xbox hints keep menu prompts recognizable; action symbols assume the game's default bindings and do not remap buttons. The right look stick, four D-pad directions and L3/R3 stick clicks are also editable. D-pad presses stay separate from steering, and the look stick works while holding steering and a pedal. Touch drawing and its button hints do not require the game's font archive.
 
-Controls opens a landscape touch editor with normalized positions, resizing, hiding, opacity and reset. Steering selects Arrows or the original Stick; switching keeps the saved positions for both. Older layouts retain their button positions, with arrows enabled by default. Extended layouts from the reference hotfix keep their steering-button positions separately from the D-pad positions, and retain an existing stick selection. The editor uses the same icon paths as gameplay and shows the display safe area. Saving writes the layout atomically; cancelling keeps the previous layout. Reset restores arrows and keeps the controller auto-hide switch in sync.
+Controls opens a full-screen touch editor with a movable, collapsible toolbar and Control, Layout, Driving and Appearance tabs. Drag controls or use position/size sliders and accessible nudge buttons. Saving is atomic; cancelling keeps the previous layout. The editor and gameplay use the same vector artwork and safe-area geometry.
 
-Physical controller detection can hide the touch pad. Otherwise, controls stay visible while a finger is held and fade after 20 seconds without input after release. Touch cancellation, menu opening and controller changes release held touch inputs. Native input tests and host-JVM layout tests cover these transitions; physical-device gameplay and contrast checks remain pending.
+**Steering: Arrows / Stick** is available both in Touch settings and the editor. Switching preserves positions for both. The left and right sticks each offer floating, fixed and invisible modes. Invisible sticks use the corresponding lower screen region; visible buttons take priority. The independent D-pad and look stick remain available. Older layouts retain their positions, including the hotfix's separate D-pad and steering controls.
 
-The touch editor groups tools into Placement, Driving and Appearance, and scrolls when text or window size needs more space. It displays position, size, opacity and steering response; position updates while dragging. Select control and Move buttons allow editing without dragging, with spoken value feedback. Driving offers immediate, 120 ms and 240 ms arrow response. Immediate remains the default; opposite arrows always give neutral steering. Optional sliding pedals start at half input, increase when dragged up and decrease when dragged down. High contrast raises touch-icon visibility, and optional touch vibration follows Android's haptic preference. Appearance shows both the chosen opacity and the effective high-contrast opacity.
+Local named layouts, left/right-handed templates, compact driving and full-controller templates help configure the pad. Switching between driving and controller styles remembers each style separately. Layout document import/export is not provided.
 
-Tap ☰ or Android Back during play for Resume, Settings, touch editing, problem reports and Quit. The host menu captures guest input and signals the same system-UI state as native host settings. Advanced game settings opens the original host menu, including controller mapping and other existing features.
+Held controls remain visible. Global and per-control idle timers control fading; controller auto-hide is optional. Cancellation, menus, controller changes and lifecycle suspension release touch input. Driving options include immediate/120 ms/240 ms arrow response, optional sliding pedals, high contrast, drawn Xbox prompt hints and touch haptics. Action icons assume default game bindings and do not remap buttons.
+
+Controller calibration applies deadzones, curves and trigger ranges to physical SDL controllers, without changing touch or wheel input. Optional phone tilt has sensitivity, deadzone and centre calibration; deliberate stick/controller steering takes priority. Phone rumble has its own strength and stops when paused or menus capture input. These features await physical-device validation.
+
+Achievements shows current progress with cached artwork. The trainer operates on a separate modded profile; enabling it requires a restart. Opt-in sustained mode requests supported Android performance mode and temporarily caps a severe thermal state at 30 FPS, or keeps a lower selected limit. It restores the saved target after a minute at light-or-lower severity without rewriting the preset. Adreno experiments are gated to matching hardware and provide a reset; they can reduce stability.
+
+Tap ☰ or Android Back for the in-game drawer. Advanced game settings opens the original host menu for controller mapping and other existing features. Android photo capture and minimap repositioning are omitted.
 
 ## Saves
 
@@ -52,7 +60,13 @@ Saves exports the standard base-game user profile as a save-only ZIP. Imports va
 
 ## Reports and recovery
 
-Reports → Play with logs enables native performance logging for that session. Share latest problem report exports bounded recent logs, device and settings details, the driver preflight result and Android exit reasons for the game process. Repeated export taps are blocked while a report is prepared. Each share points to a separate completed ZIP, so a later export does not rewrite a report another app is reading. Intentional driver-probe termination is excluded. Normal play leaves detailed performance reporting off. Reports contain no saves or game media; review them before sharing.
+Settings → Performance → Record a performance comparison launches a session with bounded native CSV logging. Drive the same route for each configuration, then use More → Report a problem (or the in-game action). Normal play keeps detailed profiling off.
+
+Exports retain CSV headers and whole rows. The report index identifies file size/truncation, originating session and source commit, and separates the latest session from older history and shared logs. A session from an older APK is not labelled current after an update. Thermal values are named severity levels, not temperatures, and normal self-exits are distinguished from crashes and low-memory kills. Saved, launch and live settings have separate snapshots; phone FPS/thermal samples carry session/build provenance.
+
+The report analyzer, `tools/analyze-android-report.py REPORT.zip --target-fps 30 --skip-seconds 10 --duration 60`, summarizes an explicit capture window. Menus/loading remain included unless the selected window excludes them. Audio-counter overlap is correlation, not a diagnosis. Truncated captures describe their exported tail, not the whole run.
+
+Repeated export taps are blocked during preparation. Each share uses its own completed ZIP. Reports include device/settings/driver data and bounded logs, not saves or game media; review them before sharing.
 
 The launcher and game run in different processes. A session marker distinguishes a normal exit from an interrupted game; recovery offers a system-driver launch or a report. Android low-memory kills and native crashes are different failure causes and should not be treated as proof of a driver problem.
 
@@ -66,6 +80,6 @@ The ARMv8.2 baseline, Android 13 minimum and 16 KiB native/ZIP alignment require
 
 A reviewed generated-code snapshot can be built with `PINYON_SHIFT_FROZEN_CODEGEN=ON`; this mode requires the complete generated modules and stamp, but not the standalone generator. It does not regenerate code when game inputs or generator settings change. Keep generated game code private and use the matching source/SDK revisions.
 
-CI also checks shared touch geometry, runs the Java mobile suite with the pinned platform/JDK, and compiles the Android driver probe and native UI bridge without game-generated source. The separately maintained shared-driver loader patch is retained when shader patches are regenerated.
+CI also checks shared touch geometry, runs the Java mobile suite with the pinned platform/JDK, and compiles the Android driver probe and native UI bridge without game-generated source. The independent input-calibration and shared-driver loader patches are retained when shader patches are regenerated.
 
-[Player setup and limitations](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.5-r4.md). [Upstream Android research](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID_PORT_BACKLOG.md).
+[Player setup and limitations](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.6-r5.md). [Upstream Android research](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID_PORT_BACKLOG.md).

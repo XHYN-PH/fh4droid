@@ -42,8 +42,8 @@ class PreflightTests(unittest.TestCase):
         config = json.loads((ROOT / "config/release-toolchain.json").read_text(encoding="utf-8"))
         space = config["disk_space_gb"]
         self.assertGreater(space["first_build"], space["rebuild"])
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn(f"{space['first_build']} GB", readme)
+        guide = (ROOT / "docs/BUILDING.md").read_text(encoding="utf-8")
+        self.assertIn(f"{space['first_build']} GB", guide)
 
     def test_short_space_names_the_drive_and_the_need(self):
         # An impossible requirement on the install drive fails with the drive,

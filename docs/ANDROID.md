@@ -2,7 +2,7 @@
 
 ## FH4Droid Android-only fork
 
-FH4Droid focuses on Android only. The `0.6.5-r4` testing build uses application ID `ph.xhyn.fh4droid`. Install the APK and choose your own supported USA retail ISO or complete extracted game folder; the phone does not compile the game. See the [fork release notes](releases/fh4droid-0.6.5-r4.md) for requirements and limitations. This build has not been tested on a physical Android device.
+FH4Droid focuses on Android only. The `0.6.6-r5` testing build uses application ID `ph.xhyn.fh4droid`. Install the APK and choose your own supported USA retail ISO or complete extracted game folder; the phone does not compile the game. See the [fork release notes](releases/fh4droid-0.6.6-r5.md) for requirements and limitations. The r5 integration has not been tested on a physical Android device. The [current Android guide](../site/pages/android.md) describes the launcher, drawer, settings, profiles, controls and reports; the upstream sections below retain their named historical measurements.
 
 The build and Wi-Fi instructions below are inherited from upstream. Its private-build distribution policy describes upstream Pinyon Shift; this fork's prebuilt APK release is separate and contains compiled game translations. Raw game files, generated source, native build products and signing keys remain excluded from the source repository.
 
@@ -243,13 +243,13 @@ drawn Xbox hints for menu prompts. These action names assume default game
 bindings. The D-pad remains independent of steering; L3/R3 press the stick
 buttons and the right stick controls the camera. All 20 editable controls,
 including the optional left steering stick, have shared vector artwork.
-Held controls stay visible; idle controls hide 20 seconds after
+Held controls stay visible; global and per-control idle timers govern fading after
 release. Controller auto-hide can be changed in the editor
 (`pinyon_shift_touch_controls` turns the overlay off).
 
 The editor also provides immediate/120 ms/240 ms arrow response, optional sliding
 pedals (half input initially; slide up for more or down for less), high contrast,
-and optional touch vibration. Tools are grouped under Placement, Driving and
+and optional touch vibration. The movable toolbar groups tools under Control, Layout, Driving and
 Appearance; the page scrolls when needed. Position, size, opacity and response
 values are visible, including effective high-contrast opacity. Position updates
 while dragging. Select control and Move buttons support editing without drag
@@ -277,8 +277,8 @@ inputs or generator settings; use matching source and SDK revisions, and retain
 the normal generator requirement for builds which regenerate code.
 
 Android's Back button or gesture opens SETTINGS, and inside the menus it steps
-back; tap a row to open or change it. SETTINGS also holds the trainer (with
-cheats on), SAVE PHOTO and the achievements, which have keyboard keys on the PC.
+back; tap a row to open or change it. The FH4Droid drawer also holds achievements and the separate-profile trainer.
+Android photo capture and minimap repositioning are omitted.
 Clicking both sticks (LS + RS) shows or hides the performance panel, F3 on a
 keyboard; SETTINGS > CONTROLLER > PERFORMANCE PANEL changes the buttons
 (`pad_chord_debug_overlay`).
@@ -290,7 +290,7 @@ keyboard; SETTINGS > CONTROLLER > PERFORMANCE PANEL changes the buttons
 | The setup screen does not find the PC | The device and the PC are on different networks, the network blocks broadcasts, or Windows Firewall blocked the launcher: enter the address the launcher shows, and allow the launcher on private networks. |
 | The app closes at once | Started from adb without the game files: open it from the app icon, or run `push-data`. If logcat says `Cannot create the state folder`, files were copied into the app's folder by hand: run `push-data` again, which lets the app use them. |
 | `VULKAN_CAPABILITY_REPORT` in the log | The device's features, formats and memory, logged at every start; attach it to reports. |
-| RESOLUTION SCALE offers only 1X | Higher scales need resolve buffers larger than a phone's shared memory holds; `android_allow_resolution_scale` lifts the limit for testing. |
+| Resolution or preset causes artifacts | Restore 100% raster scale and the default preset, restart and export a report. The Android UI offers 25–100%; phone-driver qualification is pending. |
 | `skipped a resolve` in the log | A guest copy the renderer cannot pack yet (one is known, in the title screen's attract sequence); the frame continues without it. |
 | No sound | No output device could be opened; the game runs silently instead of stopping. |
 
@@ -319,7 +319,7 @@ route at frame 1200 and shut down normally. This is a startup check; Rally
 driving and GPU performance on Android remain unqualified. Current artifact
 verification is recorded in ignored `.local/android/latest-apk-verification.json`.
 
-Bloom now defaults to OFF with a live toggle in Graphics settings. It zeros
+In the historical upstream qualification below, bloom defaulted to OFF with a live toggle in Graphics settings. It zeros
 the title's frame-local bloom scale while preserving exposure, tone mapping
 and weather data. A signed/aligned ARM64 build was installed on the Odin 2
 Portal and passed a private-state on/off/restore gameplay run through frame

@@ -98,6 +98,7 @@ class PinyonShiftApp final : public rex::ReXApp {
   // Achievement icons for the unlock toast (the title's XDBF images).
   std::unique_ptr<rex::ui::AchievementIconCache> achievement_icons_;
   uint64_t achievement_listener_ = 0;
+  uint64_t android_achievement_listener_ = 0;
   std::unique_ptr<pinyon_shift::SaveBackups> save_backups_;
   // enabled_mods as the settings file had it at start (NP-7).
   std::string enabled_mods_;
