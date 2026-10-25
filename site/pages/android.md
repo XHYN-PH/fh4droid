@@ -82,4 +82,6 @@ A reviewed generated-code snapshot can be built with `PINYON_SHIFT_FROZEN_CODEGE
 
 CI also checks shared touch geometry, runs the Java mobile suite with the pinned platform/JDK, and compiles the Android driver probe and native UI bridge without game-generated source. The independent input-calibration and shared-driver loader patches are retained when shader patches are regenerated.
 
+The docs workflow builds a site artifact from main or the published release tag. This fork has no configured GitHub Pages site; an owner can enable Pages with the Actions source and set the repository variable `FH4DROID_PAGES_ENABLED=true` to deploy it. Android APK publication does not depend on website deployment.
+
 [Player setup and limitations](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.6-r5.md). [Upstream Android research](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID_PORT_BACKLOG.md).
