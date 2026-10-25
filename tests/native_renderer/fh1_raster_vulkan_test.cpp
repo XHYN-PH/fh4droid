@@ -2,6 +2,7 @@
 // Compile with the pinned Vulkan headers and link a Vulkan loader. A software
 // ICD is sufficient; this checks correctness, never phone performance.
 #include <vulkan/vulkan.h>
+#include <rex/graphics/fh1_raster_scale.h>
 
 #include <algorithm>
 #include <array>
@@ -13,6 +14,7 @@
 #include <vector>
 
 #include "src/graphics/shaders/vulkan_spirv/fh1_native_resolve_memory_color_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/fh1_native_resolve_memory_color_ms_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/fh1_native_resolve_memory_depth_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/fh1_native_transfer_words_color_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/fh1_native_transfer_words_depth_cs.h"
@@ -238,17 +240,18 @@ struct Source {
   VkDeviceMemory memory{};
   VkImageView view{}, stencil{};
   uint32_t width, height;
-  bool depth;
-  Source(Gpu& g, uint32_t w, uint32_t h, bool d)
-      : gpu(g), width(w), height(h), depth(d) {
+  bool depth, uniform;
+  uint32_t samples;
+  Source(Gpu& g, uint32_t w, uint32_t h, bool d, uint32_t sample_count=1,bool solid=false)
+      : gpu(g), width(w), height(h), depth(d), uniform(solid), samples(sample_count) {
     VkImageCreateInfo c{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     c.imageType = VK_IMAGE_TYPE_2D;
     c.format = d ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_R8G8B8A8_UNORM;
     c.extent = {w, h, 1};
     c.mipLevels = c.arrayLayers = 1;
-    c.samples = VK_SAMPLE_COUNT_1_BIT;
+    c.samples = VkSampleCountFlagBits(samples);
     c.tiling = VK_IMAGE_TILING_OPTIMAL;
-    c.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    c.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | (d ? 0 : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
     OK(vkCreateImage(g.device, &c, nullptr, &image));
     VkMemoryRequirements r{};
     vkGetImageMemoryRequirements(g.device, image, &r);
@@ -285,6 +288,9 @@ struct Source {
       VkClearDepthStencilValue clear{.5f, 0xa5};
       vkCmdClearDepthStencilImage(g.command, image, b.newLayout, &clear, 1,
                                   &b.subresourceRange);
+    } else if(uniform) {
+      VkClearColorValue clear{{.25f,.5f,.75f,1}};
+      vkCmdClearColorImage(g.command,image,b.newLayout,&clear,1,&b.subresourceRange);
     } else {
       auto* p = static_cast<uint32_t*>(g.input);
       for (uint32_t y = 0; y < h; y++)
@@ -316,6 +322,34 @@ struct Source {
     }
     vkUpdateDescriptorSets(g.device, 2, writes, 0, nullptr);
   }
+  // The production executor clears an attachment after each band's resolve.
+  // Exercise the same ordering, source image and shipped resolve SPIR-V.
+  void ClearRows(uint32_t top, uint32_t end) {
+    if (top >= end) return;
+    VkAttachmentDescription attachment{};
+    attachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+    attachment.samples = VkSampleCountFlagBits(samples);
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachment.initialLayout = attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkAttachmentReference reference{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription subpass{};subpass.pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount=1;subpass.pColorAttachments=&reference;
+    VkSubpassDependency dependencies[2]{};
+    dependencies[0]={VK_SUBPASS_EXTERNAL,0,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_COLOR_ATTACHMENT_READ_BIT|VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,0};
+    dependencies[1]={0,VK_SUBPASS_EXTERNAL,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT,0};
+    VkRenderPassCreateInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    info.attachmentCount=1;info.pAttachments=&attachment;info.subpassCount=1;info.pSubpasses=&subpass;info.dependencyCount=2;info.pDependencies=dependencies;
+    VkRenderPass pass{};OK(vkCreateRenderPass(gpu.device,&info,nullptr,&pass));
+    VkFramebufferCreateInfo fb{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};fb.renderPass=pass;fb.attachmentCount=1;fb.pAttachments=&view;fb.width=width;fb.height=height;fb.layers=1;
+    VkFramebuffer framebuffer{};OK(vkCreateFramebuffer(gpu.device,&fb,nullptr,&framebuffer));
+    gpu.Begin();VkRenderPassBeginInfo begin{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};begin.renderPass=pass;begin.framebuffer=framebuffer;begin.renderArea.extent={width,height};
+    vkCmdBeginRenderPass(gpu.command,&begin,VK_SUBPASS_CONTENTS_INLINE);
+    VkClearAttachment clear{};clear.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+    VkClearRect rect{{{0,int32_t(top)},{width,end-top}},0,1};
+    vkCmdClearAttachments(gpu.command,1,&clear,1,&rect);vkCmdEndRenderPass(gpu.command);gpu.Submit();
+    vkDestroyFramebuffer(gpu.device,framebuffer,nullptr);vkDestroyRenderPass(gpu.device,pass,nullptr);
+  }
   ~Source() {
     vkDestroyImageView(gpu.device, view, nullptr);
     if (stencil) vkDestroyImageView(gpu.device, stencil, nullptr);
@@ -326,7 +360,7 @@ struct Source {
     return (x + 1) | ((y + 1) << 8) | (((x + y) % 255) << 16) | 0xff000000u;
   }
   uint32_t Expected(uint32_t x, uint32_t y) {
-    return depth ? 0x800000a5u : Pattern(x, y);
+    return depth ? 0x800000a5u : uniform ? 0xffbf8040u : Pattern(x, y);
   }
 };
 }  // namespace
@@ -393,6 +427,51 @@ int main() {
       vkDestroyPipeline(gpu.device, generic, nullptr);
       vkDestroyPipeline(gpu.device, transfer, nullptr);
     }
+    size_t msaa_checks=0;
+    VkPipeline ms_resolve=gpu.Pipeline(fh1_native_resolve_memory_color_ms_cs,sizeof(fh1_native_resolve_memory_color_ms_cs));
+    VkPipeline ss_resolve=gpu.Pipeline(fh1_native_resolve_memory_color_cs,sizeof(fh1_native_resolve_memory_color_cs));
+    for(int percent=25;percent<=100;percent++)for(uint32_t guest_msaa:{1u,2u})for(uint32_t samples:{1u,4u}){
+      rex::graphics::Fh1RasterScale raster(percent);
+      Source source(gpu,raster.Pixels(40),raster.Pixels(32),false,samples,true);
+      uint32_t layout=(1u<<11)|(guest_msaa<<19),mode=samples==1?3u:guest_msaa==1?2u:0u;
+      uint32_t owner=layout|(mode<<27)|(1u<<30);
+      for(uint32_t select:{0u,4u,6u}){
+        if(guest_msaa==1&&select==6)continue;
+        uint32_t push[8]={0,40u|(32u<<16),layout,owner,select,(2u<<16)|((100-percent)<<23),0,40};
+        gpu.Dispatch(samples==1?ss_resolve:ms_resolve,push,40,32,16);
+        const auto* out=static_cast<const uint32_t*>(gpu.mapped);
+        for(uint32_t y=0;y<32;y++)for(uint32_t x=0;x<40;x++){
+          if(out[Tiled(x,y,40)/4]!=source.Expected(x,y))throw std::runtime_error("MSAA resolve mismatch "+std::to_string(percent)+"% guest "+std::to_string(guest_msaa)+" host "+std::to_string(samples));
+          msaa_checks++;
+        }
+      }
+    }
+    vkDestroyPipeline(gpu.device,ms_resolve,nullptr);vkDestroyPipeline(gpu.device,ss_resolve,nullptr);
+    std::cout<<"PASS: "<<msaa_checks<<" colour MSAA pixels; guest 2x/4x, host single/4x and sample averaging at 25-100%"<<std::endl;
+    size_t legacy_seams=0, band_checks=0;
+    VkPipeline resolve=gpu.Pipeline(fh1_native_resolve_memory_color_cs,sizeof(fh1_native_resolve_memory_color_cs));
+    for (int percent=25;percent<=100;percent++) {
+      rex::graphics::Fh1RasterScale raster(percent);
+      for (bool legacy : {true,false}) {
+        Source source(gpu,raster.Pixels(80),raster.Pixels(720),false);
+        for (uint32_t band=0;band<3;band++) {
+          const uint32_t layout=1u<<11,owner=layout|(1u<<30);
+          uint32_t push[8]={0,80u|(240u<<16),layout,owner,(band*240)<<16,(2u<<16)|((100-percent)<<23),0,80};
+          gpu.Dispatch(resolve,push,80,240,16);
+          const auto* out=static_cast<const uint32_t*>(gpu.mapped);
+          for (uint32_t y=0;y<240;y++)for(uint32_t x=0;x<80;x++) {
+            bool same=out[Tiled(x,y,80)/4]==Source::Pattern(x*percent/100,(y+band*240)*percent/100);
+            if(legacy){if(!same)legacy_seams++;}
+            else {if(!same)throw std::runtime_error("band resolve seam at "+std::to_string(percent)+"% band "+std::to_string(band));band_checks++;}
+          }
+          const int end=(band+1)*240;
+          source.ClearRows(raster.Origin(band*240),legacy?raster.End(end):raster.ClearEnd(end,band<2));
+        }
+      }
+    }
+    vkDestroyPipeline(gpu.device,resolve,nullptr);
+    if(!legacy_seams)throw std::runtime_error("seam fixture did not reproduce the old clear corruption");
+    std::cout<<"PASS: "<<band_checks<<" tiled-resolve pixels; reproduced "<<legacy_seams<<" corrupt pixels with old clears, zero with corrected clears (25-100%)"<<std::endl;
     std::cout << "PASS: " << checks
               << " colour/depth pixels; 25–100%, generic/specialized resolves "
                  "and transfers"
