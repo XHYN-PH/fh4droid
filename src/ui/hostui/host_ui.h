@@ -13,6 +13,7 @@
 #include <rex/ui/ui_drawer.h>
 #include <rex/ui/window_listener.h>
 
+#include "ui/touch_overlay.h"
 #include "ui/hostui/glyph_atlas.h"
 #include "ui/hostui/menu.h"
 #include "ui/hostui/vector_font.h"
@@ -91,13 +92,7 @@ class HostUi final : public rex::ui::UIDrawer, public rex::ui::WindowInputListen
   }
   // Discs drawn over the game while no menu is open (the touch controls), in
   // window pixels; pressed ones are brighter.
-  struct OverlayDisc {
-    float x = 0.0f, y = 0.0f, radius = 0.0f;
-    std::string label;
-    bool pressed = false;
-    float opacity = 0.55f;
-    bool driving_icons = true, button_hints = true;
-  };
+  using OverlayDisc = ui::TouchOverlayDisc;
   void SetOverlaySource(std::function<std::vector<OverlayDisc>()> source) {
     overlay_source_ = std::move(source);
   }
@@ -146,9 +141,6 @@ class HostUi final : public rex::ui::UIDrawer, public rex::ui::WindowInputListen
   void DrawHud(rex::ui::UIDrawContext& context);
   void DrawRallyPace(rex::ui::UIDrawContext& context);
   void DrawOverlay(rex::ui::UIDrawContext& context);
-  void DrawTouchFrame(float x, float y, float width, float height, bool rectangular,
-                      float thickness, uint32_t fill, uint32_t outline);
-  void DrawTouchStroke(float x0, float y0, float x1, float y1, float thickness, uint32_t color);
   bool HasHud() const;
   // Sets the canvas for this draw; false while there is nothing to draw to.
   bool PrepareCanvas(rex::ui::UIDrawContext& context);
@@ -240,6 +232,7 @@ class HostUi final : public rex::ui::UIDrawer, public rex::ui::WindowInputListen
   bool assets_failed_ = false;
   std::optional<VectorFont> fonts_[size_t(Face::kCount)];
   std::unique_ptr<rex::ui::ImmediateTexture> white_;
+  std::unique_ptr<rex::ui::ImmediateTexture> touch_artwork_;
   std::unique_ptr<rex::ui::ImmediateTexture> selection_mask_;
   std::unique_ptr<rex::ui::ImmediateTexture> button_a_;
   std::unique_ptr<rex::ui::ImmediateTexture> button_b_;

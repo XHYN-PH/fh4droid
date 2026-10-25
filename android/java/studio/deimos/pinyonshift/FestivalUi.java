@@ -17,8 +17,9 @@ import java.util.function.*;
  * position.
  */
 final class FestivalUi {
-  static final int BG = 0xff120c0d, PANEL = 0xf21b1214, TEXT = 0xfffff5ef, MUTED = 0xffc5b8b3,
-                   RED = 0xfff1393e, ORANGE = 0xffff883b;
+  static final int BG = 0xff101419, PANEL = 0xf5181d24, TEXT = 0xfff5f7fa, MUTED = 0xffbbc3cf,
+                   RED = 0xffff6c35, ORANGE = 0xffff7c48;
+  static final int FULL_PAGE = 0x7f0a7f04;
   private static final int SCROLL_STATE = 0x7f0a7f01;
   private static final int REFRESH = 0x7f0a7f02;
   private static final int PAGE_SCROLL = 0x7f0a7f03;
@@ -49,9 +50,9 @@ final class FestivalUi {
   static TextView text(Activity a, String s, int size, int color) {
     TextView v = new TextView(a);
     v.setText(s);
-    v.setTextSize(size * scale(a));
+    v.setTextSize(Math.max(size>=18?16:13,size * scale(a)));
     v.setTextColor(color);
-    v.setTypeface(Typeface.create("sans-serif-condensed", 0));
+    v.setTypeface(Typeface.create("sans-serif", 0));
     return v;
   }
   static LinearLayout column(Activity a) {
@@ -89,19 +90,18 @@ final class FestivalUi {
     Button b = new Button(a);
     b.setText(title);
     b.setAllCaps(false);
-    b.setTextSize(14 * scale(a));
+    b.setTextSize(Math.max(15,16 * scale(a)));
     b.setTextColor(primary ? BG : TEXT);
-    b.setTypeface(Typeface.create("sans-serif-condensed", 1));
+    b.setTypeface(Typeface.create("sans-serif", 1));
     b.setGravity(Gravity.CENTER);
     b.setIncludeFontPadding(false);
     GradientDrawable d = primary
         ? new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[] {RED, ORANGE})
-        : surface(a, 0xd52b2023, 11);
+        : surface(a, 0x442d3540, 10);
     d.setCornerRadius(dp(a, 11));
-    if (!primary)
-      d.setStroke(dp(a, 1), 0xff624247);
+
     b.setBackgroundTintList(null);
-    GradientDrawable focused=surface(a,primary?0xffffaf70:0xff50302a,11);
+    GradientDrawable focused=surface(a,primary?0xffffa571:0xff35404e,11);
     focused.setStroke(dp(a,2),primary?TEXT:ORANGE);
     StateListDrawable states=new StateListDrawable();
     states.addState(new int[]{android.R.attr.state_focused},focused);
@@ -109,8 +109,8 @@ final class FestivalUi {
     states.addState(new int[]{},d);
     b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33ffffff),states,surface(a,Color.WHITE,11)));
     b.setFocusable(true);
-    b.setMinimumHeight(dp(a, 44));
-    b.setMinHeight(dp(a, 44));
+    b.setMinimumHeight(dp(a, 48));
+    b.setMinHeight(dp(a, 48));
     b.setMinWidth(0);
     b.setPadding(dp(a, 12), dp(a, 5), dp(a, 12), dp(a, 5));
     b.setElevation(0);
@@ -135,12 +135,12 @@ final class FestivalUi {
     LinearLayout c = column(a);
     int p = dp(a, 8);
     c.setPadding(p, p, p, p);
-    c.setBackground(surface(a, 0xdb292024, 13));
+    c.setBackground(surface(a, 0xdb1c222b, 13));
     LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
     lp.topMargin = dp(a, 6);
     parent.addView(c, lp);
     TextView t = text(a, title, 15, TEXT);
-    t.setTypeface(Typeface.create("sans-serif-condensed", 1));
+    t.setTypeface(Typeface.create("sans-serif", 1));
     c.addView(t);
     if (help != null && !help.isEmpty()) {
       TextView h = text(a, help, 12, MUTED);
@@ -194,7 +194,7 @@ final class FestivalUi {
       d[0].show();
     }
   }
-  static void toggle(Activity a, LinearLayout parent, String title, String help, boolean enabled,
+  static Switch toggle(Activity a, LinearLayout parent, String title, String help, boolean enabled,
       Consumer<Boolean> changed) {
     LinearLayout c = new LinearLayout(a);
     c.setGravity(Gravity.CENTER_VERTICAL);
@@ -209,7 +209,7 @@ final class FestivalUi {
     Switch s = new Switch(a);
     s.setTextColor(TEXT);
     s.setChecked(enabled);
-    s.setMinHeight(dp(a, 44));
+    s.setMinHeight(dp(a, 48));
     s.setContentDescription(title);
     s.setThumbTintList(
         new ColorStateList(new int[][] {new int[] {android.R.attr.state_checked}, new int[0]},
@@ -217,6 +217,13 @@ final class FestivalUi {
     s.setOnCheckedChangeListener((v, on) -> { changed.accept(on); });
     c.addView(s, new LinearLayout.LayoutParams(-2, -2));
     parent.addView(c, new LinearLayout.LayoutParams(-1, -2));
+    return s;
+  }
+  static void toggle(Activity a, LinearLayout parent, String title, String help,
+      java.util.function.BooleanSupplier read, Consumer<Boolean> changed) {
+    Switch toggle=toggle(a,parent,title,help,read.getAsBoolean(),changed);
+    CompoundButton.OnCheckedChangeListener listener=(v,on)->{changed.accept(on);refreshTree(toggle);};
+    onRefresh(toggle,()->{toggle.setOnCheckedChangeListener(null);toggle.setChecked(read.getAsBoolean());toggle.setOnCheckedChangeListener(listener);});
   }
   static SeekBar slider(Activity a, LinearLayout parent, String title, String help, int min,
       int max, int step, int initial, IntFunction<String> label, IntConsumer changed) {
@@ -267,17 +274,21 @@ final class FestivalUi {
     head.addView(b, new LinearLayout.LayoutParams(dp(a, 44), -2));
     b.setOnClickListener(v -> back.run());
     TextView t = text(a, title, 20, TEXT);
-    t.setTypeface(Typeface.create("sans-serif-condensed", 1));
+    t.setTypeface(Typeface.create("sans-serif", 1));
     t.setPadding(dp(a, 12), 0, 0, 0);
     head.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
     t.setSingleLine(true);
     t.setEllipsize(android.text.TextUtils.TruncateAt.END);
-    if (a instanceof PinyonShiftActivity) {
+    if (a instanceof PinyonShiftActivity && !title.equals("Paused")) {
       Button resume = button(a, "Resume", true);
       head.addView(resume, new LinearLayout.LayoutParams(-2, -2));
       resume.setOnClickListener(v -> ((PinyonShiftActivity) a).resumeDriving());
     }
     p.addView(head);
+    if(Boolean.TRUE.equals(body.getTag(FULL_PAGE))){
+      if(body.getParent() instanceof ViewGroup)((ViewGroup)body.getParent()).removeView(body);
+      p.addView(body,new LinearLayout.LayoutParams(-1,0,1));refreshTree(body);return p;
+    }
     PageState state = body.getTag(SCROLL_STATE) instanceof PageState
         ? (PageState) body.getTag(SCROLL_STATE)
         : new PageState();
@@ -375,11 +386,10 @@ final class FestivalUi {
   }
   static final class Artwork extends View {
     private final Paint paint = new Paint(3);
-    private final Bitmap art, logo;
+    private final Bitmap art;
     Artwork(Activity a) {
       super(a);
       art = asset(a, "menu-background.png");
-      logo = asset(a, "menu-logo.png");
       setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
     }
     private Bitmap asset(Activity a, String n) {
@@ -405,11 +415,6 @@ final class FestivalUi {
           new float[] {0, .35f, 1}, Shader.TileMode.CLAMP));
       c.drawRect(0, 0, w, h, paint);
       paint.setShader(null);
-      if (logo != null) {
-        float lw = Math.min(115 * d, w * .18f), lh = lw * logo.getHeight() / logo.getWidth(),
-              right = w - 22 * d, top = 12 * d;
-        c.drawBitmap(logo, null, new RectF(right - lw, top, right, top + lh), paint);
-      }
       paint.setShader(new LinearGradient(
           0, h - 3 * d, w, h, new int[] {RED, ORANGE}, null, Shader.TileMode.CLAMP));
       c.drawRect(0, h - 3 * d, w, h, paint);

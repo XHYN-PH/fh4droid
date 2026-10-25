@@ -35,7 +35,9 @@ jobs:
       - name: Test release tooling
         run: python -m unittest discover -s tools/tests -p "test_*.py"
       - name: Check shared touch icon paths
-        run: python tools/generate-touch-icons.py --check
+        run: |
+          python tools/generate-touch-icons.py --check
+          python tools/generate-touch-artwork.py --check
       - name: Check tracked Markdown links
         run: python tools/check-markdown-links.py
       - name: Build the docs site
@@ -95,6 +97,7 @@ jobs:
       - name: Check shared touch geometry and run mobile Java tests
         run: |
           python3 tools/generate-touch-icons.py --check
+          python3 tools/generate-touch-artwork.py --check
           python3 tools/test-android-mobile.py
       - name: Configure for android-arm64
         run: >

@@ -10,6 +10,8 @@ import android.system.ErrnoException;
 import android.system.Os;
 import android.util.Log;
 import android.view.WindowManager;
+import android.view.View;
+import android.widget.Button;
 import android.widget.Toast;
 
 import java.io.BufferedReader;
@@ -62,6 +64,19 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     private static native void nativeTilt(float value,boolean enabled);
     private static native long nativeFrameCount();
     private static native String nativeAchievements();
+    private static native String nativePressedControls();
+    private android.widget.TextView pressedLabel;
+    private long lastButtonFeedback;
+    private final Runnable buttonFeedback=new Runnable(){public void run(){
+        if(!gameResumed)return;
+        if(pressedLabel!=null){
+            boolean enabled=nativeReady&&getSharedPreferences("mobile",0).getBoolean("press_names",true)&&(gameMenu==null||!gameMenu.isShowing());
+            if(enabled){String codes=nativePressedControls();List<String> names=new ArrayList<>();for(String code:codes.split("\\|")){int index=Arrays.asList(TouchIcons.NAMES).indexOf(code);if(index>=0)names.add(TouchIcons.TITLES[index]);}
+                long now=android.os.SystemClock.elapsedRealtime();if(!names.isEmpty()){String text=String.join(" + ",names);if(!text.contentEquals(pressedLabel.getText()))pressedLabel.setText(text);pressedLabel.setVisibility(View.VISIBLE);lastButtonFeedback=now;}else if(now-lastButtonFeedback>450)pressedLabel.setVisibility(View.GONE);
+            }else pressedLabel.setVisibility(View.GONE);
+        }
+        uiHandler.postDelayed(this,80);
+    }};
     private boolean nativeReady,gameResumed;
     private String buildCommit="unknown";
     private final android.os.Handler uiHandler=new android.os.Handler(android.os.Looper.getMainLooper());
@@ -167,6 +182,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
                 }
             }
         }
+        if(!TouchLayout.file(this).isFile())try{TouchLayout initial=new TouchLayout();initial.modernDefaults(this);initial.save(this);}catch(IOException error){Log.w(TAG,"Could not save the initial touch layout",error);}
         GameSession.record(this,true);
         super.onCreate(savedInstanceState);
         // A race played on a controller touches nothing, and a screen that
@@ -186,6 +202,11 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             setShowWhenLocked(true);
             setTurnScreenOn(true);
         }
+    }
+
+    // SDL may request sensor rotation when it creates the game window.
+    @Override public void setOrientationBis(int width,int height,boolean resizable,String hint){
+        setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
     }
 
     // The C++ runtime first, then the ReXGlue runtime, which holds SDL and
@@ -230,7 +251,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     }
 
     // The intent's args, then the lines of state/config/android-arguments.txt,
-    // which the setup screen writes (1000 Club offline with title update v4).
+    // stored locally (including 1000 Club flags for developer v4 builds).
     @Override
     protected String[] getArguments() {
         Intent intent = getIntent();
@@ -273,6 +294,8 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         android.widget.Button menu=FestivalUi.button(this,"Menu",false);menu.setContentDescription("Open FH4Droid game menu");
         android.widget.RelativeLayout.LayoutParams params=new android.widget.RelativeLayout.LayoutParams(-2,-2);params.addRule(android.widget.RelativeLayout.ALIGN_PARENT_RIGHT);params.addRule(android.widget.RelativeLayout.ALIGN_PARENT_TOP);params.setMargins(0,FestivalUi.dp(this,8),FestivalUi.dp(this,12),0);mLayout.addView(menu,params);menu.setOnClickListener(v->showGameMenu());
         fpsLabel=FestivalUi.text(this,"— FPS",13,android.graphics.Color.WHITE);fpsLabel.setVisibility(android.view.View.GONE);android.widget.RelativeLayout.LayoutParams fps=new android.widget.RelativeLayout.LayoutParams(-2,-2);fps.addRule(android.widget.RelativeLayout.ALIGN_PARENT_LEFT);fps.setMargins(FestivalUi.dp(this,12),FestivalUi.dp(this,8),0,0);mLayout.addView(fpsLabel,fps);
+        pressedLabel=FestivalUi.text(this,"",13,android.graphics.Color.WHITE);pressedLabel.setTextSize(13);pressedLabel.setPadding(FestivalUi.dp(this,10),FestivalUi.dp(this,3),FestivalUi.dp(this,10),FestivalUi.dp(this,3));pressedLabel.setBackground(FestivalUi.surface(this,0xbb101419,8));pressedLabel.setVisibility(View.GONE);pressedLabel.setMaxLines(2);pressedLabel.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        android.widget.RelativeLayout.LayoutParams feedback=new android.widget.RelativeLayout.LayoutParams(-2,-2);feedback.addRule(android.widget.RelativeLayout.CENTER_HORIZONTAL);feedback.setMargins(0,FestivalUi.dp(this,8),0,0);mLayout.addView(pressedLabel,feedback);
         android.os.VibratorManager manager=getSystemService(android.os.VibratorManager.class);phoneVibrator=manager==null?null:manager.getDefaultVibrator();
     }
     private MobileSettings.Runtime settingsRuntime(){return new MobileSettings.Runtime(){
@@ -298,13 +321,17 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         gameMenu.setOnShowListener(d->{android.view.Window w=gameMenu.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);w.setGravity(android.view.Gravity.RIGHT|android.view.Gravity.TOP);w.setDimAmount(.22f);boolean wide=getResources().getConfiguration().screenWidthDp>=650&&getResources().getConfiguration().fontScale<1.5f;w.setLayout(wide?Math.min(FestivalUi.dp(this,560),(int)(getResources().getDisplayMetrics().widthPixels*.58f)):(int)(getResources().getDisplayMetrics().widthPixels*.96f),-1);}FestivalUi.slideIn(drawer);});
         android.widget.LinearLayout body=FestivalUi.column(this);MobileSettings.Runtime runtime=settingsRuntime();
         Runnable editor=()->{resumeDriving();startActivity(new Intent(this,TouchEditorActivity.class).putExtra("return_to_game",true));};
-        for(String category:SettingsHub.PAGES)FestivalUi.action(this,body,category,()->SettingsHub.page(this,category,runtime,editor));
-        FestivalUi.action(this,body,"Search / pinned settings",()->SettingsHub.page(this,"All settings",runtime,editor));
-        FestivalUi.action(this,body,"Edit touch controls",editor);
-        FestivalUi.action(this,body,"Achievements",()->AchievementsPage.show(this,nativeAchievements()));
-        ProblemReports.action(this,body,"Report a problem");
+        Button resume=FestivalUi.button(this,"Resume",true);body.addView(resume);resume.setOnClickListener(v->resumeDriving());
+        FestivalUi.action(this,body,"Settings",()->SettingsHub.show(this,runtime,editor,()->{}));
+        FestivalUi.action(this,body,"Controls",()->SettingsHub.page(this,"Controls",runtime,editor));
+        FestivalUi.action(this,body,"More",()->{
+            android.widget.LinearLayout more=FestivalUi.column(this);
+            FestivalUi.action(this,more,"Achievements",()->AchievementsPage.show(this,nativeAchievements()));
+            FestivalUi.action(this,more,"Trainer · separate profile",()->TrainerPage.show(this,runtime));
+            ProblemReports.action(this,more,"Report a problem");FestivalUi.action(this,more,"Advanced settings",()->SettingsHub.page(this,"Advanced",runtime,editor));showPanel("More",more);
+        });
         FestivalUi.action(this,body,"Quit to launcher",()->new android.app.AlertDialog.Builder(this).setTitle("Quit the game?").setMessage("Wait for the game's save indicator to finish before quitting.").setNegativeButton("Keep playing",null).setPositiveButton("Quit",(d,w)->{recordCleanExit();resumeDriving();finish();}).show());
-        showPanel("FH4Droid",body);gameMenu.show();
+        showPanel("Paused",body);gameMenu.show();
     }
     @Override public void showPanel(String title,android.view.View body){if(drawer!=null)FestivalUi.rememberTree(drawer);drawerPages.push(new DrawerPage(title,body));renderDrawer();}
     @Override public void replacePanel(String title,android.view.View body){if(!drawerPages.isEmpty())drawerPages.pop();showPanel(title,body);}
@@ -344,8 +371,8 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             getWindow().getDecorView().performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
         return super.dispatchTouchEvent(event);
     }
-    @Override protected void onPause(){gameResumed=false;if(driveAssist!=null)driveAssist.pause();if(bridgeLoaded)nativeHostMenu(true);uiHandler.removeCallbacksAndMessages(null);stopPhoneRumble();fpsTime=0;lastFrameRateHint=-1;super.onPause();}
-    @Override protected void onResume(){UiPreferences.load(this);super.onResume();gameResumed=true;reloadControls();if(bridgeLoaded){nativeHostMenu(gameMenu!=null&&gameMenu.isShowing());FestivalUi.immersive(this);uiHandler.removeCallbacks(metricsTick);uiHandler.post(metricsTick);if(nativeReady)refreshMobilePreferences();}}
+    @Override protected void onPause(){gameResumed=false;if(driveAssist!=null)driveAssist.pause();if(bridgeLoaded)nativeHostMenu(true);uiHandler.removeCallbacksAndMessages(null);if(pressedLabel!=null)pressedLabel.setVisibility(View.GONE);stopPhoneRumble();fpsTime=0;lastFrameRateHint=-1;super.onPause();}
+    @Override protected void onResume(){UiPreferences.load(this);super.onResume();gameResumed=true;reloadControls();if(bridgeLoaded){nativeHostMenu(gameMenu!=null&&gameMenu.isShowing());FestivalUi.immersive(this);uiHandler.removeCallbacks(metricsTick);uiHandler.post(metricsTick);uiHandler.removeCallbacks(buttonFeedback);uiHandler.post(buttonFeedback);if(nativeReady)refreshMobilePreferences();}}
     @Override protected void onDestroy(){
         gameResumed=false;if(driveAssist!=null)driveAssist.pause();uiHandler.removeCallbacksAndMessages(null);stopPhoneRumble();telemetry.shutdown();
         if(inputManager!=null)inputManager.unregisterInputDeviceListener(controllers);if(gameMenu!=null)gameMenu.dismiss();
@@ -355,7 +382,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     }
     public void recordCleanExit(){GameSession.record(this,false);}
 
-    // enabled_mods from a mod set the setup screen copied before the game had
+    // A pending enabled_mods list from an earlier installation, before the game had
     // written its settings file; the game reads the list at start.
     private static void applyPendingMods(File base) {
         File pending = new File(base, SetupActivity.PENDING_MODS_FILE);

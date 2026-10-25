@@ -6,11 +6,17 @@ description: FH4Droid launcher, game files, settings, controls and troubleshooti
 ---
 
 
-FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The 0.6.6-r5 shell and renderer changes use the fresh source and have not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
+FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The 0.6.7-r6 shell and renderer changes use the fresh source and have not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
 
 ## Launcher
 
+The app uses fixed landscape orientation for the launcher, local import, touch editor, driver probe and game. SDL window requests retain the landscape lock.
+
 The compact launcher puts Play and the main actions at the lower left, with brighter branding and a settings summary. Pages open on the right on wide screens and fill the window on narrow screens or with large text. In-game pages use a right-side drawer with a sticky Resume action. Back returns through the page stack and restores scroll and focus. Menu scale is adjustable from 70% to 105%; optional transitions honour Android's animator setting.
+
+The main menu displays the supplied transparent FH4Droid logo and one primary Play action, with Settings and Controls beneath it. Game files, Saves and More remain quiet secondary shortcuts.
+
+The launcher footer uses text-only YouTube, Telegram and GitHub links on the left. The right footer reads the installed Android package version and build number and shows game-file readiness. Secondary shortcuts use the same lightweight text treatment; focus feedback and generous touch targets remain available.
 
 Settings has categories, search and pinned favourites. Rows distinguish active runtime values from saved next-launch changes. Section resets require confirmation, and Undo restores the last section change. Presets write as one atomic transaction; failed writes leave the displayed value unchanged. Advanced quoted settings decode TOML escapes before preflight.
 
@@ -24,9 +30,9 @@ Use Game files → Choose game ISO or Choose extracted game folder, with the pla
 
 Folder import compares all catalogued paths and sizes, verifies the executables before replacing an installation, verifies SHA-256 on copied/resumed files and checks space for the files still needing a copy. A partial import remains marked incomplete. Check installed game files performs a complete content check; it can take several minutes.
 
-Import/check screens show current-file progress and offer cooperative cancellation between reads. Completed files are kept; choose the same source to resume a stopped folder or Wi-Fi copy. Successful folder copies clear the previous ISO selection only after the copy finishes. Cancellation may wait for a file provider or network read to return. In ISO mode, the existing content check covers the disc image; it does not also check the locally cached support files.
+Import/check screens show current-file progress and offer cooperative cancellation between reads. Completed files are kept; choose the same source folder to resume a stopped copy. Successful folder copies clear the previous ISO selection only after the copy finishes. Cancellation may wait for a file-provider read to return. In ISO mode, the existing content check covers the disc image; it does not also check the locally cached support files.
 
-For PC sharing, choose Game files → Copy from PC over Wi-Fi. The original paired local-network workflow remains available. File-replacing overlays work in ISO mode, but mods which add files to directory enumerations should use the complete extracted folder.
+The Android app imports local files. PC discovery, pairing, Wi-Fi copying and network APK updates have been removed. Copy your own extracted folder to the device over USB before selecting it; install app updates through Android’s installer. File-replacing overlays work in ISO mode, but mods which add files to directory enumerations should use the complete extracted folder.
 
 ## Rendering resolution
 
@@ -38,21 +44,25 @@ A software Vulkan readback suite checked 953,854 colour/depth values across ever
 
 ## Controls
 
-Touch steering defaults to separate left and right arrow buttons. Holding both gives neutral steering; sliding between them changes direction, and moving outside them releases steering. Every control has drawn artwork: pedals, handbrake, shifting, rewind, clutch, camera, map and pause. Small vector Xbox hints keep menu prompts recognizable; action symbols assume the game's default bindings and do not remap buttons. The right look stick, four D-pad directions and L3/R3 stick clicks are also editable. D-pad presses stay separate from steering, and the look stick works while holding steering and a pedal. Touch drawing and its button hints do not require the game's font archive.
+Touch steering defaults to separate left and right arrow buttons. Holding both gives neutral steering; sliding between them changes direction, and moving outside them releases steering. Every control has drawn artwork: pedals, handbrake, shifting, rewind, clutch, camera, map and pause. Small button/action captions keep menu prompts recognizable; action symbols assume the game's default bindings and do not remap buttons. The right look stick, four D-pad directions and L3/R3 stick clicks are also editable. D-pad presses stay separate from steering, and the look stick works while holding steering and a pedal. Touch drawing and its button hints do not require the game's font archive.
 
-Controls opens a full-screen touch editor with a movable, collapsible toolbar and Control, Layout, Driving and Appearance tabs. Drag controls or use position/size sliders and accessible nudge buttons. Saving is atomic; cancelling keeps the previous layout. The editor and gameplay use the same vector artwork and safe-area geometry.
+Controls opens a full-window touch canvas. Properties opens a separate full-window view with Control, Layout, Driving and Appearance tabs. Drag or pinch controls, or set size/position with sliders. Hide tools clears the canvas for placement; Show tools restores Save/Cancel and Test. Test highlights touches locally without sending inputs to the game. Saving is atomic; cancelling keeps the previous layout. Hidden controls remain selectable under Properties.
+
+The editor and native overlay use the exact same antialiased PNG atlas for all 20 icons, classic letters and button/action captions. Modern symbols use thin linework on translucent controls. Accelerator, brake and clutch have shaded pedal faces with fine grip details and slim bevels; their artwork replaces the extra rectangular keycaps. Pressed pedals warm to the orange accent, while steering arrows use circular pads. All symbols are rendered from square SVGs with their proportions preserved. The camera uses a circular lens. Separate button-code badges sit above the symbols and short action labels below them. The Modern racing preset groups map, camera and pause at the upper right, with rewind and handbrake above the pedals. It adapts the spacing to the screen aspect ratio so pedal and steering clusters stay separated on tablets and wide phones. Existing custom positions stay in place until a preset is applied. Icon opacity is independent of backing opacity. Normal, pressed and held states use the same artwork. Optional pressed-button names briefly identify touched controls at the top of the screen. Action labels assume default game bindings.
+
+New layouts start with the compact Modern racing preset. Existing layouts keep their saved positions and visibility. Apply Modern racing, Full controller or a handed preset explicitly to replace positions. Steering has Arrows and Stick choices; floating, fixed and invisible modes remain available for each stick. The optional manual group shows clutch and both gear controls together.
 
 **Steering: Arrows / Stick** is available both in Touch settings and the editor. Switching preserves positions for both. The left and right sticks each offer floating, fixed and invisible modes. Invisible sticks use the corresponding lower screen region; visible buttons take priority. The independent D-pad and look stick remain available. Older layouts retain their positions, including the hotfix's separate D-pad and steering controls.
 
 Local named layouts, left/right-handed templates, compact driving and full-controller templates help configure the pad. Full controller selects stick steering and Xbox labels; driving templates use arrows and racing artwork. Switching between driving and controller styles remembers each style separately. Layout document import/export is not provided.
 
-Held controls remain visible. Global and per-control idle timers control fading; controller auto-hide is optional. Cancellation, menus, controller changes and lifecycle suspension release touch input. Driving options include immediate/120 ms/240 ms arrow response, optional sliding pedals, high contrast, drawn Xbox prompt hints and touch haptics. Action icons assume default game bindings and do not remap buttons.
+Held controls remain visible. Global and per-control idle timers control fading; controller auto-hide is optional. Cancellation, menus, controller changes and lifecycle suspension release touch input. Driving options include immediate/120 ms/240 ms arrow response, optional sliding pedals, high contrast, button/action captions and touch haptics. Action icons assume default game bindings and do not remap buttons.
 
 Controller calibration applies deadzones, curves and trigger ranges to physical SDL controllers, without changing touch or wheel input. Optional phone tilt has sensitivity, deadzone and centre calibration; deliberate stick/controller steering takes priority. Phone rumble has its own strength and stops when paused or menus capture input. These features await physical-device validation.
 
 Achievements shows current progress with cached artwork. The trainer operates on a separate modded profile; enabling it requires a restart. Opt-in sustained mode requests supported Android performance mode and temporarily caps a severe thermal state at 30 FPS, or keeps a lower selected limit. It restores the saved target after a minute at light-or-lower severity without rewriting the preset. Adreno experiments are gated to matching hardware and provide a reset; they can reduce stability.
 
-Tap ☰ or Android Back for the in-game drawer. Advanced game settings opens the original host menu for controller mapping and other existing features. Android photo capture and minimap repositioning are omitted.
+Android Back opens a five-action pause drawer: Resume, Settings, Controls, More and Quit. Settings use six categories: Graphics, Controls, Audio, Interface, Gameplay and Advanced. Controls separates touch, phone and physical-controller options. Search/favourites and section Reset/Undo are secondary tools. Advanced → Original game settings opens the original host menu for controller mapping and other existing features. Android photo capture and minimap repositioning are omitted.
 
 ## Saves
 
@@ -60,7 +70,7 @@ Saves exports the standard base-game user profile as a save-only ZIP. Imports va
 
 ## Reports and recovery
 
-Settings → Performance → Record a performance comparison launches a session with bounded native CSV logging. Drive the same route for each configuration, then use More → Report a problem (or the in-game action). Normal play keeps detailed profiling off.
+Settings → Advanced → Record a performance comparison launches a session with bounded native CSV logging. Drive the same route for each configuration, then use More → Report a problem (or the in-game action). Normal play keeps detailed profiling off.
 
 Exports retain CSV headers and whole rows. The report index identifies file size/truncation, originating session and source commit, and separates the latest session from older history and shared logs. A session from an older APK is not labelled current after an update. Thermal values are named severity levels, not temperatures, and normal self-exits are distinguished from crashes and low-memory kills. Saved, launch and live settings have separate snapshots; phone FPS/thermal samples carry session/build provenance.
 
@@ -84,4 +94,8 @@ CI also checks shared touch geometry, runs the Java mobile suite with the pinned
 
 The docs workflow builds a site artifact from main or the published release tag. This fork has no configured GitHub Pages site; an owner can enable Pages with the Actions source and set the repository variable `FH4DROID_PAGES_ENABLED=true` to deploy it. Android APK publication does not depend on website deployment.
 
-[Player setup and limitations](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.6-r5.md). [Upstream Android research](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID_PORT_BACKLOG.md).
+[Player setup and limitations](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.7-r6.md). [Upstream Android research](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID_PORT_BACKLOG.md).
+
+### Fractional-resolution lines
+
+A software Vulkan regression reproduced a band-boundary clear bug: a post-resolve clear rounded the bottom of an intermediate band up, erasing a reduced-resolution texel still used by the next band. Intermediate clears now retain that shared row. The final band copy also calculates its extent from rounded endpoints, preventing a one-row attachment overrun at scales such as 59%. The fixture checks three successive band resolves at every integer resolution from 25% through 100% with the shipped resolve SPIR-V. Old clear bounds corrupt 13,600 pixels; corrected bounds pass 4,377,600 tiled-resolve pixels, in addition to 953,854 existing colour/depth resolve and transfer checks. Another 972,800 colour values cover guest 2×/4× MSAA using single-sample or 4× host surfaces, including sample averaging, at every supported scale. These are correctness checks on llvmpipe, not phone performance measurements. The reported phone artifact still needs an on-device retest; screen filters and physical display behavior are not covered by this fixture.

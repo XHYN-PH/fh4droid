@@ -1,5 +1,7 @@
 #include "ui/hostui/host_ui.h"
 #include "ui/touch_icons.h"
+#include "ui/touch_artwork.h"
+#include <rex/ui/image_decode.h>
 
 #include <algorithm>
 #include <cmath>
@@ -154,7 +156,12 @@ bool HostUi::LoadOverlayAssets() {
     const uint8_t white[4] = {255, 255, 255, 255};
     white_ = drawer_.CreateTexture(1, 1, ImmediateTextureFilter::kNearest, false, white);
   }
-  return bool(white_);
+  if (!touch_artwork_) {
+    int width=0,height=0;
+    auto pixels=rex::ui::DecodeImageRGBA(ui::kTouchArtworkPng,sizeof(ui::kTouchArtworkPng),width,height);
+    if(!pixels.empty())touch_artwork_=drawer_.CreateTexture(width,height,ImmediateTextureFilter::kLinear,false,pixels.data());
+  }
+  return bool(white_) && bool(touch_artwork_);
 }
 
 bool HostUi::LoadAssets() {
@@ -787,26 +794,9 @@ void HostUi::DrawOverlay(rex::ui::UIDrawContext& context) {
   if (discs.empty() || !LoadOverlayAssets() || !PrepareCanvas(context)) return;
   drawer_.Begin(context, float(context.render_target_width()),
                 float(context.render_target_height()));
-  for (const auto& disc : discs) {
-    const auto* icon = ui::FindTouchIcon(disc.label);
-    const float opacity = std::clamp(disc.opacity, 0.f, 1.f);
-    if(opacity<=0)continue;
-    const uint32_t outline = disc.pressed ? Rgba(255, 136, 59, int(255 * opacity))
-                                         : Rgba(255, 245, 239, int(255 * opacity));
-    const float stroke = std::max(2.0f, disc.radius * 0.065f);
-    DrawTouchFrame(disc.x, disc.y, disc.radius * (icon ? icon->width : 1.f),
-                   disc.radius * (icon ? icon->height : 1.f), icon && icon->rectangular,
-                   stroke, Rgba(12, 10, 12, int(180 * opacity)), outline);
-    if (icon) {
-      const auto lines = [&](std::span<const ui::TouchLine> paths, float thickness) {
-        for (const auto& line : paths)
-          DrawTouchStroke(disc.x + line.x0 * disc.radius, disc.y + line.y0 * disc.radius,
-                          disc.x + line.x1 * disc.radius, disc.y + line.y1 * disc.radius,
-                          thickness, outline);
-      };
-      lines(disc.driving_icons ? icon->lines : icon->classic, stroke * 1.25f);
-      if(disc.driving_icons && disc.button_hints) lines(icon->hints, stroke * .6f);
-    }
+  for (auto& mesh : ui::BuildTouchOverlay(discs)) {
+    batches_.push_back(Batch{std::move(mesh.vertices),std::move(mesh.indices),
+        mesh.artwork?touch_artwork_.get():white_.get()});
   }
   Flush();
   drawer_.End();
@@ -814,60 +804,6 @@ void HostUi::DrawOverlay(rex::ui::UIDrawContext& context) {
   RequestPaint();
 }
 
-void HostUi::DrawTouchStroke(float x0, float y0, float x1, float y1, float thickness,
-                              uint32_t color) {
-  const float length = std::hypot(x1 - x0, y1 - y0);
-  if (length <= 0.f) return;
-  if (batches_.empty() || batches_.back().texture != white_.get() ||
-      batches_.back().vertices.size() > 60000) batches_.push_back(Batch{.texture = white_.get()});
-  auto& batch = batches_.back();
-  const float nx = -(y1 - y0) / length * thickness * .5f;
-  const float ny = (x1 - x0) / length * thickness * .5f;
-  const auto base = uint16_t(batch.vertices.size());
-  batch.vertices.push_back({x0 + nx, y0 + ny, .5f, .5f, color});
-  batch.vertices.push_back({x1 + nx, y1 + ny, .5f, .5f, color});
-  batch.vertices.push_back({x1 - nx, y1 - ny, .5f, .5f, color});
-  batch.vertices.push_back({x0 - nx, y0 - ny, .5f, .5f, color});
-  for (uint16_t i : {0, 1, 2, 0, 2, 3}) batch.indices.push_back(uint16_t(base + i));
-}
-
-void HostUi::DrawTouchFrame(float x, float y, float width, float height, bool rectangular,
-                             float thickness, uint32_t fill, uint32_t outline) {
-  if (width <= thickness || height <= thickness) return;
-  if (batches_.empty() || batches_.back().texture != white_.get() ||
-      batches_.back().vertices.size() > 60000) batches_.push_back(Batch{.texture = white_.get()});
-  auto& batch = batches_.back();
-  const float corner = rectangular ? std::min(width, height) * .25f : std::min(width, height);
-  constexpr unsigned kSteps = 8, kPoints = 4 * (kSteps + 1);
-  const auto base = uint16_t(batch.vertices.size());
-  batch.vertices.push_back({x, y, .5f, .5f, fill});
-  // A filled fan followed by a non-overlapping outline strip, in window pixels.
-  for (unsigned ring = 0; ring < 2; ++ring) {
-    for (unsigned q = 0; q < 4; ++q) {
-      const float cx = x + (q == 0 || q == 3 ? 1.f : -1.f) * (width - corner);
-      const float cy = y + (q >= 2 ? -1.f : 1.f) * (height - corner);
-      for (unsigned i = 0; i <= kSteps; ++i) {
-        const float angle = (float(q) + float(i) / kSteps) * 1.5707963268f;
-        const float r = std::max(0.f, corner - (ring ? thickness : 0.f));
-        batch.vertices.push_back({cx + std::cos(angle) * r, cy + std::sin(angle) * r,
-                                  .5f, .5f, ring ? fill : outline});
-      }
-    }
-  }
-  // Use the inner ring for the fill; the border keeps its intended alpha.
-  for (unsigned i = 0; i < kPoints; ++i) {
-    const auto next = uint16_t((i + 1) % kPoints);
-    const auto outer = uint16_t(base + 1 + i), outer_next = uint16_t(base + 1 + next);
-    const auto inner = uint16_t(outer + kPoints), inner_next = uint16_t(outer_next + kPoints);
-    batch.indices.insert(batch.indices.end(), {base, inner, inner_next});
-    // Separate outline vertices avoid interpolating the fill colour into it.
-    const auto edge = uint16_t(batch.vertices.size());
-    for (const auto v : {outer, inner, outer_next, inner_next}) {
-      auto vertex = batch.vertices[v]; vertex.color = outline; batch.vertices.push_back(vertex);
-    }
-    for (uint16_t v : {0, 1, 2, 2, 1, 3}) batch.indices.push_back(uint16_t(edge + v));
-  }
-}
 
 void HostUi::HudChanged() {
   if (HasHud() && LoadOverlayAssets()) {

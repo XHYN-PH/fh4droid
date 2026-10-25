@@ -55,7 +55,7 @@ python tools/pinyon.py android doctor --install
 python tools/pinyon.py android build
 ```
 
-`launch` also takes `--state-root`, `--hidden` (no window, audio muted) and `--render-test-script` for scripted routes. Game arguments go after `--`. The Android commands are listed on the [Android](android.md#install-over-usb) page.
+`launch` also takes `--state-root`, `--hidden` (no window, audio muted) and `--render-test-script` for scripted routes. Game arguments go after `--`. The Android installation and game-file requirements are listed on the [Android](android.md#game-files) page.
 
 ## Package the launcher
 

@@ -34,6 +34,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
     float stick_x = 0.0f, stick_y = 0.0f;  // the knob, for the stick
     float opacity = 1.f;
     bool driving_icons = true, button_hints = true;
+    float icon_opacity = .95f;
   };
 
   static TouchPad& Get();
@@ -48,6 +49,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
   void LoadLayout(const std::filesystem::path& path);
   void SetPhysicalController(bool connected);
   float Opacity() const;
+  std::string PressedControls() const;
   void SetPhoneSteering(float steering, bool enabled);
   void SetRumbleCallback(std::function<void(uint16_t,uint16_t)> callback);
   void Rumble(uint16_t left,uint16_t right);
@@ -102,7 +104,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
   std::vector<bool> hidden_;
   std::vector<float> timeouts_;
   std::vector<std::chrono::steady_clock::time_point> activity_;
-  float opacity_ = 0.55f;
+  float opacity_ = 0.55f, icon_opacity_ = .95f;
   bool auto_hide_ = true;
   bool arrow_steering_ = true;
   bool analog_pedals_ = false;
@@ -117,6 +119,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
   mutable std::chrono::steady_clock::time_point steering_updated_{};
   bool physical_controller_ = false;
   // A control's centre in window pixels, inside the safe area.
+  float Radius(const Layout& control, float width, float height) const;
   void Place(const Layout& control, float width, float height, float& x, float& y) const;
   Control Hit(float x, float y, float width, float height) const;
   bool Enabled(Control control) const;

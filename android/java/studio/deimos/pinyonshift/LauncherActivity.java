@@ -17,7 +17,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     private FrameLayout rightPane;private float builtScale;private boolean sideBySide;
     private static final class PanelPage{final String title;final View body;PanelPage(String title,View body){this.title=title;this.body=body;}}
     private static final int ISO=310,SAVE_OUT=311,SAVE_IN=312,DRIVER_ZIP=313,PROBE=314;
-    private TextView title,summary,note;private Button play;private boolean busy;
+    private TextView title,summary,note,versionFooter;private Button play;private boolean busy;
     private String pendingDriver;private boolean playAfterProbe;private AlertDialog progress;private FileOperation operation;
     @Override public void onCreate(Bundle state){
         super.onCreate(state);UiPreferences.load(this);if(state!=null){pendingDriver=state.getString("driver");playAfterProbe=state.getBoolean("play_after_probe");}
@@ -32,24 +32,40 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         builtScale=FestivalUi.scale(this);
         FrameLayout canvas=new FrameLayout(this);canvas.addView(new FestivalUi.Artwork(this),new FrameLayout.LayoutParams(-1,-1));
         boolean wide=getResources().getConfiguration().screenWidthDp>=650&&getResources().getConfiguration().fontScale<1.5f;
-        sideBySide=wide;int pad=FestivalUi.dp(this,18);LinearLayout row=new LinearLayout(this);row.setPadding(pad,pad,pad,FestivalUi.dp(this,58));canvas.addView(row,new FrameLayout.LayoutParams(-1,-1));
-        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);LinearLayout menu=FestivalUi.column(this);menu.setGravity(Gravity.BOTTOM);menu.setPadding(0,FestivalUi.dp(this,46),wide?pad:0,0);scroll.addView(menu);row.addView(scroll,new LinearLayout.LayoutParams(0,-1,wide?.43f:1));
+        sideBySide=wide;int pad=FestivalUi.dp(this,18);LinearLayout row=new LinearLayout(this);row.setPadding(pad,pad,pad,FestivalUi.dp(this,64));canvas.addView(row,new FrameLayout.LayoutParams(-1,-1));
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);LinearLayout menu=FestivalUi.column(this);menu.setGravity(Gravity.BOTTOM);menu.setPadding(0,FestivalUi.dp(this,12),wide?pad:0,0);scroll.addView(menu);row.addView(scroll,new LinearLayout.LayoutParams(0,-1,wide?.43f:1));
         title=FestivalUi.text(this,"Ready to drive",13,FestivalUi.MUTED);menu.addView(title);
-        TextView brand=FestivalUi.text(this,"FH4DROID",36,FestivalUi.TEXT);brand.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);brand.setSingleLine(true);brand.setAutoSizeTextTypeUniformWithConfiguration(20,36,1,android.util.TypedValue.COMPLEX_UNIT_SP);menu.addView(brand);
-        summary=FestivalUi.text(this,"",13,FestivalUi.MUTED);summary.setPadding(0,4,0,6);menu.addView(summary);
-        note=FestivalUi.text(this,"",12,0xffffbca5);note.setPadding(0,0,0,8);menu.addView(note);
+        ImageView logo=new ImageView(this);logo.setContentDescription("FH4Droid logo");logo.setScaleType(ImageView.ScaleType.FIT_START);logo.setAdjustViewBounds(true);
+        try(InputStream in=getAssets().open("menu-logo.png")){logo.setImageBitmap(android.graphics.BitmapFactory.decodeStream(in));}catch(IOException error){logo.setContentDescription("FH4Droid");}
+        logo.setBackgroundColor(android.graphics.Color.TRANSPARENT);menu.addView(logo,new LinearLayout.LayoutParams(-1,FestivalUi.dp(this,getResources().getConfiguration().screenHeightDp<380?70:96)));
+        summary=FestivalUi.text(this,"",13,FestivalUi.MUTED);summary.setPadding(0,FestivalUi.dp(this,4),0,FestivalUi.dp(this,6));menu.addView(summary);
+        note=FestivalUi.text(this,"",12,0xffffbca5);note.setPadding(0,0,0,FestivalUi.dp(this,8));menu.addView(note);
         play=FestivalUi.button(this,"Play",true);play.setOnClickListener(v->play(false));menu.addView(play,new LinearLayout.LayoutParams(-1,-2));
-        LinearLayout primary=new LinearLayout(this);menu.addView(primary,new LinearLayout.LayoutParams(-1,-2));
-        navButton(primary,"Settings",()->{if(GameFiles.running(this)){toast("Open settings with Android Back while playing.");return;}openRoot();MobileSettings.show(this,null,this::controls,this::drivers);});
-        navButton(primary,"Game files",()->{openRoot();files();});
+        FestivalUi.action(this,menu,"Settings",()->{if(GameFiles.running(this)){toast("Open settings with Android Back while playing.");return;}openRoot();MobileSettings.show(this,null,this::controls,this::drivers);});
+        FestivalUi.action(this,menu,"Controls",this::controls);
         HorizontalScrollView links=new HorizontalScrollView(this);links.setHorizontalScrollBarEnabled(false);LinearLayout shortcuts=new LinearLayout(this);links.addView(shortcuts);menu.addView(links);
-        smallLink(shortcuts,"Saves",()->{openRoot();saves();});smallLink(shortcuts,"Controls",this::controls);smallLink(shortcuts,"Drivers",()->{openRoot();drivers();});smallLink(shortcuts,"More",()->{openRoot();more();});
+        smallLink(shortcuts,"Game files",()->{openRoot();files();});smallLink(shortcuts,"Saves",()->{openRoot();saves();});smallLink(shortcuts,"More",()->{openRoot();more();});
         rightPane=new FrameLayout(this);if(wide){LinearLayout.LayoutParams pane=new LinearLayout.LayoutParams(0,-1,.57f);pane.topMargin=FestivalUi.dp(this,40);row.addView(rightPane,pane);}else{FrameLayout.LayoutParams pane=new FrameLayout.LayoutParams(-1,-1);pane.setMargins(pad,FestivalUi.dp(this,54),pad,FestivalUi.dp(this,54));canvas.addView(rightPane,pane);}
-        TextView footer=FestivalUi.text(this,"FH4Droid · Android preview\nXHYN-PH · Unofficial fan port",10,FestivalUi.MUTED);footer.setMaxLines(2);footer.setMaxWidth((int)(getResources().getDisplayMetrics().widthPixels*.42f));footer.setOnClickListener(v->{openRoot();about();});
-        FrameLayout.LayoutParams footerParams=new FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM|Gravity.LEFT);footerParams.leftMargin=pad;footerParams.bottomMargin=FestivalUi.dp(this,8);canvas.addView(footer,footerParams);
-        HorizontalScrollView socials=new HorizontalScrollView(this);LinearLayout social=new LinearLayout(this);socials.addView(social);smallLink(social,"YouTube",()->external("https://youtube.com/@xhyn_ph"));smallLink(social,"Telegram",()->external("https://t.me/xhynports"));smallLink(social,"GitHub",()->external("https://github.com/XHYN-PH/fh4droid"));
-        FrameLayout.LayoutParams socialParams=new FrameLayout.LayoutParams(Math.min(FestivalUi.dp(this,300),(int)(getResources().getDisplayMetrics().widthPixels*.53f)),-2,Gravity.BOTTOM|Gravity.RIGHT);socialParams.rightMargin=pad;socialParams.bottomMargin=FestivalUi.dp(this,3);canvas.addView(socials,socialParams);
-        canvas.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets safe=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());row.setPadding(pad+safe.left,pad+safe.top,pad+safe.right,FestivalUi.dp(this,58)+safe.bottom);footerParams.leftMargin=pad+safe.left;footerParams.bottomMargin=FestivalUi.dp(this,8)+safe.bottom;footer.setLayoutParams(footerParams);socialParams.rightMargin=pad+safe.right;socialParams.bottomMargin=FestivalUi.dp(this,3)+safe.bottom;socials.setLayoutParams(socialParams);return insets;});
+        LinearLayout footer=new LinearLayout(this);footer.setGravity(Gravity.CENTER_VERTICAL);footer.setPadding(pad,0,pad,0);
+        HorizontalScrollView socials=new HorizontalScrollView(this);socials.setHorizontalScrollBarEnabled(false);
+        LinearLayout social=new LinearLayout(this);social.setGravity(Gravity.CENTER_VERTICAL);socials.addView(social);
+        smallLink(social,"YouTube",()->external("https://youtube.com/@xhyn_ph"));footerSeparator(social);
+        smallLink(social,"Telegram",()->external("https://t.me/xhynports"));footerSeparator(social);
+        smallLink(social,"GitHub",()->external("https://github.com/XHYN-PH/fh4droid"));
+        footer.addView(socials,new LinearLayout.LayoutParams(0,-2,.62f));
+        versionFooter=FestivalUi.text(this,installedVersion(),12,FestivalUi.MUTED);versionFooter.setTextSize(12);
+        versionFooter.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);versionFooter.setMaxLines(3);versionFooter.setPadding(FestivalUi.dp(this,8),0,0,0);
+        footer.addView(versionFooter,new LinearLayout.LayoutParams(0,-2,.38f));
+        FrameLayout.LayoutParams footerParams=new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM);footerParams.bottomMargin=FestivalUi.dp(this,8);canvas.addView(footer,footerParams);
+        final android.graphics.Insets[] safeInsets={android.graphics.Insets.NONE};
+        Runnable fitFooter=()->{
+            android.graphics.Insets safe=safeInsets[0];int bottom=Math.max(FestivalUi.dp(this,64),footer.getHeight()+FestivalUi.dp(this,16))+safe.bottom;
+            row.setPadding(pad+safe.left,pad+safe.top,pad+safe.right,bottom);
+            footer.setPadding(pad+safe.left,0,pad+safe.right,0);footerParams.bottomMargin=FestivalUi.dp(this,8)+safe.bottom;footer.setLayoutParams(footerParams);
+            if(!wide){FrameLayout.LayoutParams pane=(FrameLayout.LayoutParams)rightPane.getLayoutParams();pane.setMargins(pad+safe.left,FestivalUi.dp(this,54)+safe.top,pad+safe.right,bottom);rightPane.setLayoutParams(pane);}
+        };
+        footer.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->{if(l!=ol||t!=ot||r!=or||b!=ob)fitFooter.run();});
+        canvas.setOnApplyWindowInsetsListener((v,insets)->{safeInsets[0]=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());fitFooter.run();return insets;});
         setContentView(canvas);renderPanel();FestivalUi.enter(menu);
     }
     private void openRoot(){panels.clear();renderPanel();}
@@ -58,13 +74,36 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     @Override public void backPanel(){if(!panels.isEmpty())panels.pop();if(Math.abs(builtScale-FestivalUi.scale(this))>.001f)build();else renderPanel();}
     private void renderPanel(){if(rightPane==null)return;FestivalUi.rememberTree(rightPane);rightPane.removeAllViews();rightPane.setVisibility(panels.isEmpty()&&!sideBySide?View.GONE:View.VISIBLE);if(!panels.isEmpty()){PanelPage page=panels.peek();View panel=FestivalUi.panel(this,page.title,page.body,this::backPanel);rightPane.addView(panel,new FrameLayout.LayoutParams(-1,-1));FestivalUi.slideIn(panel);}}
     @Override public void onBackPressed(){if(!panels.isEmpty())backPanel();else super.onBackPressed();}
-    private void smallLink(LinearLayout row,String text,Runnable run){Button button=FestivalUi.button(this,text,false);row.addView(button,new LinearLayout.LayoutParams(-2,-2));button.setOnClickListener(v->run.run());}
+    private TextView smallLink(LinearLayout row,String label,Runnable action){
+        TextView link=FestivalUi.text(this,label,13,FestivalUi.MUTED);link.setTextSize(13);link.setGravity(Gravity.CENTER);
+        link.setMinHeight(FestivalUi.dp(this,48));link.setPadding(FestivalUi.dp(this,10),0,FestivalUi.dp(this,10),0);link.setFocusable(true);
+        android.graphics.drawable.StateListDrawable background=new android.graphics.drawable.StateListDrawable();
+        background.addState(new int[]{android.R.attr.state_focused},FestivalUi.surface(this,0x33ffffff,8));
+        background.addState(new int[]{},FestivalUi.surface(this,android.graphics.Color.TRANSPARENT,8));
+        link.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x33ffffff),background,FestivalUi.surface(this,android.graphics.Color.WHITE,8)));
+        link.setAccessibilityDelegate(new View.AccessibilityDelegate(){@Override public void onInitializeAccessibilityNodeInfo(View host,android.view.accessibility.AccessibilityNodeInfo info){super.onInitializeAccessibilityNodeInfo(host,info);info.setClassName("android.widget.Button");}});
+        row.addView(link,new LinearLayout.LayoutParams(-2,-2));link.setOnClickListener(v->action.run());return link;
+    }
+    private void footerSeparator(LinearLayout row){TextView separator=FestivalUi.text(this,"·",13,FestivalUi.MUTED);separator.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);row.addView(separator);}
+    private String installedVersion(){
+        try{android.content.pm.PackageInfo info=getPackageManager().getPackageInfo(getPackageName(),0);return "v"+(info.versionName==null?"Unknown":info.versionName)+" · build "+info.getLongVersionCode();}
+        catch(android.content.pm.PackageManager.NameNotFoundException error){return "Version unavailable";}
+    }
     private void external(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(ActivityNotFoundException error){toast("No browser is available.");}}
-    private void more(){LinearLayout body=FestivalUi.column(this);FestivalUi.action(this,body,"Achievements",()->AchievementsPage.show(this,null));FestivalUi.action(this,body,"Cheats · separate profile",()->TrainerPage.show(this,null));ProblemReports.action(this,body,"Report a problem");FestivalUi.action(this,body,"About",this::about);FestivalUi.present(this,"More",body);}
-    private void about(){LinearLayout body=FestivalUi.column(this);body.addView(FestivalUi.text(this,"FH4Droid is an unofficial Android fan port. Supply your own supported Forza Horizon game files. Local achievements do not synchronize with Xbox Live.",14,FestivalUi.TEXT));FestivalUi.present(this,"About FH4Droid",body);}
+    private void more(){LinearLayout body=FestivalUi.column(this);FestivalUi.action(this,body,"Graphics drivers",this::drivers);FestivalUi.action(this,body,"Achievements",()->AchievementsPage.show(this,null));FestivalUi.action(this,body,"Cheats · separate profile",()->TrainerPage.show(this,null));ProblemReports.action(this,body,"Report a problem");FestivalUi.action(this,body,"About",this::about);FestivalUi.present(this,"More",body);}
+    private void about(){LinearLayout body=FestivalUi.column(this);body.addView(FestivalUi.text(this,installedVersion(),16,FestivalUi.ORANGE));body.addView(FestivalUi.text(this,"FH4Droid is an unofficial Android fan port. Supply your own supported Forza Horizon game files. Local achievements do not synchronize with Xbox Live.",14,FestivalUi.TEXT));FestivalUi.action(this,body,"Control artwork credits",this::controlArtworkCredits);FestivalUi.present(this,"About FH4Droid",body);}
+    private void controlArtworkCredits(){
+        LinearLayout body=FestivalUi.column(this);
+        FestivalUi.action(this,body,"Lucide icon library",()->external("https://lucide.dev/"));
+        try(InputStream in=getResources().openRawResource(getResources().getIdentifier("control_artwork_license","raw",getPackageName()));ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
+            byte[] buffer=new byte[4096];for(int n;(n=in.read(buffer))!=-1;)bytes.write(buffer,0,n);
+            body.addView(FestivalUi.text(this,new String(bytes.toByteArray(),java.nio.charset.StandardCharsets.UTF_8),13,FestivalUi.MUTED));
+        }catch(Exception error){body.addView(FestivalUi.text(this,"Lucide icons are used under the ISC license, with applicable Feather icons under the MIT license.",13,FestivalUi.MUTED));}
+        FestivalUi.present(this,"Control artwork",body);
+    }
     void startDiagnosticRun(){play(true);}
     private void navButton(LinearLayout row,String text,Runnable action){
-        Button b=FestivalUi.button(this,text,false);boolean horizontal=true;LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(horizontal?0:-1,-2,horizontal?1:0);if(horizontal)p.leftMargin=FestivalUi.dp(this,10);else p.topMargin=FestivalUi.dp(this,10);row.addView(b,p);b.setOnClickListener(v->action.run());
+        Button b=FestivalUi.button(this,text,false);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(0,-2,1);if(row.getChildCount()>0)p.leftMargin=FestivalUi.dp(this,8);row.addView(b,p);b.setOnClickListener(v->action.run());
     }
     private void link(GridLayout row,String label,Runnable action){
         Button button=FestivalUi.button(this,label,false);button.setTextSize(14);
@@ -73,8 +112,8 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     }
     private void refresh(){
         if(title==null)return;boolean ready=GameFiles.ready(this);
-        title.setText(ready?"Ready to drive":"Your next drive awaits");play.setText(ready?"▶  Play":"Set up game");
-        summary.setText(MobileSettings.summary(this));note.setText(ready?"Your own Forza Horizon Xbox 360 game files.":"Add your Forza Horizon Xbox 360 disc image or extracted folder.");
+        title.setText(ready?"Ready to drive":"Your next drive awaits");play.setText(ready?"Play":"Set up game");
+        summary.setText(MobileSettings.summary(this));if(versionFooter!=null)versionFooter.setText(installedVersion()+"\n"+(GameFiles.running(this)?"Game running":ready?"Game files ready":"Setup required"));note.setText(ready?"Your own Forza Horizon Xbox 360 game files.":"Add your Forza Horizon Xbox 360 disc image or extracted folder.");
         if(GameSession.interrupted(this)>0)note.setText("The last game stopped unexpectedly. Try the system driver or share a report.");
     }
     private void recovery(){
@@ -118,7 +157,6 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         LinearLayout p=FestivalUi.column(this);p.addView(FestivalUi.text(this,"Use your own Xbox 360 copy of Forza Horizon (2012). This build uses base-game executables; TU4 saves require a separate TU4 build.",14,FestivalUi.MUTED));
         FestivalUi.action(this,p,"Choose game ISO",()->{if(canManage())pick(ISO,"*/*",false);});
         FestivalUi.action(this,p,"Choose extracted game folder",()->{if(canManage())startActivity(new Intent(this,SetupActivity.class).putExtra("setup",true).putExtra("choose_folder",true));});
-        FestivalUi.action(this,p,"Copy from PC over Wi-Fi",()->{if(canManage())startActivity(new Intent(this,SetupActivity.class).putExtra("setup",true));});
         FestivalUi.action(this,p,"Check installed game files",()->{if(canManage())work("Checking all game files. Large games can take several minutes…",()->GameFiles.verifyComplete(this),()->toast("All supported game files verified."));});
         FestivalUi.present(this,"Game files",p);
     }
@@ -132,6 +170,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
             .setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->work("Restoring saves…",()->SaveArchive.restore(new File(MobileConfig.base(this),"state")),()->toast("Previous saves restored."))).show();});
         FestivalUi.present(this,"Saves",p);
     }
+    void openDrivers(){drivers();}
     private void drivers(){
         FestivalUi.present(this,"Graphics drivers",driverPage());
     }

@@ -1,5 +1,6 @@
 #include "ui/touch_pad.h"
 #include "ui/touch_icons.h"
+#include "ui/touch_overlay.h"
 #include <rex/ui/ui_event.h>
 #include <cmath>
 #include <cstdio>
@@ -23,6 +24,7 @@ struct TouchPadTestAccess {
     std::lock_guard lock(pad.mutex_);
     pad.steering_updated_ -= std::chrono::milliseconds(ms);
   }
+  static void Insets(TouchPad& pad,float left,float top,float right,float bottom){std::lock_guard lock(pad.mutex_);pad.safe_left_=left;pad.safe_top_=top;pad.safe_right_=right;pad.safe_bottom_=bottom;}
   static void AgeAll(TouchPad& pad,int seconds){
     std::lock_guard lock(pad.mutex_);
     pad.last_touch_-=std::chrono::seconds(seconds);
@@ -214,6 +216,15 @@ int main() {
   Press(pad,1,"Y");Access::AgeAll(pad,2);CHECK(Find(pad,"Y").opacity==1&&pad.State().buttons==rex::input::X_INPUT_GAMEPAD_Y);Release(pad,1);
   CHECK(Find(pad,"Y").opacity>.9f);
 
+  // Feedback names describe active pointers and clear with input ownership.
+  {std::ofstream out(layout);out<<"icon_opacity 0.91\nopacity 0.22\n";}
+  pad.LoadLayout(layout);CHECK(std::abs(Find(pad,"RT").icon_opacity-.91f)<.001f);
+  CHECK(std::abs(pad.Opacity()-.22f)<.001f);
+  CHECK(pad.PressedControls().empty());Press(pad,1,"RT");Press(pad,2,"Y");
+  CHECK(pad.PressedControls()=="RT|Y");Release(pad,1);CHECK(pad.PressedControls()=="Y");
+  pad.SetSuspended(true);CHECK(pad.PressedControls().empty());pad.SetSuspended(false);
+  Press(pad,1,"RT");pad.SetPhysicalController(true);CHECK(pad.PressedControls().empty());pad.SetPhysicalController(false);
+
   // Fixed sticks use the saved centre; floating sticks start at the touch.
   {std::ofstream out(layout);out<<"steering stick\nleft_mode 1\nidle_seconds 0\n";}
   pad.LoadLayout(layout);const auto fixed=Find(pad,"LS");
@@ -222,6 +233,11 @@ int main() {
   {std::ofstream out(layout);out<<"steering stick\nleft_mode 0\n";}
   pad.LoadLayout(layout);Access::Touch(pad,1,Action::kDown,fixed.x+fixed.radius*.5f,fixed.y);
   CHECK(pad.State().thumb_lx==0);Release(pad,1);
+
+  const auto overlay=pinyon_shift::ui::TouchOverlayForShapes(pad.Shapes(1280,720),pad.Opacity());
+  bool base=false,knob=false;
+  for(const auto& disc:overlay){CHECK(pinyon_shift::ui::FindTouchIcon(disc.label)!=nullptr);if(disc.label=="LS"){base|=!disc.thumb_knob;knob|=disc.thumb_knob;}}
+  CHECK(base&&knob); // Both stick parts have a drawable identity in gameplay.
 
   // Invisible steering/look zones respect button precedence and axis ownership.
   {std::ofstream out(layout);out<<"steering stick\nleft_mode 2\nright_mode 2\n";}
@@ -239,6 +255,15 @@ int main() {
   pad.SetRumbleCallback([&](uint16_t l,uint16_t r){rumbleLeft=l;rumbleRight=r;});
   pad.Rumble(123,456);CHECK(rumbleLeft==123&&rumbleRight==456);
   pad.SetSuspended(true);CHECK(rumbleLeft==0&&rumbleRight==0);pad.SetSuspended(false);pad.SetRumbleCallback({});
+  // Wide pedal artwork must stay inside cutouts at the saved extremes.
+  {std::ofstream out(layout);out<<"LT 1 1 .24 0\nRT 0 0 .24 0\nidle_seconds 0\n";}
+  pad.LoadLayout(layout);Access::Insets(pad,45,12,55,18);
+  for(auto [w,h]:{std::pair{1280.f,720.f},std::pair{320.f,180.f}})for(const auto& shape:pad.Shapes(w,h)){
+    const auto* icon=pinyon_shift::ui::FindTouchIcon(shape.label);
+    CHECK(shape.x-icon->width*shape.radius>=45-.01f&&shape.x+icon->width*shape.radius<=w-55+.01f);
+    CHECK(shape.y-icon->height*shape.radius>=12-.01f&&shape.y+icon->height*shape.radius<=h-18+.01f);
+  }
+  Access::Insets(pad,0,0,0,0);
   std::filesystem::remove_all(root);
   std::printf("Touch controls: %d failures\n", failures);
   return failures ? 1 : 0;

@@ -17,6 +17,7 @@ final class LayoutProfiles {
   private static File folder(Activity a){return new File(MobileConfig.base(a),"state/config/layouts");}
   static void show(Activity a){
     LinearLayout body=FestivalUi.column(a);
+    TouchLayout modern=new TouchLayout();modern.modernDefaults(a);FestivalUi.action(a,body,"Modern racing preset",()->apply(a,modern));
     FestivalUi.action(a,body,"Save current layout as…",()->{
       EditText field=new EditText(a);field.setSingleLine(true);
       AlertDialog dialog=new AlertDialog.Builder(a).setTitle("Layout name").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();

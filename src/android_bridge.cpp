@@ -17,7 +17,7 @@
 #include "ui/settings_menu.h"
 #include "ui/touch_pad.h"
 extern "C" __attribute__((used, visibility("default")))
-const char fh4droid_native_bridge_abi[] = "fh4droid-native-bridge:r5-controls-v1";
+const char fh4droid_native_bridge_abi[] = "fh4droid-native-bridge:r6-modern-controls-v1";
 namespace {
 std::mutex bridge_mutex;
 std::function<void(bool)> menu_handler;
@@ -190,4 +190,10 @@ Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeAchievements(
   std::lock_guard lock(bridge_mutex);
   const std::string json = achievements_handler ? achievements_handler() : "{}";
   return env->NewStringUTF(json.c_str());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativePressedControls(JNIEnv* env,jclass){
+  const auto labels=pinyon_shift::ui::TouchPad::Get().PressedControls();
+  return env->NewStringUTF(labels.c_str());
 }

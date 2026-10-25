@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 final class ProblemReports {
     private static final AtomicBoolean EXPORTING=new AtomicBoolean();
-    static void capture(Activity a){if(a instanceof LauncherActivity)((LauncherActivity)a).startDiagnosticRun();else FestivalUi.explain(a,"Performance comparison","Quit to the launcher, open Settings → Performance and choose Record a performance comparison. Drive the same route with each configuration, then export a problem report.");}
+    static void capture(Activity a){if(a instanceof LauncherActivity)((LauncherActivity)a).startDiagnosticRun();else FestivalUi.explain(a,"Performance comparison","Quit to the launcher, open Settings → Advanced and choose Record a performance comparison. Drive the same route with each configuration, then export a problem report.");}
     private static void entry(ZipOutputStream zip,String name,byte[] data)throws IOException{zip.putNextEntry(new ZipEntry(name));zip.write(data);zip.closeEntry();}
     private static org.json.JSONObject sessionBuild(File file){
         try(RandomAccessFile in=new RandomAccessFile(file,"r")){byte[] first=new byte[(int)Math.min(65536,in.length())];in.readFully(first);String line=new String(first,StandardCharsets.UTF_8).split("\\n",2)[0];return new org.json.JSONObject(line);}catch(Exception ignored){return new org.json.JSONObject();}

@@ -894,21 +894,13 @@ bool PinyonShiftApp::EnsureHostUi() {
       }
     });
     host_ui_->SetOverlaySource([this] {
-      std::vector<pinyon_shift::hostui::HostUi::OverlayDisc> discs;
       auto& pad = pinyon_shift::ui::TouchPad::Get();
       if (!window() || !pad.Visible() || (host_ui_ && host_ui_->is_open())) {
-        return discs;
+        return std::vector<pinyon_shift::hostui::HostUi::OverlayDisc>{};
       }
-      for (const auto& shape : pad.Shapes(float(window()->GetActualPhysicalWidth()),
-                                          float(window()->GetActualPhysicalHeight()))) {
-        discs.push_back({shape.x, shape.y, shape.radius, shape.stick ? "" : shape.label,
-                         shape.pressed && !shape.stick, pad.Opacity()*shape.opacity,shape.driving_icons,shape.button_hints});
-        if (shape.stick) {
-          discs.push_back({shape.stick_x, shape.stick_y, shape.radius * 0.55f, shape.label,
-                           shape.pressed, pad.Opacity()*shape.opacity,shape.driving_icons,shape.button_hints});
-        }
-      }
-      return discs;
+      return pinyon_shift::ui::TouchOverlayForShapes(
+          pad.Shapes(float(window()->GetActualPhysicalWidth()),
+                     float(window()->GetActualPhysicalHeight())), pad.Opacity());
     });
   }
   host_ui_->HudChanged();

@@ -1,0 +1,156 @@
+{
+  "RT": {
+    "caption": "RT GAS",
+    "svg": "accelerator.svg",
+    "button": "RT",
+    "label": "GAS",
+    "glyph_scale": 1.46,
+    "offset": [
+      0,
+      0.04
+    ],
+    "badge_y": -0.81
+  },
+  "LT": {
+    "caption": "LT BRAKE",
+    "svg": "brake.svg",
+    "button": "LT",
+    "label": "BRAKE",
+    "glyph_scale": 1.5,
+    "offset": [
+      0,
+      0
+    ],
+    "badge_y": -0.77
+  },
+  "A": {
+    "caption": "A HANDBRAKE",
+    "svg": "circle-parking.svg",
+    "button": "A",
+    "label": "HANDBRAKE",
+    "glyph_scale": 1.25
+  },
+  "B": {
+    "caption": "B GEAR+",
+    "svg": "arrow-up.svg",
+    "button": "B",
+    "label": "SHIFT +",
+    "glyph_scale": 1.3
+  },
+  "X": {
+    "caption": "X GEAR-",
+    "svg": "arrow-down.svg",
+    "button": "X",
+    "label": "SHIFT -",
+    "glyph_scale": 1.3
+  },
+  "Y": {
+    "caption": "Y REWIND",
+    "svg": "rewind.svg",
+    "button": "Y",
+    "label": "REWIND",
+    "glyph_scale": 1.26,
+    "filled": true,
+    "stroke": 0.65
+  },
+  "LB": {
+    "caption": "LB CLUTCH",
+    "svg": "clutch.svg",
+    "button": "LB",
+    "label": "CLUTCH",
+    "glyph_scale": 1.3
+  },
+  "RB": {
+    "caption": "RB CAMERA",
+    "svg": "camera.svg",
+    "button": "RB",
+    "label": "CAMERA",
+    "glyph_scale": 1.27
+  },
+  "BACK": {
+    "caption": "BACK MAP",
+    "svg": "map.svg",
+    "button": "BACK",
+    "label": "MAP",
+    "glyph_scale": 1.3
+  },
+  "START": {
+    "caption": "START PAUSE",
+    "svg": "pause.svg",
+    "button": "START",
+    "label": "PAUSE",
+    "glyph_scale": 1.2,
+    "filled": true,
+    "stroke": 0.65
+  },
+  "LS": {
+    "caption": "LS STEER",
+    "svg": "stick.svg",
+    "button": "LS",
+    "label": "STEER",
+    "glyph_scale": 1.3
+  },
+  "LEFT": {
+    "caption": "LEFT",
+    "svg": "chevron-left.svg",
+    "button": "",
+    "label": "LEFT",
+    "glyph_scale": 1.62
+  },
+  "RIGHT": {
+    "caption": "RIGHT",
+    "svg": "chevron-right.svg",
+    "button": "",
+    "label": "RIGHT",
+    "glyph_scale": 1.62
+  },
+  "RS": {
+    "caption": "RS LOOK",
+    "svg": "stick.svg",
+    "button": "RS",
+    "label": "LOOK",
+    "glyph_scale": 1.3
+  },
+  "UP": {
+    "caption": "D UP",
+    "svg": "arrow-up.svg",
+    "button": "",
+    "label": "D UP",
+    "glyph_scale": 1.28
+  },
+  "DOWN": {
+    "caption": "D DOWN",
+    "svg": "arrow-down.svg",
+    "button": "",
+    "label": "D DOWN",
+    "glyph_scale": 1.28
+  },
+  "DPAD_LEFT": {
+    "caption": "D LEFT",
+    "svg": "arrow-left.svg",
+    "button": "",
+    "label": "D LEFT",
+    "glyph_scale": 1.28
+  },
+  "DPAD_RIGHT": {
+    "caption": "D RIGHT",
+    "svg": "arrow-right.svg",
+    "button": "",
+    "label": "D RIGHT",
+    "glyph_scale": 1.28
+  },
+  "L3": {
+    "caption": "L3 PRESS",
+    "svg": "circle-arrow-down.svg",
+    "button": "L3",
+    "label": "PRESS",
+    "glyph_scale": 1.28
+  },
+  "R3": {
+    "caption": "R3 PRESS",
+    "svg": "circle-arrow-down.svg",
+    "button": "R3",
+    "label": "PRESS",
+    "glyph_scale": 1.28
+  }
+}

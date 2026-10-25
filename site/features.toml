@@ -126,7 +126,7 @@ cells = [
   "yes: launcher ZIP",
   "yes: launcher archive; **Add to Steam** for Game Mode",
   "partly: launcher app; not notarized, so it is approved once in System Settings",
-  "partly: an APK built by the PC launcher, installed over Wi-Fi or USB (built off Windows: untested)",
+  "yes: signed APK; local ISO or extracted-folder import",
 ]
 
 [[platform]]
@@ -136,7 +136,7 @@ cells = [
   "yes: in the launcher",
   "yes: in the launcher",
   "yes: in the launcher",
-  "partly: rebuild the APK on the PC; the app offers it",
+  "yes: install a signed APK update through Android’s installer",
 ]
 
 [[platform]]
@@ -272,7 +272,7 @@ cells = ["yes", "yes", "yes", "partly: save backups; Android photo capture omitt
 [[platform]]
 feature = "Android launcher and touch editor"
 link = "android.md#launcher"
-cells = ["n/a", "n/a", "n/a", "partly: 20 racing-icon controls, explicit arrows/stick, floating/fixed/invisible sticks, local named layouts and per-control fading; updated controls await device testing"]
+cells = ["n/a", "n/a", "n/a", "partly: transparent logo, organized settings, full-window editor; 20 proportion-preserving SVG icons in a shared PNG atlas, code badges, arrows/stick, explicit presets and per-control fading; device testing pending"]
 
 [[platform]]
 feature = "Direct ISO loading"

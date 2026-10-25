@@ -7,6 +7,7 @@ import subprocess
 import sys
 import unittest
 import uuid
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -60,16 +61,14 @@ class AndroidPortTest(unittest.TestCase):
             self.assertNotIn(path.read_bytes()[:4], (b"XEX2", b"\x7fELF"), name)
             self.assertLess(path.stat().st_size, 2 * 1024 * 1024, name)
         self.assertEqual(sorted(name for name in files if name.startswith("art/")),
-                         ["art/menu-background.png", "art/menu-logo.png"])
+                         ["art/menu-background.png", "art/menu-logo.png", "art/touch-controls.png"])
 
-    def test_manifest_asks_only_for_sockets_rumble_and_updates(self):
+    def test_manifest_asks_only_for_sockets_and_rumble(self):
         manifest = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
         permissions = sorted(re.findall(r'uses-permission android:name="([^"]+)"', manifest))
         # Sockets for the title's system link (socket() fails without it and
-        # the title dereferences null), vibration for rumble, and installing
-        # the newer APK a PC's share offers; nothing else.
+        # the title dereferences null) and vibration for rumble.
         self.assertEqual(permissions, ["android.permission.INTERNET",
-                                       "android.permission.REQUEST_INSTALL_PACKAGES",
                                        "android.permission.VIBRATE"])
         self.assertIn('android:extractNativeLibs="true"', manifest)
         self.assertIn("android.hardware.vulkan.version", manifest)
@@ -84,9 +83,8 @@ class AndroidPortTest(unittest.TestCase):
         self.assertEqual(pinyon_android.NATIVE_LIBRARIES[-1], "libmain.so")
 
     def test_the_app_icon_opens_the_android_launcher(self):
-        # ONE_CLICK_SETUP_BACKLOG A-4: the launcher entry is the setup
-        # screen, which hands over to the game once its files are present;
-        # tooling still starts the game activity directly.
+        # The launcher owns the app icon; the shortcut opens only local import.
+        # All app windows keep the same landscape orientation.
         manifest = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
         setup = manifest[manifest.index('android:name="studio.deimos.pinyonshift.SetupActivity"'):]
         setup = setup[:setup.index("</activity>")]
@@ -98,18 +96,24 @@ class AndroidPortTest(unittest.TestCase):
         self.assertNotIn("android.intent.category.LAUNCHER", setup)
         self.assertNotIn("android.intent.category.LAUNCHER", game)
         self.assertIn(pinyon_android.PACKAGE + ".SETUP", setup)
-        self.assertIn('android:usesCleartextTraffic="true"', manifest)
+        self.assertIn('android:usesCleartextTraffic="false"', manifest)
+        orientation = "{http://schemas.android.com/apk/res/android}screenOrientation"
+        for activity in ET.fromstring(manifest).iter("activity"):
+            self.assertEqual(activity.get(orientation), "landscape")
         shortcuts = (ROOT / "android" / "res" / "xml" / "shortcuts.xml").read_text(encoding="utf-8")
         self.assertIn(pinyon_android.PACKAGE + ".SETUP", shortcuts)
 
-    def test_setup_writes_only_inside_the_game_and_state_folders(self):
+    def test_local_import_cannot_start_a_network_transfer(self):
         source = (ROOT / "android" / "java" / "studio" / "deimos" / "pinyonshift"
                   / "SetupActivity.java").read_text(encoding="utf-8")
-        self.assertIn('path.startsWith("game/base/") || path.startsWith("state/")', source)
+        self.assertIn('path.startsWith("game/base/")', source)
         self.assertIn('part.equals("..")', source)
         self.assertIn("getCanonicalPath()", source)
-        # The PC's save replaces the device's only after a backup.
-        self.assertLess(source.index("backUpSave();"), source.index("fetch(code,"))
+        for removed in ("java.net", "DatagramSocket", "HttpURLConnection", "PackageInstaller", "startDiscovery", "copyFromPc"):
+            self.assertNotIn(removed, source)
+        self.assertIn("ACTION_OPEN_DOCUMENT_TREE", source)
+        self.assertIn("current.attach()", source)
+        self.assertIn("operation.cancel()", source)
 
     def test_packager_compiles_java_8_and_desugars_to_android(self):
         # javac uses the JDK Java 8 bootstrap, providing LambdaMetafactory;

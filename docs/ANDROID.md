@@ -2,9 +2,9 @@
 
 ## FH4Droid Android-only fork
 
-FH4Droid focuses on Android only. The `0.6.6-r5` testing build uses application ID `ph.xhyn.fh4droid`. Install the APK and choose your own supported USA retail ISO or complete extracted game folder; the phone does not compile the game. See the [fork release notes](releases/fh4droid-0.6.6-r5.md) for requirements and limitations. The r5 integration has not been tested on a physical Android device. The [current Android guide](../site/pages/android.md) describes the launcher, drawer, settings, profiles, controls and reports; the upstream sections below retain their named historical measurements.
+FH4Droid focuses on Android only. The `0.6.7-r6` testing build uses application ID `ph.xhyn.fh4droid`. Install the APK and choose your own supported USA retail ISO or complete extracted game folder; the phone does not compile the game. See the [fork release notes](releases/fh4droid-0.6.7-r6.md) for requirements and limitations. The r6 integration has not been tested on a physical Android device. The [current Android guide](../site/pages/android.md) describes the launcher, drawer, settings, profiles, controls and reports; the upstream sections below retain their named historical measurements.
 
-The build and Wi-Fi instructions below are inherited from upstream. Its private-build distribution policy describes upstream Pinyon Shift; this fork's prebuilt APK release is separate and contains compiled game translations. Raw game files, generated source, native build products and signing keys remain excluded from the source repository.
+The developer build instructions and historical measurements below are inherited from upstream. Current FH4Droid source uses local ISO/folder import; its PC discovery, pairing, Wi-Fi transfer and network app-update client have been removed. Its private-build distribution policy describes upstream Pinyon Shift; this fork's prebuilt APK release is separate and contains compiled game translations. Raw game files, generated source, native build products and signing keys remain excluded from the source repository.
 
 ## Upstream Android status
 
@@ -100,71 +100,26 @@ uploaded. The repository refuses Android packages, libraries and signing keys
   free on the install drive. From a terminal, `pinyon.py android doctor
   --install` does the same (`--accept-licenses` answers yes).
 - The device: arm64, Android 13 (API 33) or later, a Vulkan 1.3 driver,
-  about 8 GB free, on the same network as the PC. USB debugging is needed only
+  about 8 GB free for an extracted folder. USB debugging is needed only
   for the adb commands.
 
-## From the PC to the device
+## Local installation and game import
 
-In the launcher, once the game plays on the PC, choose **Android**:
+Install the signed FH4Droid APK through Android's installer. Open **Game files**
+and choose your supported USA base-game ISO or complete extracted folder.
+To use an extracted folder from a PC, copy it to the device over USB first,
+then choose the folder containing `default.xex`. The app checks it against the
+supported catalog before replacing an installation. Completed files are kept
+when an import is cancelled; select the same source to resume it.
 
-1. **Build APK** builds `.local/android/pinyon-shift.apk` (20 to 60 minutes
-   the first time), from title update v4 when you play v4 on the PC. The
-   panel shows where the package is, with **Show in folder** and **Save a
-   copy**. A failure is described in `.local/logs/android-error.json`.
-2. **Share on Wi-Fi** shows a QR code and a six-digit pairing code. Scan the
-   code with the device's camera (or open the address under it in the
-   device's browser), download the app and open it; Android asks once to
-   allow the browser to install apps. Windows asks once to allow the launcher
-   on private networks.
-3. The app opens its setup screen while the game files are missing. It finds
-   the PC by a broadcast on the local network (or takes the address the panel
-   shows), asks for the pairing code and lists what the PC offers: the game
-   files (7.2 GB, required), title update v4 (with a v4 package), imported
-   DLC, the Rally overlay, the PC's mods, its custom radio stations, the XE
-   mod and the PC's save. The save is never selected for you; when chosen,
-   the device's own save is first copied to
-   `files/state/backups/before-pc-save-<time>`. An interrupted copy resumes
-   where it stopped. Then **Play**.
+The long-press **Game files** shortcut opens the local importer. The launcher,
+importer, touch editor, driver probe and game stay in fixed landscape orientation.
+The left footer contains text links; the right shows the installed version and
+build number. App updates are installed manually through Android.
 
-The mod rows carry the mods the PC has enabled, as it plays them. Before
-sharing, the launcher rebuilds their generated patches (`zz-db-patches`,
-`zz-archive-patches`) from the PC's game files, as every PC launch does;
-the device's game files come from the same disc, so the patched archives
-match. Because those patches are built for exactly the PC's set, the mods,
-custom radio and XE rows are copied together. On the device each mod
-folder in `files/state/mods` ends up as on the PC: files the PC no longer
-has move to `files/state/backups/before-pc-mods-<time>`, which also keeps
-the device's previous `enabled_mods`. `enabled_mods` is cleared while the
-copy runs (an interrupted copy plays unmodded) and set to the PC's list
-when it completes. Mods that only change how the game looks keep your save;
-XE plays its own new save (`user-xe`), as on the PC. Not shared: native
-mods (their library is a PC binary) and XE with a v4 package (XE is made
-for the base game). If the game has never started on the device, the list
-is applied at the second start, after the game has written its settings.
-
-When the PC shares a newer build of the app than the one installed (a
-higher version, or a later build of the same version), the setup screen
-says so after connecting and offers **Install update**. The app downloads
-the package from the share and hands it to Android's installer, which asks
-to confirm; Android also asks once to allow Pinyon Shift to install apps.
-The app closes while it updates; the save, settings and game files stay.
-A base package is not offered to a device that has title update v4
-installed, since a v4 save cannot be loaded by the base game again.
-
-The launcher serves only while its Android panel is open and sharing, only to
-private network addresses, and only the files it listed. Every request but
-the download page and the package needs the pairing code, which changes each
-time sharing starts; ten wrong codes stop the share. Nothing goes from the
-device to the PC.
-
-To copy more later, such as DLC imported afterwards, changed mods or a
-rebuilt app, long-press the app icon and choose **Get files from PC**. Without a network, copy the extracted game
-folder (`.local\game\base` in the install folder, the one holding
-`default.xex`) to the device over USB and choose it with **Choose folder** on
-the setup screen.
-
-With USB debugging on, **Install over USB** in the panel installs the package
-and copies the game with adb. From a terminal:
+The following commands are for developer builds and USB deployment.
+With USB debugging on, the tools can install the package and copy the game
+with adb. From a terminal:
 
 ```bash
 python tools/pinyon.py android doctor --install
@@ -213,10 +168,9 @@ python tools/pinyon.py android push-title-update --state-root STATE
 
 A save written by v4 cannot be loaded by the base build afterwards, so keep a
 copy before its first v4 start. Offline 1000 Club needs
-`pinyon_shift_car_challenge_gate_probe` and `xam_report_live_signin` on. When
-the setup screen copies title update v4 from a PC with 1000 Club offline on,
-it writes both to `files/state/config/android-arguments.txt`, whose lines the
-game adds to its arguments at every start.
+`pinyon_shift_car_challenge_gate_probe` and `xam_report_live_signin` on. For a developer v4 build, put both flags in
+`files/state/config/android-arguments.txt`; the game adds that file’s lines
+to its arguments at every start.
 
 Start the game from the launcher icon, or:
 
@@ -236,24 +190,24 @@ accelerator (RT) and brake (LT) pedal pictograms, A, B, X, Y, the bumpers,
 Back and Start, a right look stick, four separate D-pad directions and both
 stick clicks. Both arrows held together give neutral steering. Controls →
 Steering in the touch editor switches between Arrows and the original Stick,
-keeping saved positions for both. Icons use shared drawn paths rather than
+keeping saved positions for both. Icons use a shared PNG atlas independently of
 game fonts. Driving symbols show handbrake (A), shift up (B), shift down (X),
 rewind (Y), clutch (LB), camera (RB), map (Back) and pause (Start), with small
-drawn Xbox hints for menu prompts. These action names assume default game
+button/action captions for menu prompts. These action names assume default game
 bindings. The D-pad remains independent of steering; L3/R3 press the stick
 buttons and the right stick controls the camera. All 20 editable controls,
-including the optional left steering stick, have shared vector artwork.
+including the optional left steering stick, have shared antialiased PNG artwork.
 Held controls stay visible; global and per-control idle timers govern fading after
 release. Controller auto-hide can be changed in the editor
 (`pinyon_shift_touch_controls` turns the overlay off).
 
 The editor also provides immediate/120 ms/240 ms arrow response, optional sliding
 pedals (half input initially; slide up for more or down for less), high contrast,
-and optional touch vibration. The movable toolbar groups tools under Control, Layout, Driving and
+and optional touch vibration. The full-window Properties view groups tools under Control, Layout, Driving and
 Appearance; the page scrolls when needed. Position, size, opacity and response
 values are visible, including effective high-contrast opacity. Position updates
-while dragging. Select control and Move buttons support editing without drag
-gestures, with accessible value feedback. These changes have host tests and Android compilation
+while dragging. The control selector and position/size sliders support editing
+without drag gestures, with accessible value feedback. These changes have host tests and Android compilation
 checks; on-device gameplay and accessibility validation remain pending.
 
 Problem-report exports use separate completed ZIP files. Repeat export taps are
@@ -276,7 +230,7 @@ without requiring the standalone generator. It does not regenerate changed game
 inputs or generator settings; use matching source and SDK revisions, and retain
 the normal generator requirement for builds which regenerate code.
 
-Android's Back button or gesture opens SETTINGS, and inside the menus it steps
+Android's Back button or gesture opens the pause drawer, and inside the menus it steps
 back; tap a row to open or change it. The FH4Droid drawer also holds achievements and the separate-profile trainer.
 Android photo capture and minimap repositioning are omitted.
 Clicking both sticks (LS + RS) shows or hides the performance panel, F3 on a
@@ -287,7 +241,7 @@ keyboard; SETTINGS > CONTROLLER > PERFORMANCE PANEL changes the buttons
 
 | Symptom | Cause |
 | --- | --- |
-| The setup screen does not find the PC | The device and the PC are on different networks, the network blocks broadcasts, or Windows Firewall blocked the launcher: enter the address the launcher shows, and allow the launcher on private networks. |
+| Folder import rejects the source | Choose the complete supported base-game folder containing `default.xex`. Copy it to the device over USB before importing. |
 | The app closes at once | Started from adb without the game files: open it from the app icon, or run `push-data`. If logcat says `Cannot create the state folder`, files were copied into the app's folder by hand: run `push-data` again, which lets the app use them. |
 | `VULKAN_CAPABILITY_REPORT` in the log | The device's features, formats and memory, logged at every start; attach it to reports. |
 | Resolution or preset causes artifacts | Restore 100% raster scale and the default preset, restart and export a report. The Android UI offers 25–100%; phone-driver qualification is pending. |
@@ -344,3 +298,31 @@ receipt. Reusing an existing output directory previously triggered SDL thread
 crashes during static destruction on the Odin. A private rejection check and
 desktop subprocess check preserve that directory and emit the expected failure;
 the updated Odin run produces no corresponding native crash record.
+
+## Current mobile presentation
+
+The launcher shows the existing transparent FH4Droid logo without a backing box.
+Settings use Graphics, Controls, Audio, Interface, Gameplay and Advanced sections;
+Android Back opens Resume, Settings, Controls, More and Quit. The touch editor
+uses the whole window for placement, with a separate full-window Properties
+view and Save, Cancel, Test and Hide tools actions. The active custom layout is
+kept until the player explicitly applies a preset or saves an edited draft.
+
+`config/touch-artwork.json` generates the PNG loaded by Android and embedded
+byte-for-byte in the native overlay. `tools/generate-touch-artwork.py --check`
+validates both consumers without Pillow. Regeneration uses Pillow 11.3.0 and CairoSVG 2.8.2 from `tools/requirements-touch-artwork.txt`. The source SVGs use square 24-unit viewports, with proportions preserved. Lucide/Feather license notices ship in the Android resources and are available through More → About → Control artwork credits. The
+production mesh readback test covers all 20 symbols, captions, classic letters,
+pressed state and stick knobs; its optional PPM output is a software artwork
+proof, not an Android gameplay screenshot. Phone layout and legibility still
+need device testing.
+
+The fractional-resolution band-clear regression and its limits are documented
+in the [Android player guide](../site/pages/android.md#fractional-resolution-lines).
+The fix changes intermediate untiled-band clears only; guest texture layouts
+and 100% resolution remain unchanged.
+
+The current driving artwork uses thin utility symbols and translucent pedal
+faces with bevel highlights and grip grooves. Accelerator, brake and clutch
+use their pedal silhouette directly; the touch targets retain their saved size.
+Pressed modern pedals receive the same warm tint in native rendering and the
+editor. SVG gradients reference only definitions inside the same source file.
