@@ -2,6 +2,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 import sys,tempfile,unittest
+from unittest import mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import pinyon_android
 
@@ -18,4 +19,15 @@ class AndroidValidationTests(unittest.TestCase):
                 pinyon_android.validation_library(SimpleNamespace(validation_layer=file,debuggable=True))
             header[18:20]=(183).to_bytes(2,'little');file.write_bytes(header)
             self.assertEqual(pinyon_android.validation_library(SimpleNamespace(validation_layer=file,debuggable=True)),file)
+class AndroidBaselineTests(unittest.TestCase):
+    def test_package_reports_the_configured_cpu_requirement(self):
+        with tempfile.TemporaryDirectory() as folder, mock.patch.object(pinyon_android,"ROOT",Path(folder)):
+            file=Path(folder)/"out/build"/pinyon_android.CONFIG["configure_preset"]/"CMakeCache.txt";file.parent.mkdir(parents=True)
+            for baseline in ("armv8-a","armv8.2-a"):
+                file.write_text("PINYON_SHIFT_ANDROID_MARCH:STRING="+baseline+"\n")
+                self.assertEqual(pinyon_android._cpu_baseline(),baseline)
+    def test_unconfigured_build_uses_the_declared_default(self):
+        with tempfile.TemporaryDirectory() as folder,mock.patch.object(pinyon_android,"ROOT",Path(folder)):
+            self.assertEqual(pinyon_android._cpu_baseline(),pinyon_android.CONFIG["cpu_baseline"])
+
 if __name__=='__main__':unittest.main()
