@@ -756,3 +756,50 @@ index f67ae8f..7c5ef10 100644
                                      : VK_MAKE_API_VERSION(0, 1, 0, 0);
  
    VkInstanceCreateInfo instance_create_info;
+diff --git a/src/ui/vulkan/vulkan_device.cpp b/src/ui/vulkan/vulkan_device.cpp
+index 87a571c..38435f9 100644
+--- a/src/ui/vulkan/vulkan_device.cpp
++++ b/src/ui/vulkan/vulkan_device.cpp
+@@ -404,6 +404,8 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+ 
+   bool ext_KHR_portability_subset = false;
+   bool ext_1_2_KHR_driver_properties = false;
++  bool ext_1_2_KHR_create_renderpass2 = false;
++  bool ext_1_2_KHR_depth_stencil_resolve = false;
+   if (get_physical_device_properties2_supported) {
+     // #164. Must be enabled according to the specification if the physical
+     // device is a portability subset one.
+@@ -429,6 +431,9 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+     XE_UI_VULKAN_STRUCT_PROMOTED_EXTENSION(KHR_maintenance4, 1, 3)
+     // #55.
+     XE_UI_VULKAN_STRUCT_PROMOTED_EXTENSION(KHR_dynamic_rendering, 1, 3)
++    // Dynamic rendering before core 1.2 also needs these extension dependencies.
++    XE_UI_VULKAN_LOCAL_PROMOTED_EXTENSION(KHR_create_renderpass2, 1, 2)
++    XE_UI_VULKAN_LOCAL_PROMOTED_EXTENSION(KHR_depth_stencil_resolve, 1, 2)
+   }
+ 
+   if (with_swapchain) {
+@@ -545,6 +550,23 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+     }
+   }
+ 
++  if (properties.apiVersion < VK_MAKE_API_VERSION(0, 1, 2, 0)) {
++    const auto disable_extension = [&](const char* name) {
++      enabled_extensions.erase(std::remove_if(enabled_extensions.begin(), enabled_extensions.end(),
++          [&](const char* enabled) { return std::strcmp(name, enabled) == 0; }), enabled_extensions.end());
++    };
++    if (!ext_1_2_KHR_create_renderpass2 && ext_1_2_KHR_depth_stencil_resolve) {
++      ext_1_2_KHR_depth_stencil_resolve = false;
++      disable_extension(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME);
++    }
++    if ((!ext_1_2_KHR_create_renderpass2 || !ext_1_2_KHR_depth_stencil_resolve) &&
++        device->extensions_.ext_1_3_KHR_dynamic_rendering) {
++      device->extensions_.ext_1_3_KHR_dynamic_rendering = false;
++      disable_extension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
++      REXLOG_INFO("Vulkan 1.1 dynamic-rendering dependencies unavailable; using render passes");
++    }
++  }
++
+   if (with_swapchain && !device->extensions_.ext_KHR_swapchain) {
+     REXLOG_WARN("Vulkan device '{}' doesn't support swapchains", properties.deviceName);
+     return nullptr;

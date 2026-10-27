@@ -10,9 +10,7 @@ import java.util.*;
 
 final class ControllerTools {
   static void testRumble(Activity a) {
-    VibratorManager manager =
-        (VibratorManager) a.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
-    Vibrator vibrator = manager == null ? null : manager.getDefaultVibrator();
+    Vibrator vibrator = PlatformCompat.vibrator(a);
     if (vibrator == null || !vibrator.hasVibrator()) {
       FestivalUi.explain(a, "Phone vibration", "This device does not report a vibration motor.");
       return;

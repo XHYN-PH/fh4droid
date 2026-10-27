@@ -148,6 +148,9 @@ else()
     )
 endif()
 
+add_executable(pinyon_shift_view_policy_tests EXCLUDE_FROM_ALL tests/ui/view_policy_test.cpp)
+target_include_directories(pinyon_shift_view_policy_tests PRIVATE src)
+
 add_executable(pinyon_shift_fh1_ui_api_tests EXCLUDE_FROM_ALL
     tests/ui/fh1_ui_api_test.cpp
     src/ui/fh1_ui_api.cpp
@@ -256,6 +259,7 @@ target_link_libraries(pinyon_shift_touch_pad_tests PRIVATE rex::runtime)
 add_dependencies(pinyon_shift_host_tests
     pinyon_shift_touch_overlay_tests
     pinyon_shift_touch_pad_tests
+    pinyon_shift_view_policy_tests
     pinyon_shift_fh1_ui_api_tests
     pinyon_shift_fh1_shader_pack_tests
     pinyon_shift_hostui_tests

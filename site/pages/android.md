@@ -6,7 +6,21 @@ description: FH4Droid launcher, game files, settings, controls and troubleshooti
 ---
 
 
-FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The 0.6.7-r6 shell and renderer changes use the fresh source and have not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
+FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The 0.6.8-r7 shell and renderer changes use the fresh source and have not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
+
+## r7 changes and limits
+
+Android 12 or newer is required. Snapdragon 845/Adreno 630, Mali-G52 and Xclipse need device qualification; an Android 10 stock phone does not meet this OS floor. Start Mali/Xclipse with the system Vulkan driver. Turnip controls are Adreno-only, and PanVK is not a universal Mali fallback.
+
+View changes use host-time hysteresis and discard obsolete queued requests. The reported sudden shrinking/sidebars needs transition testing on the phone; the white-car overexposure remains unresolved. The probe checks 8-bit/10-bit/float16 clear and readback with both render-pass paths, which does not test the paint shaders.
+
+Save management supports Normal/Modded/Both archives and reversible restore. Offline Profile edits local name/picture without changing XUID. Xenia ZIP import preserves its source XUID, keeps existing profiles, backs up settings and refuses detected TU4 saves in this base build. This is separate from Xbox LIVE, which is not provided.
+
+Named graphics profiles and a manually marked working snapshot support recovery. Resolution, MSAA and screen mode distinguish running and next-launch values; presets show changes before applying. Budget preview targets 30 FPS at 50% with one shader worker, without a measured 4 GB performance claim. Native/classic renderer options remain experimental. Camera comfort options use existing native hooks.
+
+Interface offers separate app/game languages: English or Filipino core menus (detailed help stays English) and game choices limited to archives present in the owned files. Controls hand off between keyboard, gamepad and touch, with Android menu hints and A/B navigation. Use my music player turns off game music at next launch while preserving engine/effects.
+
+Reports refresh live state every five seconds and on pause/view changes, prioritize the current CSV and identify truncation. More → Mark a visual issue records a frame/time/view marker for an external screenshot. Latest frame time, RAM and thermal severity are optional FPS details; severity is not temperature. See the [complete review](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.8-r7-review.md) for all 70 dispositions and remaining device tests, and [release notes](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.8-r7.md) for opt-in validation packaging.
 
 ## Launcher
 
@@ -46,9 +60,9 @@ A software Vulkan readback suite checked 953,854 colour/depth values across ever
 
 Touch steering defaults to separate left and right arrow buttons. Holding both gives neutral steering; sliding between them changes direction, and moving outside them releases steering. Every control has drawn artwork: pedals, handbrake, shifting, rewind, clutch, camera, map and pause. Small button/action captions keep menu prompts recognizable; action symbols assume the game's default bindings and do not remap buttons. The right look stick, four D-pad directions and L3/R3 stick clicks are also editable. D-pad presses stay separate from steering, and the look stick works while holding steering and a pedal. Touch drawing and its button hints do not require the game's font archive.
 
-Controls opens a full-window touch canvas. Properties opens a separate full-window view with Control, Layout, Driving and Appearance tabs. Drag or pinch controls, or set size/position with sliders. Hide tools clears the canvas for placement; Show tools restores Save/Cancel and Test. Test highlights touches locally without sending inputs to the game. Saving is atomic; cancelling keeps the previous layout. Hidden controls remain selectable under Properties.
+Controls opens a full-window touch canvas. Properties opens a separate full-window view with Control, Layout, Driving and Appearance tabs. Drag or pinch controls, or set size/position with sliders. Hide tools clears the canvas for placement; Show tools restores Save/Cancel and Test. Test highlights touches locally without sending inputs to the game. Saving is atomic; cancelling keeps the previous layout. Hidden controls remain selectable under Properties. Edit offers bounded undo/redo, overlap/small-target checks and Hide tools. Back/Cancel asks before discarding a changed draft. Safe-area data refreshes before native rendering as well as input.
 
-The editor and native overlay use the exact same antialiased PNG atlas for all 20 icons, classic letters and button/action captions. Modern symbols use thin linework on translucent controls. Accelerator, brake and clutch have shaded pedal faces with fine grip details and slim bevels; their artwork replaces the extra rectangular keycaps. Pressed pedals warm to the orange accent, while steering arrows use circular pads. All symbols are rendered from square SVGs with their proportions preserved. The camera uses a circular lens. Separate button-code badges sit above the symbols and short action labels below them. The Modern racing preset groups map, camera and pause at the upper right, with rewind and handbrake above the pedals. It adapts the spacing to the screen aspect ratio so pedal and steering clusters stay separated on tablets and wide phones. Existing custom positions stay in place until a preset is applied. Icon opacity is independent of backing opacity. Normal, pressed and held states use the same artwork. Optional pressed-button names briefly identify touched controls at the top of the screen. Action labels assume default game bindings.
+The editor and native overlay use the exact same antialiased PNG atlas for all 20 icons, classic letters and button/action captions. Modern symbols use thin linework on translucent controls. Accelerator, brake and clutch have shaded pedal faces with fine grip details and slim bevels; their artwork replaces the extra rectangular keycaps. Pressed pedals warm to the orange accent, while steering arrows use circular pads. All symbols are rendered from square SVGs with their proportions preserved. The camera uses a circular lens. Separate button-code badges sit above the symbols and short action labels below them. The Modern racing preset groups map, camera and pause at the upper right, with rewind and handbrake above the pedals. It adapts the spacing to the screen aspect ratio so pedal and steering clusters stay separated on tablets and wide phones. Existing custom positions stay in place until a preset is applied. Always visible works before the first tap. Separate turn-in/return rates and steering lock control the arrows; opposed arrows cancel immediately. Output amount bars show pedal and arrow values. Icon opacity is independent of backing opacity. Normal, pressed and held states use the same artwork. Optional pressed-button names briefly identify touched controls at the top of the screen. Digital touch remapping updates artwork/captions and hit bounds; action names still assume the game's default controller bindings. Detected menus keep their original Confirm/Back actions.
 
 New layouts start with the compact Modern racing preset. Existing layouts keep their saved positions and visibility. Apply Modern racing, Full controller or a handed preset explicitly to replace positions. Steering has Arrows and Stick choices; floating, fixed and invisible modes remain available for each stick. The optional manual group shows clutch and both gear controls together.
 
@@ -66,7 +80,7 @@ Android Back opens a five-action pause drawer: Resume, Settings, Controls, More 
 
 ## Saves
 
-Saves exports the standard base-game user profile as a save-only ZIP. Imports validate the entire archive in staging, reject path escapes/duplicates and retain the previous user tree before an atomic replacement. Restore keeps the current tree so the operation can be reversed. Quit the game before save management. Separate modded/cheat profiles remain available through Advanced game settings. Base-game and TU4 saves are incompatible.
+Saves exports Normal, Modded or Both base-game save trees. Imports validate the entire archive in staging, reject path escapes/duplicates and retain selected previous trees before replacement. Multi-tree failures roll back and Restore keeps the current trees so the operation is reversible. Legacy normal-only archives remain readable. Quit the game before save management. The page shows backup status and configured profile selection. Base-game and TU4 saves are incompatible; guided Xenia import refuses detected TU4 data for this APK.
 
 ## Reports and recovery
 
@@ -86,7 +100,7 @@ An intentional native window close records a clean exit before the runtime's har
 
 The pinned ShiftGlue SDK remains at 79d3e6f. Reviewed runtime changes and regenerated Vulkan helpers are stored in cmake/patches and applied idempotently before configuring the source SDK. This avoids a submodule commit unavailable from the upstream remote. Regenerate helpers with compile-fh1-native.sh (SPIRV_ONLY=1 and GLSLANG set), then run tools/update-android-sdk-patch.py after reviewing the SDK worktree.
 
-The ARMv8.2 baseline, Android 13 minimum and 16 KiB native/ZIP alignment requirements are unchanged. Run tools/test-android-mobile.py and the renderer/parser host tests before packaging. No physical-device or sustained performance claim follows from compilation or SPIR-V validation.
+The current minimum is Android 12/API 31 and the native CPU baseline is ARMv8-A. Vulkan 1.1/1.2 capability paths, Mali/Immortalis and Samsung Xclipse are experimental; a GPU name or API version does not qualify gameplay. 16 KiB native/ZIP alignment remains required. Run tools/test-android-mobile.py and the renderer/parser host tests before packaging. No physical-device or sustained performance claim follows from compilation or SPIR-V validation.
 
 A reviewed generated-code snapshot can be built with `PINYON_SHIFT_FROZEN_CODEGEN=ON`; this mode requires the complete generated modules and stamp, but not the standalone generator. It does not regenerate code when game inputs or generator settings change. Keep generated game code private and use the matching source/SDK revisions.
 
@@ -94,7 +108,7 @@ CI also checks shared touch geometry, runs the Java mobile suite with the pinned
 
 The docs workflow builds a site artifact from main or the published release tag. This fork has no configured GitHub Pages site; an owner can enable Pages with the Actions source and set the repository variable `FH4DROID_PAGES_ENABLED=true` to deploy it. Android APK publication does not depend on website deployment.
 
-[Player setup and limitations](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.7-r6.md). [Upstream Android research](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID_PORT_BACKLOG.md).
+[Player setup and limitations](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.8-r7.md). [Upstream Android research](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID_PORT_BACKLOG.md).
 
 ### Fractional-resolution lines
 

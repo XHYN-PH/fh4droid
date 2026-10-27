@@ -272,7 +272,7 @@ cells = ["yes", "yes", "yes", "partly: save backups; Android photo capture omitt
 [[platform]]
 feature = "Android launcher and touch editor"
 link = "android.md#launcher"
-cells = ["n/a", "n/a", "n/a", "partly: transparent logo, organized settings, full-window editor; 20 proportion-preserving SVG icons in a shared PNG atlas, code badges, arrows/stick, explicit presets and per-control fading; device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: transparent logo, organized settings, full-window editor; 20 proportion-preserving SVG icons in a shared PNG atlas, code badges, arrows/stick, explicit presets, remapping, undo/redo, separate arrow rates and per-control fading; device testing pending"]
 
 [[platform]]
 feature = "Direct ISO loading"
@@ -282,4 +282,4 @@ cells = ["n/a", "n/a", "n/a", "partly: base game; host support files cached; dev
 [[platform]]
 feature = "Phone save import/export and reports"
 link = "android.md#saves"
-cells = ["n/a", "n/a", "n/a", "partly: normal base-game profile; separate trainer profile; CSV headers and session/build-labelled completed report ZIPs; device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: scoped normal/modded archives, reversible restore, original-XUID base-game Xenia import; current-session reports and visual markers; device testing pending"]

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cstdlib>
 #include <functional>
 #include <regex>
@@ -44,7 +45,7 @@ T Load(PFN_vkGetInstanceProcAddr get, VkInstance instance, const char* name) {
 // SDL.
 std::string RenderTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
                        VkPhysicalDevice physical, VkDevice device,
-                       uint32_t family, bool core13) {
+                       uint32_t family, bool core13, bool dynamic_rendering = true, VkFormat test_format=VK_FORMAT_R8G8B8A8_UNORM) {
   auto gd = Load<PFN_vkGetDeviceProcAddr>(get, instance, "vkGetDeviceProcAddr");
   if (!gd) return "Device entry points unavailable.";
 #define FN(name)                                               \
@@ -77,6 +78,12 @@ std::string RenderTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
   FN(vkMapMemory);
   FN(vkUnmapMemory);
   FN(vkDeviceWaitIdle);
+  FN(vkCreateRenderPass);
+  FN(vkDestroyRenderPass);
+  FN(vkCreateFramebuffer);
+  FN(vkDestroyFramebuffer);
+  FN(vkCmdBeginRenderPass);
+  FN(vkCmdEndRenderPass);
 #undef FN
   auto begin = reinterpret_cast<PFN_vkCmdBeginRendering>(
       gd(device, core13 ? "vkCmdBeginRendering" : "vkCmdBeginRenderingKHR"));
@@ -84,7 +91,7 @@ std::string RenderTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
       gd(device, core13 ? "vkCmdEndRendering" : "vkCmdEndRenderingKHR"));
   auto properties = Load<PFN_vkGetPhysicalDeviceMemoryProperties>(
       get, instance, "vkGetPhysicalDeviceMemoryProperties");
-  if (!begin || !end || !properties)
+  if ((dynamic_rendering && (!begin || !end)) || !properties)
     return "Dynamic rendering or memory entry points unavailable.";
   VkImage image{};
   VkImageView view{};
@@ -92,6 +99,8 @@ std::string RenderTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
   VkDeviceMemory image_memory{}, buffer_memory{};
   VkCommandPool pool{};
   VkFence fence{};
+  VkRenderPass pass{};
+  VkFramebuffer framebuffer{};
   bool submitted = false, complete = false;
   struct Cleanup {
     std::function<void()> run;
@@ -102,6 +111,8 @@ std::string RenderTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
     if (submitted && !complete) return;
     if (fence) vkDestroyFence(device, fence, nullptr);
     if (pool) vkDestroyCommandPool(device, pool, nullptr);
+    if (framebuffer) vkDestroyFramebuffer(device, framebuffer, nullptr);
+    if (pass) vkDestroyRenderPass(device, pass, nullptr);
     if (view) vkDestroyImageView(device, view, nullptr);
     if (image) vkDestroyImage(device, image, nullptr);
     if (buffer) vkDestroyBuffer(device, buffer, nullptr);
@@ -126,7 +137,7 @@ std::string RenderTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
   };
   VkImageCreateInfo ic{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
   ic.imageType = VK_IMAGE_TYPE_2D;
-  ic.format = VK_FORMAT_R8G8B8A8_UNORM;
+  ic.format = test_format;
   ic.extent = {16, 16, 1};
   ic.mipLevels = ic.arrayLayers = 1;
   ic.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -145,7 +156,7 @@ std::string RenderTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
   iv.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
   TRY(vkCreateImageView(device, &iv, nullptr, &view));
   VkBufferCreateInfo bc{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-  bc.size = 16 * 16 * 4;
+  bc.size = 16 * 16 * (test_format==VK_FORMAT_R16G16B16A16_SFLOAT?8:4);
   bc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   TRY(vkCreateBuffer(device, &bc, nullptr, &buffer));
   vkGetBufferMemoryRequirements(device, buffer, &req);
@@ -190,8 +201,23 @@ std::string RenderTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
   rendering.layerCount = 1;
   rendering.colorAttachmentCount = 1;
   rendering.pColorAttachments = &attachment;
-  begin(command, &rendering);
-  end(command);
+  if (dynamic_rendering) {
+    begin(command, &rendering); end(command);
+  } else {
+    VkAttachmentDescription description{};
+    description.format=ic.format;description.samples=VK_SAMPLE_COUNT_1_BIT;
+    description.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;description.storeOp=VK_ATTACHMENT_STORE_OP_STORE;
+    description.stencilLoadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE;description.stencilStoreOp=VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    description.initialLayout=description.finalLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference reference{0,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription subpass{};subpass.pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS;subpass.colorAttachmentCount=1;subpass.pColorAttachments=&reference;
+    VkRenderPassCreateInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};rp.attachmentCount=1;rp.pAttachments=&description;rp.subpassCount=1;rp.pSubpasses=&subpass;
+    TRY(vkCreateRenderPass(device,&rp,nullptr,&pass));
+    VkFramebufferCreateInfo fb{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};fb.renderPass=pass;fb.attachmentCount=1;fb.pAttachments=&view;fb.width=fb.height=16;fb.layers=1;
+    TRY(vkCreateFramebuffer(device,&fb,nullptr,&framebuffer));
+    VkRenderPassBeginInfo render{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};render.renderPass=pass;render.framebuffer=framebuffer;render.renderArea.extent={16,16};render.clearValueCount=1;render.pClearValues=&attachment.clearValue;
+    vkCmdBeginRenderPass(command,&render,VK_SUBPASS_CONTENTS_INLINE);vkCmdEndRenderPass(command);
+  }
   barrier.oldLayout = barrier.newLayout;
   barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
@@ -227,17 +253,22 @@ std::string RenderTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
   TRY(vkMapMemory(device, buffer_memory, 0, VK_WHOLE_SIZE, 0, &pixels));
   bool matches = true;
   const auto* p = static_cast<const unsigned char*>(pixels);
-  for (int i = 0; i < 16 * 16; i++)
-    matches &= std::abs(int(p[i * 4]) - 64) <= 1 &&
-               std::abs(int(p[i * 4 + 1]) - 128) <= 1 &&
-               std::abs(int(p[i * 4 + 2]) - 191) <= 1 && p[i * 4 + 3] == 255;
+  for (int i = 0; i < 16 * 16; i++) {
+    if(test_format==VK_FORMAT_R16G16B16A16_SFLOAT){
+      const auto* half=reinterpret_cast<const uint16_t*>(p)+i*4;
+      matches &= half[0]==0x3400&&half[1]==0x3800&&half[2]==0x3a00&&half[3]==0x3c00;
+    }else if(test_format==VK_FORMAT_A2B10G10R10_UNORM_PACK32){
+      const uint32_t packed=reinterpret_cast<const uint32_t*>(p)[i];
+      matches &= std::abs(int(packed&1023)-256)<=1&&std::abs(int((packed>>10)&1023)-512)<=1&&std::abs(int((packed>>20)&1023)-767)<=1&&(packed>>30)==3;
+    }else matches &= std::abs(int(p[i * 4]) - 64) <= 1 && std::abs(int(p[i * 4 + 1]) - 128) <= 1 && std::abs(int(p[i * 4 + 2]) - 191) <= 1 && p[i * 4 + 3] == 255;
+  }
   vkUnmapMemory(device, buffer_memory);
 #undef TRY
   return matches ? "" : "The rendered pixels did not match the test image.";
 }
 
 std::string Probe(void* loader, std::string* first_name = nullptr,
-                  uint32_t max_api = VK_API_VERSION_1_3) {
+                  uint32_t max_api = VK_API_VERSION_1_3, bool force_legacy = false) {
   auto get = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
       dlsym(loader, "vkGetInstanceProcAddr"));
   if (!get) return Error("Missing Vulkan entry points.");
@@ -246,8 +277,8 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
       get, nullptr, "vkEnumerateInstanceVersion");
   uint32_t api = VK_API_VERSION_1_0;
   if (!create || !version || version(&api) != VK_SUCCESS ||
-      api < VK_API_VERSION_1_2)
-    return Error("This build requires Vulkan 1.2 with dynamic rendering.");
+      api < VK_API_VERSION_1_1)
+    return Error("This build requires Vulkan 1.1 and the listed graphics features.");
   VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
   app.pApplicationName = "FH4Droid driver test";
   app.apiVersion = std::min(api, max_api);
@@ -304,19 +335,25 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
       props2(device, &properties2);
     }
     if (first_name && first_name->empty()) *first_name = p.deviceName;
+    uint32_t ec=0;extensions(device,nullptr,&ec,nullptr);std::vector<VkExtensionProperties> ex(ec);
+    if(extensions(device,nullptr,&ec,ex.data())!=VK_SUCCESS){last="Could not enumerate Vulkan device extensions.";continue;}
+    const auto has=[&](const char* name){return std::any_of(ex.begin(),ex.end(),[&](const auto& e){return std::string(e.extensionName)==name;});};
+    const bool core13=std::min(p.apiVersion,app.apiVersion)>=VK_API_VERSION_1_3;
+    const bool dependencies=p.apiVersion>=VK_API_VERSION_1_2 || (has(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME)&&has(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME));
+    const bool dynamic_supported=!force_legacy && (core13 || (has(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)&&dependencies));
     VkPhysicalDeviceDynamicRenderingFeatures f13{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES};
     VkPhysicalDeviceVulkan12Features f12{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-    f12.pNext = &f13;
+    f12.pNext = dynamic_supported ? &f13 : nullptr;
     VkPhysicalDeviceFeatures2 f{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    f.pNext = &f12;
+    f.pNext = p.apiVersion>=VK_API_VERSION_1_2 ? static_cast<void*>(&f12) : dynamic_supported ? static_cast<void*>(&f13) : nullptr;
     features(device, &f);
-    if (p.apiVersion < VK_API_VERSION_1_2 || !f13.dynamicRendering ||
+    if (p.apiVersion < VK_API_VERSION_1_1 ||
         !f.features.independentBlend || !f.features.fragmentStoresAndAtomics ||
         !f.features.vertexPipelineStoresAndAtomics) {
       last = std::string(p.deviceName) +
-             ": missing Vulkan 1.2, dynamic rendering or required blend/atomic "
+             ": missing Vulkan 1.1 or required blend/atomic "
              "features.";
       continue;
     }
@@ -336,28 +373,8 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
              ": required depth/output formats are unavailable.";
       continue;
     }
-    uint32_t ec = 0;
-    extensions(device, nullptr, &ec, nullptr);
-    std::vector<VkExtensionProperties> ex(ec);
-    extensions(device, nullptr, &ec, ex.data());
-    bool swapchain = false, dynamic = false;
-    for (const auto& e : ex) {
-      if (std::string(e.extensionName) == VK_KHR_SWAPCHAIN_EXTENSION_NAME)
-        swapchain = true;
-      if (std::string(e.extensionName) ==
-          VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)
-        dynamic = true;
-    }
-    const bool core13 =
-        std::min(p.apiVersion, app.apiVersion) >= VK_API_VERSION_1_3;
-    if (!core13 && !dynamic) {
-      last = "This Vulkan 1.2 driver lacks the dynamic-rendering extension.";
-      continue;
-    }
-    if (!swapchain) {
-      last = "The driver does not support Vulkan swapchains.";
-      continue;
-    }
+    const bool dynamic=dynamic_supported && f13.dynamicRendering;
+    if(!has(VK_KHR_SWAPCHAIN_EXTENSION_NAME)){last="The driver does not support Vulkan swapchains.";continue;}
     uint32_t qc = 0;
     queues(device, &qc, nullptr);
     std::vector<VkQueueFamilyProperties> qp(qc);
@@ -391,11 +408,13 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES};
     enabled13.dynamicRendering = VK_TRUE;
     di.pEnabledFeatures = &enabled;
-    di.pNext = &enabled13;
-    const char* required[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-                              VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME};
-    di.enabledExtensionCount = core13 ? 1 : 2;
-    di.ppEnabledExtensionNames = required;
+    di.pNext = dynamic ? &enabled13 : nullptr;
+    std::vector<const char*> required{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    if(dynamic && !core13){
+      required.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+      if(p.apiVersion<VK_API_VERSION_1_2){required.push_back(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME);required.push_back(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME);}
+    }
+    di.enabledExtensionCount=uint32_t(required.size());di.ppEnabledExtensionNames=required.data();
     VkDevice logical{};
     status = create_device(device, &di, nullptr, &logical);
     if (status != VK_SUCCESS) {
@@ -403,12 +422,21 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
       continue;
     }
     const auto render_error =
-        RenderTest(get, instance, device, logical, family, core13);
+        RenderTest(get, instance, device, logical, family, core13, dynamic);
     // A hung queue is reclaimed when DriverProbeActivity exits its isolated
     // process.
     if (!render_error.empty()) return Error(render_error);
+    for(VkFormat format:{VK_FORMAT_A2B10G10R10_UNORM_PACK32,VK_FORMAT_R16G16B16A16_SFLOAT}){
+      const auto error=RenderTest(get,instance,device,logical,family,core13,dynamic,format);
+      if(!error.empty())return Error("HDR/10-bit readback: "+error);
+    }
     destroy_device(logical, nullptr);
-    result = "{\"ok\":true,\"gpu\":" + Quote(p.deviceName) +
+    std::string gpu_family="other";std::string gpu_name=p.deviceName;
+    std::transform(gpu_name.begin(),gpu_name.end(),gpu_name.begin(),[](unsigned char c){return char(std::tolower(c));});
+    if(gpu_name.find("xclipse")!=std::string::npos||p.vendorID==0x144d)gpu_family="xclipse";
+    else if(p.vendorID==0x13b5||gpu_name.find("mali")!=std::string::npos||gpu_name.find("immortalis")!=std::string::npos)gpu_family="mali";
+    else if(p.vendorID==0x5143)gpu_family="adreno";
+    result = "{\"ok\":true,\"gpu_family\":"+Quote(gpu_family)+",\"gpu\":" + Quote(p.deviceName) +
              ",\"vendor_id\":" + std::to_string(p.vendorID) +
              ",\"driver_id\":" + std::to_string(driver.driverID) +
              ",\"driver_name\":" + Quote(driver.driverName) +
@@ -417,18 +445,19 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
              ",\"ir3_shader_debug\":" + Quote(std::getenv("IR3_SHADER_DEBUG") ? std::getenv("IR3_SHADER_DEBUG") : "") +
              ",\"api\":" + std::to_string(p.apiVersion) +
              ",\"driver\":" + std::to_string(p.driverVersion) +
+             ",\"dynamic_rendering\":" + (dynamic ? "true" : "false") +
+             ",\"renderer\":" + Quote(dynamic ? "native" : "compatibility") +
              ",\"descriptor_indexing\":" +
              (f12.runtimeDescriptorArray && f12.descriptorBindingPartiallyBound
                   ? "true"
                   : "false") +
              ",\"checks\":[{\"name\":\"Required graphics "
-             "features\",\"ok\":true,\"detail\":\"Blend, atomics and dynamic "
-             "rendering\"},"
+             "features\",\"ok\":true,\"detail\":\"Blend and required atomics\"},"
              "{\"name\":\"Colour and depth "
              "formats\",\"ok\":true,\"detail\":\"Required sampled, storage and "
              "depth formats\"},"
-             "{\"name\":\"Render and readback\",\"ok\":true,\"detail\":\"A "
-             "small image was rendered and its pixels checked\"}]}";
+             "{\"name\":\"Render and readback\",\"ok\":true,\"detail\":\""
+             "RGBA8, 10-bit and float16 clear/readback passed; materials and full gameplay still need testing\"}]}";
     break;
   }
   destroy(instance, nullptr);

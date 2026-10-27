@@ -143,6 +143,7 @@ final class AdrenoSettings {
     body.addView(FestivalUi.text(a,
         report.optString("gpu", "Run the Vulkan test for your selected driver first."), 14,
         FestivalUi.TEXT));
+    body.addView(FestivalUi.text(a,GpuCompatibility.guidance(report.optInt("vendor_id"),report.optString("gpu")),13,FestivalUi.MUTED));
     if (adreno) {
       body.addView(FestivalUi.text(a,
           report.optString("driver_name", "Driver") + ". Changes apply on the next game launch.",

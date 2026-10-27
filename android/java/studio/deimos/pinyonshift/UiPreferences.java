@@ -10,14 +10,15 @@ import org.json.*;
 /** Explicit handoff for UI preferences between launcher and :game processes. */
 final class UiPreferences {
   private static final Set<String> BOOLEANS =
-      new HashSet<>(Arrays.asList("animations", "show_fps", "match_refresh", "phone_rumble",
+      new HashSet<>(Arrays.asList("animations", "show_fps", "show_frame_time", "show_memory_heat", "match_refresh", "phone_rumble",
           "phone_tilt", "press_names", "sustained_mode", "advanced_settings", "detailed_gpu"));
   static Map<String, Object> sanitized(Map<String, ?> values) {
     Map<String, Object> result = new LinkedHashMap<>();
     for (Map.Entry<String, ?> entry : values.entrySet()) {
       String key = entry.getKey();
       Object value = entry.getValue();
-      if (BOOLEANS.contains(key) && value instanceof Boolean)
+      if(key.equals("app_language")&&value instanceof String&&Arrays.asList("en","fil").contains(value))result.put(key,value);
+      else if (BOOLEANS.contains(key) && value instanceof Boolean)
         result.put(key, value);
       else if (key.equals("ui_scale") && value instanceof Number) {
         float n = ((Number) value).floatValue();

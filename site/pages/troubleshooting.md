@@ -28,7 +28,7 @@ When the Visual Studio Installer stops, the error gives its exit code and, for t
 
 ## The game doesn't start
 
-Update the GPU driver and check that the GPU supports Vulkan 1.3. To reset the runtime settings, delete `.local/preview/config/pinyon_shift.toml`. Security software may quarantine the newly compiled, unsigned executable. Restore it only if it was built by your own install.
+On Android, start with the system driver and check the missing feature reported by the driver test; Vulkan 1.1/1.2 and Mali/Xclipse paths remain experimental. Use the launcher recovery options or your last-working graphics snapshot. Keep saves and profile identity intact. Desktop builds target Vulkan 1.3; back up configuration before resetting it. Security software may quarantine the newly compiled, unsigned executable. Restore it only if it was built by your own install.
 
 ## A white window after the first screen
 

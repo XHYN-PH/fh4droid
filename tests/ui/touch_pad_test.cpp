@@ -9,6 +9,7 @@
 
 namespace pinyon_shift::ui {
 struct TouchPadTestAccess {
+  static void Fresh(TouchPad& pad){std::lock_guard lock(pad.mutex_);pad.last_touch_={};}
   static void Touch(TouchPad& pad, uint32_t id, rex::ui::TouchEvent::Action action,
                     float x, float y) {
     rex::ui::TouchEvent event(nullptr, id, action, x, y);
@@ -264,6 +265,33 @@ int main() {
     CHECK(shape.y-icon->height*shape.radius>=12-.01f&&shape.y+icon->height*shape.radius<=h-18+.01f);
   }
   Access::Insets(pad,0,0,0,0);
+  {std::ofstream out(layout);out<<"idle_seconds 0\nsteering_response_ms 200\nsteering_return_ms 50\nsteering_lock 0.5\nA .63 .86 .045 1\nB .75 .4 .045 1\n";}
+  pad.LoadLayout(layout);Access::Fresh(pad);CHECK(pad.Visible());
+  pad.SetSafeArea(38,5,20,8);CHECK(Find(pad,"RT").x>=38);
+  pad.SetSafeArea(0,0,0,0);
+  Press(pad,1,"RIGHT");pad.State();Access::AdvanceSteering(pad,200);
+  CHECK(std::abs(pad.State().thumb_lx-16383)<=1);
+  Press(pad,99,"LEFT");CHECK(pad.State().thumb_lx==0);Release(pad,99);Release(pad,1);
+  Access::AdvanceSteering(pad,50);CHECK(pad.State().thumb_lx==0);
+  Press(pad,2,"RT");pad.SetPhoneSteering(.7f,true);pad.SetMenuContext(true);
+  CHECK(pad.MenuContext()&&pad.State().right_trigger==0&&pad.State().thumb_lx==0);
+  CHECK(!Has(pad,"RT")&&!Has(pad,"LEFT")&&Has(pad,"A")&&Has(pad,"B")&&Has(pad,"UP"));
+  CHECK(!Find(pad,"A").driving_icons&&pad.Visible());
+  Press(pad,3,"A");CHECK(pad.State().buttons==rex::input::X_INPUT_GAMEPAD_A);Release(pad,3);
+  pad.SetMenuContext(false);pad.SetPhoneSteering(0,false);
+  CHECK(Has(pad,"RT")&&!Has(pad,"A")&&!Has(pad,"B")&&pad.State().buttons==0);
+  {std::ofstream out(layout);out<<"idle_seconds 0\nmap A Y\nmap Y A\nmap LS RT\n";}
+  pad.LoadLayout(layout);Press(pad,10,"Y");CHECK(pad.State().buttons==rex::input::X_INPUT_GAMEPAD_Y);
+  CHECK(pad.PressedControls()=="Y");Release(pad,10);
+  Press(pad,11,"RT");CHECK(Find(pad,"RT").amount==1.f);Release(pad,11);
+  pad.SetMenuContext(true);Press(pad,12,"A");CHECK(pad.State().buttons==rex::input::X_INPUT_GAMEPAD_A);Release(pad,12);
+  pad.SetMenuContext(false);Press(pad,13,"RIGHT");CHECK(Find(pad,"RIGHT").amount>0);Release(pad,13);
+  pad.LoadLayout(layout);CHECK(pad.State().buttons==0&&pad.State().right_trigger==0);
+  Press(pad,20,"RT");CHECK(pad.State().right_trigger==255);
+  pad.UpdateViewport(2400,1080);CHECK(pad.State().right_trigger==0);
+  Access::Touch(pad,20,Action::kMove,900,600);CHECK(pad.State().right_trigger==0);
+  Press(pad,21,"RT");pad.SetSafeArea(10,0,0,0);CHECK(pad.State().right_trigger==0);
+  Press(pad,22,"RT");pad.UpdateViewport(0,0);CHECK(pad.State().right_trigger==0);
   std::filesystem::remove_all(root);
   std::printf("Touch controls: %d failures\n", failures);
   return failures ? 1 : 0;

@@ -1,0 +1,8 @@
+Optional developer diagnostic dependency: Khronos Vulkan Validation Layers
+Source: https://github.com/KhronosGroup/Vulkan-ValidationLayers
+Pinned reference: vulkan-sdk-1.4.363.0
+License information is included in LICENSE.txt.
+
+This library is supplied only when the developer explicitly chooses
+--validation-layer with --debuggable. Normal FH4Droid APKs omit it.
+No Mali, Xclipse or older-phone gameplay qualification is implied.

@@ -46,6 +46,7 @@
 #include <rex/ui/upscaler.h>
 
 #include "pinyon_shift_diagnostics.h"
+#include "ui/view_policy.h"
 #include "fh1_guest_address.h"
 #include "platform/host_platform.h"
 #include "fh1_render_test.h"
@@ -7644,34 +7645,23 @@ std::function<void(bool)> g_map_view_callback;
 }  // namespace
 
 static void UpdateMapView() {
-  // Hor+ widens only the gameplay camera's view. Without it (title, menus,
-  // Autoshow, loading, pause map) the frame is the title's own 16:9 layers,
-  // which a widened, stretched presentation squeezes beside garbage (#363);
-  // those frames are shown 16:9 instead. The pause map switches at once; the
-  // rest after half a second without the gameplay view, so brief gaps (a
-  // dialog, a camera cut) do not flicker.
-  static bool narrow = false;
-  const uint64_t frame = g_title_frames.fetch_add(1, std::memory_order_relaxed) + 1;
-  const uint64_t map = g_map_view_frame.load(std::memory_order_relaxed);
-  const uint64_t game = g_game_view_frame.load(std::memory_order_relaxed);
-  const bool game_recent = game != 0 && frame - game <= 2;
-  const bool map_recent = map != 0 && frame - map <= 3;
-  const bool game_gone = game == 0 || frame - game > 30;
-  // The map's view keeps running in free roam once opened, so only the
-  // gameplay view decides; the map just makes the switch immediate.
-  const bool now_narrow = narrow ? !game_recent
-                                 : (game_gone || (map_recent && frame - game > 3));
-  if (now_narrow == narrow) return;
-  narrow = now_narrow;
-  g_narrow_view.store(narrow, std::memory_order_relaxed);
-  g_narrow_view_for_feedback.store(narrow, std::memory_order_relaxed);
-  const bool open = narrow;
+  static pinyon_shift::ui::ViewPolicy policy;
+  const uint64_t frame=g_title_frames.fetch_add(1,std::memory_order_relaxed)+1;
+  const uint64_t map=g_map_view_frame.load(std::memory_order_relaxed);
+  const uint64_t game=g_game_view_frame.load(std::memory_order_relaxed);
+  const bool game_recent=game!=0 && frame-game<=2;
+  const bool map_recent=map!=0 && frame-map<=3;
+  const uint64_t now=uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count());
+  if(!policy.Update(game_recent,map_recent,now))return;
   std::function<void(bool)> callback;
-  {
-    std::lock_guard lock(g_map_view_mutex);
-    callback = g_map_view_callback;
-  }
-  if (callback) callback(open);
+  {std::lock_guard lock(g_map_view_mutex);callback=g_map_view_callback;}
+  if(callback)callback(policy.narrow());
+}
+
+void PinyonShiftCommitMapView(bool open) {
+  g_narrow_view.store(open,std::memory_order_relaxed);
+  g_narrow_view_for_feedback.store(open,std::memory_order_relaxed);
 }
 
 void PinyonShiftSetMapViewCallback(std::function<void(bool open)> callback) {

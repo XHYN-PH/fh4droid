@@ -43,7 +43,7 @@ public final class SetupActivity extends Activity {
         progressText=FestivalUi.text(this,"",14,FestivalUi.TEXT);body.addView(progressText);
         cancelCopyButton=FestivalUi.action(this,body,"Cancel import",()->{if(operation!=null)operation.cancel();cancelCopyButton.setEnabled(false);progressText.setText("Stopping after the current read. Completed files are kept.");});
         View panel=FestivalUi.panel(this,"Import game folder",body,this::finish);root.addView(panel,new FrameLayout.LayoutParams(-1,-1));
-        root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets safe=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());int pad=FestivalUi.dp(this,12);root.setPadding(pad+safe.left,pad+safe.top,pad+safe.right,pad+safe.bottom);return insets;});
+        root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Rect safe=PlatformCompat.safeInsets(insets);int pad=FestivalUi.dp(this,12);root.setPadding(pad+safe.left,pad+safe.top,pad+safe.right,pad+safe.bottom);return insets;});
         setContentView(root);FestivalUi.immersive(this);
     }
     private static String size(long bytes){return String.format(Locale.ROOT,"%.1f MB",bytes/1048576.0);}

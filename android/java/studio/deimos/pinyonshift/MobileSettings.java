@@ -4,6 +4,18 @@ import android.app.Activity;
 
 final class MobileSettings {
   static final Option[] OPTIONS = {
+      o("Graphics", "vulkan_fh1_native_executor", "Native game renderer", "true", true,
+          "Requires dynamic-rendering support. Off selects the experimental compatibility renderer at next launch. It can be slower or look different; it is not yet qualified on Mali-G52 or Xclipse.", "false", "true"),
+      o("Graphics", "vulkan_dynamic_rendering", "Dynamic rendering", "true", true,
+          "Normally on when the driver supports it. Off uses classic render passes and disables the native game renderer. Both paths still require the listed Vulkan features.", "false", "true"),
+      o("Gameplay", "pinyon_shift_camera_gforce", "Camera G-force motion", "1", false,
+          "Scales the built-in immersive camera motion. Does not change vehicle physics.", "0", ".5", "1", "1.5"),
+      o("Gameplay", "pinyon_shift_camera_lean", "Camera lean", "1", false,
+          "Cockpit and hood cameras only. Requires the built-in immersive camera mod.", "0", ".5", "1", "1.5"),
+      o("Gameplay", "pinyon_shift_camera_shake", "Camera speed shake", "1", false,
+          "Cockpit and hood cameras only. Requires the built-in immersive camera mod.", "0", ".5", "1", "1.5"),
+      o("Gameplay", "pinyon_shift_camera_head", "Camera head motion", "1", false,
+          "Cockpit and hood cameras only. Requires the built-in immersive camera mod.", "0", ".5", "1", "1.5"),
       o("Graphics", "vulkan_texture_max_size", "Texture size", "0", true,
           "Smaller textures use less graphics memory. Original preserves the "
               + "game's detail.",

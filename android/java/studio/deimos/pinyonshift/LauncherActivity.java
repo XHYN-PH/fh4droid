@@ -16,15 +16,15 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     private final ArrayDeque<PanelPage> panels=new ArrayDeque<>();
     private FrameLayout rightPane;private float builtScale;private boolean sideBySide;
     private static final class PanelPage{final String title;final View body;PanelPage(String title,View body){this.title=title;this.body=body;}}
-    private static final int ISO=310,SAVE_OUT=311,SAVE_IN=312,DRIVER_ZIP=313,PROBE=314;
+    private static final int ISO=310,SAVE_OUT=311,SAVE_IN=312,DRIVER_ZIP=313,PROBE=314,PROFILE_PIC=315,XENIA_IN=316;
     private TextView title,summary,note,versionFooter;private Button play;private boolean busy;
-    private String pendingDriver;private boolean playAfterProbe;private AlertDialog progress;private FileOperation operation;
+    private String pendingDriver,pendingSaveScope=SaveArchive.BOTH;private boolean playAfterProbe;private AlertDialog progress;private FileOperation operation;
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);UiPreferences.load(this);if(state!=null){pendingDriver=state.getString("driver");playAfterProbe=state.getBoolean("play_after_probe");}
+        super.onCreate(state);UiPreferences.load(this);if(state!=null){pendingDriver=state.getString("driver");playAfterProbe=state.getBoolean("play_after_probe");pendingSaveScope=state.getString("save_scope",SaveArchive.BOTH);}
         build();FestivalUi.immersive(this);
         new Thread(()->{try{DriverStore.installBundled(this);}catch(IOException ignored){}},"BundledDrivers").start();
     }
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("driver",pendingDriver);state.putBoolean("play_after_probe",playAfterProbe);}
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("driver",pendingDriver);state.putBoolean("play_after_probe",playAfterProbe);state.putString("save_scope",pendingSaveScope);}
     @Override protected void onResume(){super.onResume();UiPreferences.load(this);if(Math.abs(builtScale-FestivalUi.scale(this))>.001f)build();refresh();recovery();}
     @Override public void onConfigurationChanged(android.content.res.Configuration config){super.onConfigurationChanged(config);build();refresh();FestivalUi.immersive(this);}
     @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus){UiPreferences.load(this);if(Math.abs(builtScale-FestivalUi.scale(this))>.001f)build();FestivalUi.immersive(this);refresh();if(rightPane!=null)FestivalUi.refreshTree(rightPane);}}
@@ -57,15 +57,15 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         versionFooter.setGravity(Gravity.RIGHT|Gravity.CENTER_VERTICAL);versionFooter.setMaxLines(3);versionFooter.setPadding(FestivalUi.dp(this,8),0,0,0);
         footer.addView(versionFooter,new LinearLayout.LayoutParams(0,-2,.38f));
         FrameLayout.LayoutParams footerParams=new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM);footerParams.bottomMargin=FestivalUi.dp(this,8);canvas.addView(footer,footerParams);
-        final android.graphics.Insets[] safeInsets={android.graphics.Insets.NONE};
+        final android.graphics.Rect[] safeInsets={new android.graphics.Rect()};
         Runnable fitFooter=()->{
-            android.graphics.Insets safe=safeInsets[0];int bottom=Math.max(FestivalUi.dp(this,64),footer.getHeight()+FestivalUi.dp(this,16))+safe.bottom;
+            android.graphics.Rect safe=safeInsets[0];int bottom=Math.max(FestivalUi.dp(this,64),footer.getHeight()+FestivalUi.dp(this,16))+safe.bottom;
             row.setPadding(pad+safe.left,pad+safe.top,pad+safe.right,bottom);
             footer.setPadding(pad+safe.left,0,pad+safe.right,0);footerParams.bottomMargin=FestivalUi.dp(this,8)+safe.bottom;footer.setLayoutParams(footerParams);
             if(!wide){FrameLayout.LayoutParams pane=(FrameLayout.LayoutParams)rightPane.getLayoutParams();pane.setMargins(pad+safe.left,FestivalUi.dp(this,54)+safe.top,pad+safe.right,bottom);rightPane.setLayoutParams(pane);}
         };
         footer.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->{if(l!=ol||t!=ot||r!=or||b!=ob)fitFooter.run();});
-        canvas.setOnApplyWindowInsetsListener((v,insets)->{safeInsets[0]=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());fitFooter.run();return insets;});
+        canvas.setOnApplyWindowInsetsListener((v,insets)->{safeInsets[0]=PlatformCompat.safeInsets(insets);fitFooter.run();return insets;});
         setContentView(canvas);renderPanel();FestivalUi.enter(menu);
     }
     private void openRoot(){panels.clear();renderPanel();}
@@ -73,6 +73,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     @Override public void replacePanel(String title,View body){if(!panels.isEmpty())panels.pop();showPanel(title,body);}
     @Override public void backPanel(){if(!panels.isEmpty())panels.pop();if(Math.abs(builtScale-FestivalUi.scale(this))>.001f)build();else renderPanel();}
     private void renderPanel(){if(rightPane==null)return;FestivalUi.rememberTree(rightPane);rightPane.removeAllViews();rightPane.setVisibility(panels.isEmpty()&&!sideBySide?View.GONE:View.VISIBLE);if(!panels.isEmpty()){PanelPage page=panels.peek();View panel=FestivalUi.panel(this,page.title,page.body,this::backPanel);rightPane.addView(panel,new FrameLayout.LayoutParams(-1,-1));FestivalUi.slideIn(panel);}}
+    @Override public boolean dispatchKeyEvent(android.view.KeyEvent event){if(ControllerPrompts.handle(this,getWindow(),event.getKeyCode(),event,this::onBackPressed))return true;return super.dispatchKeyEvent(event);}
     @Override public void onBackPressed(){if(!panels.isEmpty())backPanel();else super.onBackPressed();}
     private TextView smallLink(LinearLayout row,String label,Runnable action){
         TextView link=FestivalUi.text(this,label,13,FestivalUi.MUTED);link.setTextSize(13);link.setGravity(Gravity.CENTER);
@@ -90,7 +91,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         catch(android.content.pm.PackageManager.NameNotFoundException error){return "Version unavailable";}
     }
     private void external(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(ActivityNotFoundException error){toast("No browser is available.");}}
-    private void more(){LinearLayout body=FestivalUi.column(this);FestivalUi.action(this,body,"Graphics drivers",this::drivers);FestivalUi.action(this,body,"Achievements",()->AchievementsPage.show(this,null));FestivalUi.action(this,body,"Cheats · separate profile",()->TrainerPage.show(this,null));ProblemReports.action(this,body,"Report a problem");FestivalUi.action(this,body,"About",this::about);FestivalUi.present(this,"More",body);}
+    private void more(){LinearLayout body=FestivalUi.column(this);FestivalUi.action(this,body,"Profile",()->ProfilePage.show(this,()->{if(canManage())pick(PROFILE_PIC,"image/*",false);},this::saves));FestivalUi.action(this,body,"Graphics drivers",this::drivers);FestivalUi.action(this,body,"Achievements",()->AchievementsPage.show(this,null));FestivalUi.action(this,body,"Cheats · separate profile",()->TrainerPage.show(this,null));ProblemReports.action(this,body,"Report a problem");FestivalUi.action(this,body,"About",this::about);FestivalUi.present(this,"More",body);}
     private void about(){LinearLayout body=FestivalUi.column(this);body.addView(FestivalUi.text(this,installedVersion(),16,FestivalUi.ORANGE));body.addView(FestivalUi.text(this,"FH4Droid is an unofficial Android fan port. Supply your own supported Forza Horizon game files. Local achievements do not synchronize with Xbox Live.",14,FestivalUi.TEXT));FestivalUi.action(this,body,"Control artwork credits",this::controlArtworkCredits);FestivalUi.present(this,"About FH4Droid",body);}
     private void controlArtworkCredits(){
         LinearLayout body=FestivalUi.column(this);
@@ -123,8 +124,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         new AlertDialog.Builder(this).setTitle("The last game stopped unexpectedly")
             .setMessage("This may be a driver problem, a game crash or Android freeing memory. A report can help identify the cause.")
             .setNegativeButton("Back",null).setNeutralButton("Share report",(d,w)->ProblemReports.share(this))
-            .setPositiveButton("Try system driver",(d,w)->{try{MobileConfig.put(this,"android_gpu_driver","\"\"");play(false);}
-                catch(IOException e){error(e.getMessage());}}).show();
+            .setPositiveButton("Recovery options",(d,w)->{String[] choices=GraphicsProfilePage.lastGood(this).isFile()?new String[]{"Use system driver","Restore last working graphics"}:new String[]{"Use system driver"};FestivalUi.choose(this,"Recovery",choices,-1,index->{try{if(index==1)GraphicsProfilePage.restoreForRecovery(this);else MobileConfig.put(this,"android_gpu_driver","\"\"");toast("Recovery settings saved. Tap Play to try them.");}catch(IOException e){error(e.getMessage());}});}).show();
     }
     private boolean canManage(){if(busy)return false;if(GameFiles.running(this)){toast("Quit the game before changing files, saves or drivers.");return false;}return true;}
     private void work(String message,Task task,Runnable success){
@@ -162,10 +162,12 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     }
     private void controls(){startActivity(new Intent(this,TouchEditorActivity.class));}
     private void saves(){
-        LinearLayout p=FestivalUi.column(this);p.addView(FestivalUi.text(this,"Backups cover the normal base-game profile. The trainer uses a separate modded profile, which is not included here. Quit the game before importing or restoring.",14,FestivalUi.MUTED));
-        FestivalUi.action(this,p,"Export saves",()->{if(canManage())pick(SAVE_OUT,"application/zip",true);});
+        LinearLayout p=FestivalUi.column(this);p.addView(FestivalUi.text(this,"Choose normal, modded or both profiles when exporting. Imports and restores preserve the profiles separately and retain a rollback copy. Quit the game before changing saves.",14,FestivalUi.MUTED));
+        p.addView(FestivalUi.text(this,"Next launch: "+LocalProfile.configuredProfile(MobileConfig.read(this))+"\n"+LocalProfile.backupStatus(MobileConfig.read(this)),13,FestivalUi.ORANGE));
+        FestivalUi.action(this,p,"Export saves",()->{if(canManage())FestivalUi.choose(this,"Profiles to back up",new String[]{"Both profiles","Normal profile","Modded profile"},0,index->{pendingSaveScope=new String[]{SaveArchive.BOTH,SaveArchive.NORMAL,SaveArchive.MODDED}[index];pick(SAVE_OUT,"application/zip",true);});});
         FestivalUi.action(this,p,"Import saves",()->{if(canManage())new AlertDialog.Builder(this).setTitle("Import saves?").setMessage("Current saves are kept as a local backup before replacement.")
             .setNegativeButton("Cancel",null).setPositiveButton("Choose ZIP",(d,w)->pick(SAVE_IN,"application/zip",false)).show();});
+        FestivalUi.action(this,p,"Import a Xenia profile",()->{if(canManage())new AlertDialog.Builder(this).setTitle("Import a base-game Xenia save").setMessage("Choose a ZIP containing content/<XUID>/4D5309C9 with the original folders. Imports beside your current normal save and selects that original XUID for next launch. Existing profiles are kept, settings are backed up, and title-update-v4 saves are refused. Modded mode keeps using its separate save tree.").setNegativeButton("Cancel",null).setPositiveButton("Choose ZIP",(d,w)->pick(XENIA_IN,"application/zip",false)).show();});
         FestivalUi.action(this,p,"Restore previous saves",()->{if(canManage())new AlertDialog.Builder(this).setTitle("Restore previous saves?").setMessage("Your current saves are also kept before the restore.")
             .setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->work("Restoring saves…",()->SaveArchive.restore(new File(MobileConfig.base(this),"state")),()->toast("Previous saves restored."))).show();});
         FestivalUi.present(this,"Saves",p);
@@ -175,7 +177,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         FestivalUi.present(this,"Graphics drivers",driverPage());
     }
     private View driverPage(){
-        LinearLayout body=FestivalUi.column(this);body.addView(FestivalUi.text(this,"Test a driver before selecting it. Quit the game before importing or removing drivers.",13,FestivalUi.MUTED));
+        LinearLayout body=FestivalUi.column(this);body.addView(FestivalUi.text(this,"Mali and Xclipse: start with your system driver. Turnip is for compatible Adreno GPUs. Test a driver before selecting it. Quit the game before importing or removing drivers.",13,FestivalUi.MUTED));
         String current=MobileConfig.get(this,"android_gpu_driver","auto");
         for(String choice:DriverStore.choices(this)){
             LinearLayout row=new LinearLayout(this);body.addView(row);
@@ -204,8 +206,10 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         if(!canManage())return;
         if(request==ISO){try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(SecurityException e){error("This file provider cannot keep access. Choose an ISO in local storage.");return;}
             work("Inspecting your disc and verifying the game…",()->installIso(uri),()->toast("Disc image ready."));}
-        else if(request==SAVE_OUT)work("Exporting saves…",()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new IOException("Cannot create backup.");SaveArchive.export(new File(MobileConfig.base(this),"state/user"),out);}},()->toast("Saves exported."));
+        else if(request==SAVE_OUT)work("Exporting saves…",()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new IOException("Cannot create backup.");SaveArchive.exportState(new File(MobileConfig.base(this),"state"),pendingSaveScope,out);}},()->toast("Saves exported."));
         else if(request==SAVE_IN)work("Importing saves…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open backup.");SaveArchive.importInto(new File(MobileConfig.base(this),"state"),in);}},()->toast("Saves imported."));
+        else if(request==XENIA_IN)work("Checking Xenia profile…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open Xenia ZIP.");try(XeniaSaveImport.Prepared prepared=XeniaSaveImport.prepare(new File(MobileConfig.base(this),"state"),in)){XeniaSaveImport.install(new File(MobileConfig.base(this),"state"),prepared);}}},()->toast("Xenia profile imported; original XUID selected for the next launch."));
+        else if(request==PROFILE_PIC)work("Preparing gamer picture…",()->ProfilePage.importPicture(this,uri),()->toast("Gamer picture saved for the next launch."));
         else if(request==DRIVER_ZIP)work("Importing driver…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open driver ZIP.");pendingDriver=DriverStore.importZip(this,in);}},()->probe(pendingDriver,false));
     }
     private void probeResult(int result,Intent data){

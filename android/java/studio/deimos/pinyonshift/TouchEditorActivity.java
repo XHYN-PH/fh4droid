@@ -22,9 +22,10 @@ public final class TouchEditorActivity extends Activity {
     private boolean propertyMode,testMode,toolsHidden,picker;
     private Rect safe=new Rect();
     private Bitmap artwork;
+    private LayoutHistory history;private String savedLayout;private boolean changingHistory,gesture;
     @Override public void onCreate(Bundle saved){
-        super.onCreate(saved);UiPreferences.load(this);layout.load(this);artwork=TouchArtwork.bitmap(this);
-        if(saved!=null){layout.parse(saved.getString("draft",""));active=Math.max(0,Math.min(TouchLayout.LABELS.length-1,saved.getInt("active")));page=Math.max(0,Math.min(3,saved.getInt("page")));propertyMode=saved.getBoolean("properties");toolsHidden=saved.getBoolean("tools_hidden");}
+        super.onCreate(saved);UiPreferences.load(this);layout.load(this);savedLayout=layout.serialize();history=new LayoutHistory(savedLayout);artwork=TouchArtwork.bitmap(this);
+        if(saved!=null){layout.parse(saved.getString("draft",""));active=Math.max(0,Math.min(TouchLayout.LABELS.length-1,saved.getInt("active")));page=Math.max(0,Math.min(3,saved.getInt("page")));savedLayout=saved.getString("baseline",savedLayout);history.record(layout.serialize());propertyMode=saved.getBoolean("properties");toolsHidden=saved.getBoolean("tools_hidden");}
         root=new FrameLayout(this);root.addView(new FestivalUi.Artwork(this),new FrameLayout.LayoutParams(-1,-1));
         editor=new Editor();root.addView(editor,new FrameLayout.LayoutParams(-1,-1));
         properties=new ScrollView(this);properties.setBackgroundColor(FestivalUi.PANEL);root.addView(properties,new FrameLayout.LayoutParams(-1,-1));
@@ -32,15 +33,27 @@ public final class TouchEditorActivity extends Activity {
         TextView title=FestivalUi.text(this,"Touch layout",18,FestivalUi.TEXT);title.setPadding(FestivalUi.dp(this,12),0,FestivalUi.dp(this,8),0);header.addView(title,new LinearLayout.LayoutParams(0,-2,1));
         propertyButton=headerAction("Properties",()->{propertyMode=!propertyMode;testMode=false;fingers.clear();showMode();});
         testButton=headerAction("Test",()->{testMode=!testMode;propertyMode=false;fingers.clear();showMode();});
-        headerAction("Hide tools",()->{toolsHidden=true;propertyMode=false;showMode();});
+        headerAction("Edit",this::editTools);
+
         headerAction("Cancel",this::close);
-        Button save=FestivalUi.button(this,"Save",true);header.addView(save);save.setOnClickListener(v->{try{layout.save(this);close();}catch(Exception error){SettingsHub.error(this,error);}});
+        Button save=FestivalUi.button(this,"Save",true);header.addView(save);save.setOnClickListener(v->{try{layout.save(this);savedLayout=layout.serialize();close();}catch(Exception error){SettingsHub.error(this,error);}});
         root.addView(header,new FrameLayout.LayoutParams(-1,-2,Gravity.TOP));
         reveal=FestivalUi.button(this,"Show tools",false);root.addView(reveal,new FrameLayout.LayoutParams(-2,-2,Gravity.TOP|Gravity.CENTER_HORIZONTAL));reveal.setOnClickListener(v->{toolsHidden=false;showMode();});
         status=FestivalUi.text(this,"",13,FestivalUi.TEXT);status.setTextSize(13);status.setPadding(8,3,8,3);status.setBackground(FestivalUi.surface(this,0xaa14181f,6));status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);root.addView(status,new FrameLayout.LayoutParams(-2,-2,Gravity.BOTTOM|Gravity.CENTER_HORIZONTAL));
-        root.setOnApplyWindowInsetsListener((v,insets)->{Insets i=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());safe=new Rect(i.left,i.top,i.right,i.bottom);fit();editor.invalidate();return insets;});
+        root.setOnApplyWindowInsetsListener((v,insets)->{Rect i=PlatformCompat.safeInsets(insets);safe=new Rect(i.left,i.top,i.right,i.bottom);fit();editor.invalidate();return insets;});
         header.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->{if(b-t!=ob-ot)fit();});
         setContentView(root);FestivalUi.immersive(this);showMode();
+    }
+    private void editTools(){
+        history.record(layout.serialize());
+        String[] labels={"Undo last edit","Redo last edit","Check touch areas","Hide tools"};
+        FestivalUi.choose(this,"Layout tools",labels,-1,index->{
+            if(index==3){toolsHidden=true;propertyMode=false;showMode();return;}
+            if(index==2){java.util.List<String> warnings=LayoutWarnings.check(layout,editor.getWidth(),editor.getHeight(),safe.left,safe.top,safe.right,safe.bottom,FestivalUi.dp(this,48));
+                FestivalUi.explain(this,"Touch areas",warnings.isEmpty()?"No overlapping or small targets found. Test simultaneous presses before saving.":String.join("\n",warnings)+"\n\nWarnings do not move your controls.");return;}
+            if(index==0&&!history.canUndo()||index==1&&!history.canRedo()){Toast.makeText(this,index==0?"Nothing to undo":"Nothing to redo",Toast.LENGTH_SHORT).show();return;}
+            changingHistory=true;try{layout.reset();layout.parse(index==0?history.undo():history.redo());fingers.clear();buildProperties();changed();}finally{changingHistory=false;}
+        });
     }
     private Button headerAction(String label,Runnable action){Button b=FestivalUi.button(this,label,false);b.setTextSize(13);b.setPadding(FestivalUi.dp(this,8),0,FestivalUi.dp(this,8),0);header.addView(b);b.setOnClickListener(v->action.run());return b;}
     private void fit(){
@@ -56,6 +69,7 @@ public final class TouchEditorActivity extends Activity {
     }
     private String title(){return TouchLayout.displayLabel(active,layout.drivingLabels);}
     private void changed(){
+        if(history!=null&&!changingHistory&&!gesture)history.record(layout.serialize());
         if(status!=null){if(testMode){Set<String> names=new LinkedHashSet<>();for(int i:fingers.values())names.add(TouchArtwork.CAPTIONS[i]);status.setText(names.isEmpty()?"Test controls · touches stay in the editor":String.join(" + ",names));}
             else status.setText(String.format(Locale.ROOT,"%s · X %.0f%% · Y %.0f%% · %.1f%% size",title(),layout.values[active][0]*100,layout.values[active][1]*100,layout.values[active][2]*100));}
         if(editor!=null)editor.invalidate();
@@ -68,11 +82,15 @@ public final class TouchEditorActivity extends Activity {
         if(page==0){
             FestivalUi.action(this,body,title()+" · select control",()->{picker=!picker;buildProperties();});
             if(picker){for(int i=0;i<TouchLayout.LABELS.length;i++){final int n=i;FestivalUi.action(this,body,TouchArtwork.CAPTIONS[i]+(layout.hidden[i]?" · hidden":""),()->{active=n;picker=false;buildProperties();changed();});}return;}
+            if(TouchLayout.mappable(active))FestivalUi.action(this,body,"Action: "+TouchLayout.LABELS[layout.mapping[active]]+" · "+TouchArtwork.CAPTIONS[layout.mapping[active]],()->{
+                java.util.List<Integer> ids=new java.util.ArrayList<>();java.util.List<String> names=new java.util.ArrayList<>();for(int i=0;i<TouchLayout.LABELS.length;i++)if(TouchLayout.mappable(i)){ids.add(i);names.add(TouchLayout.LABELS[i]+" · "+TouchArtwork.CAPTIONS[i]);}
+                FestivalUi.choose(this,"Controller action (driving only)",names.toArray(new String[0]),ids.indexOf(layout.mapping[active]),index->{layout.mapping[active]=ids.get(index);changed();buildProperties();});
+            });
             FestivalUi.slider(this,body,"Size","Pinch on the full-screen canvas to resize.",35,240,5,Math.round(layout.values[active][2]*1000),n->String.format(Locale.ROOT,"%.1f%%",n/10f),n->{layout.values[active][2]=n/1000f;changed();});
             FestivalUi.slider(this,body,"Horizontal position","",0,100,1,Math.round(layout.values[active][0]*100),n->n+"%",n->{layout.values[active][0]=n/100f;changed();});
             FestivalUi.slider(this,body,"Vertical position","",0,100,1,Math.round(layout.values[active][1]*100),n->n+"%",n->{layout.values[active][1]=n/100f;changed();});
             FestivalUi.toggle(this,body,"Show this control","Hidden controls stay in the selector.",!layout.hidden[active],on->{layout.hidden[active]=!on;changed();});
-            FestivalUi.slider(this,body,"Fade timer","Held buttons remain visible.",-1,120,1,Math.round(layout.timeout[active]),n->n<0?"Global timer":n==0?"Always visible":n+" seconds",n->layout.timeout[active]=n);
+            FestivalUi.slider(this,body,"Fade timer","Held buttons remain visible.",-1,120,1,Math.round(layout.timeout[active]),n->n<0?"Global timer":n==0?"Always visible":n+" seconds",n->{layout.timeout[active]=n;changed();});
         }else if(page==1){
             TouchLayout modern=new TouchLayout();modern.modernDefaults(this);FestivalUi.action(this,body,"Modern racing preset",()->chooseLayout(modern));
             FestivalUi.action(this,body,"Full controller preset",()->chooseLayout(LayoutProfiles.controllerTemplate()));
@@ -82,50 +100,53 @@ public final class TouchEditorActivity extends Activity {
             FestivalUi.action(this,body,"Look stick: "+modes[layout.rightMode],()->FestivalUi.choose(this,"Look stick",modes,layout.rightMode,n->{layout.rightMode=n;buildProperties();changed();}));
         }else if(page==2){
             FestivalUi.action(this,body,"Steering: "+(layout.steering.equals("arrows")?"Arrows":"Stick"),()->FestivalUi.choose(this,"Steering",new String[]{"Arrows","Stick"},layout.steering.equals("arrows")?0:1,n->{layout.steering=n==0?"arrows":"stick";buildProperties();changed();}));
-            FestivalUi.action(this,body,"Arrow response: "+layout.steeringResponseMs+" ms",()->FestivalUi.choose(this,"Arrow response",new String[]{"Immediate","Gentle · 120 ms","Smooth · 240 ms"},Arrays.asList(0,120,240).indexOf(layout.steeringResponseMs),n->{layout.steeringResponseMs=new int[]{0,120,240}[n];buildProperties();}));
-            FestivalUi.toggle(this,body,"Sliding pedals","Slide to vary pressure.",layout.analogPedals,on->layout.analogPedals=on);
-            FestivalUi.toggle(this,body,"Hide with controller","",layout.autoHide,on->layout.autoHide=on);
-            FestivalUi.toggle(this,body,"Touch vibration","Follows Android haptic settings.",layout.haptics,on->layout.haptics=on);
+            FestivalUi.action(this,body,"Arrow response: "+layout.steeringResponseMs+" ms",()->FestivalUi.choose(this,"Arrow response",new String[]{"Immediate","Gentle · 120 ms","Smooth · 240 ms"},Arrays.asList(0,120,240).indexOf(layout.steeringResponseMs),n->{layout.steeringResponseMs=new int[]{0,120,240}[n];buildProperties();changed();}));
+            FestivalUi.slider(this,body,"Arrow return to centre","Separate from turning into a corner. Matching keeps the previous behaviour.",-1,500,1,layout.steeringReturnMs,n->n<0?"Match turn-in":n+" ms",n->{layout.steeringReturnMs=n;changed();});
+            FestivalUi.slider(this,body,"Maximum arrow steering","Limit full-lock steering when using arrows.",25,100,5,Math.round(layout.steeringLock*100),n->n+"%",n->{layout.steeringLock=n/100f;changed();});
+            FestivalUi.toggle(this,body,"Sliding pedals","Slide to vary pressure.",layout.analogPedals,on->{layout.analogPedals=on;changed();});
+            FestivalUi.toggle(this,body,"Hide with controller","",layout.autoHide,on->{layout.autoHide=on;changed();});
+            FestivalUi.toggle(this,body,"Touch vibration","Follows Android haptic settings.",layout.haptics,on->{layout.haptics=on;changed();});
         }else{
             FestivalUi.toggle(this,body,"Modern driving icons","Turn off for controller letters.",layout.drivingLabels,on->{layout.drivingLabels=on;changed();});
             FestivalUi.toggle(this,body,"Button names","Button codes above each icon and action names below.",layout.buttonHints,on->{layout.buttonHints=on;changed();});
             FestivalUi.slider(this,body,"Button background","",20,100,1,Math.round(layout.opacity*100),n->n+"%",n->{layout.opacity=n/100f;changed();});
             FestivalUi.slider(this,body,"Icon and label opacity","",30,100,1,Math.round(layout.iconOpacity*100),n->n+"%",n->{layout.iconOpacity=n/100f;changed();});
             FestivalUi.toggle(this,body,"High contrast","Raises backing opacity to at least 85%.",layout.highContrast,on->{layout.highContrast=on;changed();});
-            FestivalUi.slider(this,body,"Global fade timer","",0,120,1,Math.round(layout.idleSeconds),n->n==0?"Always visible":n+" seconds",n->layout.idleSeconds=n);
+            FestivalUi.slider(this,body,"Global fade timer","",0,120,1,Math.round(layout.idleSeconds),n->n==0?"Always visible":n+" seconds",n->{layout.idleSeconds=n;changed();});
         }
     }
-    private void close(){boolean game=getIntent().getBooleanExtra("return_to_game",false)&&GameFiles.running(this);finish();if(game)startActivity(new Intent(this,PinyonShiftActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_SINGLE_TOP));}
+    private void close(){if(!layout.serialize().equals(savedLayout)){new AlertDialog.Builder(this).setTitle("Discard layout changes?").setMessage("Your saved layout is kept. Choose Save to apply this draft.").setNegativeButton("Keep editing",null).setPositiveButton("Discard",(d,w)->finishEditor()).show();return;}finishEditor();}
+    private void finishEditor(){boolean game=getIntent().getBooleanExtra("return_to_game",false)&&GameFiles.running(this);finish();if(game)startActivity(new Intent(this,PinyonShiftActivity.class).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT|Intent.FLAG_ACTIVITY_SINGLE_TOP));}
     @Override public void onBackPressed(){if(propertyMode){propertyMode=false;showMode();}else close();}
     @Override protected void onPause(){fingers.clear();changed();super.onPause();}
-    @Override protected void onSaveInstanceState(Bundle s){super.onSaveInstanceState(s);s.putString("draft",layout.serialize());s.putInt("active",active);s.putInt("page",page);s.putBoolean("properties",propertyMode);s.putBoolean("tools_hidden",toolsHidden);}
+    @Override protected void onSaveInstanceState(Bundle s){super.onSaveInstanceState(s);s.putString("draft",layout.serialize());s.putString("baseline",savedLayout);s.putInt("active",active);s.putInt("page",page);s.putBoolean("properties",propertyMode);s.putBoolean("tools_hidden",toolsHidden);}
     private final class Editor extends View {
         private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
         private final ScaleGestureDetector pinch;
         private boolean dragging;
         private float dx,dy;
-        Editor(){super(TouchEditorActivity.this);setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);pinch=new ScaleGestureDetector(getContext(),new ScaleGestureDetector.SimpleOnScaleGestureListener(){@Override public boolean onScale(ScaleGestureDetector e){if(testMode)return false;layout.values[active][2]=Math.max(.035f,Math.min(.24f,layout.values[active][2]*e.getScaleFactor()));changed();return true;}});}
+        Editor(){super(TouchEditorActivity.this);setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);pinch=new ScaleGestureDetector(getContext(),new ScaleGestureDetector.SimpleOnScaleGestureListener(){@Override public boolean onScaleBegin(ScaleGestureDetector e){if(testMode)return false;history.record(layout.serialize());gesture=true;return true;}@Override public void onScaleEnd(ScaleGestureDetector e){gesture=false;changed();}@Override public boolean onScale(ScaleGestureDetector e){if(testMode)return false;layout.values[active][2]=Math.max(.035f,Math.min(.24f,layout.values[active][2]*e.getScaleFactor()));changed();return true;}});}
         float width(){return Math.max(1,getWidth()-safe.left-safe.right);}float height(){return Math.max(1,getHeight()-safe.top-safe.bottom);}
-        float radius(int i){return Math.min(layout.values[i][2]*getHeight(),Math.min(width()*.49f/Math.max(1,TouchIcons.BOUNDS[i][0]),height()*.49f/Math.max(1,TouchIcons.BOUNDS[i][1])));}
-        float x(int i){float r=radius(i)*Math.max(1,TouchIcons.BOUNDS[i][0]);return safe.left+Math.max(r,Math.min(width()-r,layout.values[i][0]*width()));}
-        float y(int i){float r=radius(i)*Math.max(1,TouchIcons.BOUNDS[i][1]);return safe.top+Math.max(r,Math.min(height()-r,layout.values[i][1]*height()));}
+        float radius(int i){return Math.min(layout.values[i][2]*getHeight(),Math.min(width()*.49f/Math.max(1,TouchIcons.BOUNDS[layout.mapping[i]][0]),height()*.49f/Math.max(1,TouchIcons.BOUNDS[layout.mapping[i]][1])));}
+        float x(int i){float r=radius(i)*Math.max(1,TouchIcons.BOUNDS[layout.mapping[i]][0]);return safe.left+Math.max(r,Math.min(width()-r,layout.values[i][0]*width()));}
+        float y(int i){float r=radius(i)*Math.max(1,TouchIcons.BOUNDS[layout.mapping[i]][1]);return safe.top+Math.max(r,Math.min(height()-r,layout.values[i][1]*height()));}
         private boolean shown(int i){return !layout.hidden[i]&&layout.enabled(i)&&!(TouchLayout.LABELS[i].equals("LS")&&layout.leftMode==2)&&!(TouchLayout.LABELS[i].equals("RS")&&layout.rightMode==2);}
-        private int hit(float x,float y){int found=-1;float best=Float.MAX_VALUE;for(int i=0;i<layout.values.length;i++){if(!shown(i)&&!(i==active&&!testMode))continue;float ax=Math.abs(x-x(i)),ay=Math.abs(y-y(i)),distance=(float)Math.hypot(ax,ay),r=radius(i);boolean inside=TouchIcons.RECT[i]?ax<=TouchIcons.BOUNDS[i][0]*r*1.15f&&ay<=TouchIcons.BOUNDS[i][1]*r*1.15f:distance<=r*1.15f;if(inside&&distance<best){best=distance;found=i;}}if(found<0&&testMode&&y>=safe.top+height()*.55f&&y<=getHeight()-safe.bottom&&x>=safe.left&&x<=getWidth()-safe.right){
+        private int hit(float x,float y){int found=-1;float best=Float.MAX_VALUE;for(int i=0;i<layout.values.length;i++){if(!shown(i)&&!(i==active&&!testMode))continue;float ax=Math.abs(x-x(i)),ay=Math.abs(y-y(i)),distance=(float)Math.hypot(ax,ay),r=radius(i);boolean inside=TouchIcons.RECT[layout.mapping[i]]?ax<=TouchIcons.BOUNDS[layout.mapping[i]][0]*r*1.15f&&ay<=TouchIcons.BOUNDS[layout.mapping[i]][1]*r*1.15f:distance<=r*1.15f;if(inside&&distance<best){best=distance;found=i;}}if(found<0&&testMode&&y>=safe.top+height()*.55f&&y<=getHeight()-safe.bottom&&x>=safe.left&&x<=getWidth()-safe.right){
             int stick=x<safe.left+width()*.45f?10:x>safe.left+width()*.55f?13:-1;
             if(stick>=0&&!layout.hidden[stick]&&layout.enabled(stick)&&(stick==10?layout.leftMode:layout.rightMode)==2)found=stick;
         }return found;}
         @Override protected void onDraw(Canvas canvas){for(int i=0;i<layout.values.length;i++){if(!shown(i)&&!(i==active&&!testMode))continue;boolean stick=TouchLayout.LABELS[i].equals("LS")||TouchLayout.LABELS[i].equals("RS");float opacity=layout.highContrast?Math.max(.85f,layout.opacity):layout.opacity;
-            TouchIconPainter.draw(canvas,paint,artwork,i,x(i),y(i),radius(i),opacity,layout.iconOpacity,fingers.containsValue(i)&&!stick,!shown(i),layout.drivingLabels,layout.buttonHints,!testMode&&i==active);
-            if(stick)TouchIconPainter.draw(canvas,paint,artwork,i,x(i),y(i),radius(i)*.55f,opacity,layout.iconOpacity,fingers.containsValue(i),!shown(i),layout.drivingLabels,layout.buttonHints,false,true);}}
+            TouchIconPainter.draw(canvas,paint,artwork,layout.mapping[i],x(i),y(i),radius(i),opacity,layout.iconOpacity,fingers.containsValue(i)&&!stick,!shown(i),layout.drivingLabels,layout.buttonHints,!testMode&&i==active);
+            if(stick)TouchIconPainter.draw(canvas,paint,artwork,layout.mapping[i],x(i),y(i),radius(i)*.55f,opacity,layout.iconOpacity,fingers.containsValue(i),!shown(i),layout.drivingLabels,layout.buttonHints,false,true);}}
         @Override public boolean onTouchEvent(MotionEvent event){
             if(testMode){int action=event.getActionMasked(),index=event.getActionIndex();if(action==MotionEvent.ACTION_CANCEL)fingers.clear();else if(action==MotionEvent.ACTION_UP||action==MotionEvent.ACTION_POINTER_UP)fingers.remove(event.getPointerId(index));else for(int p=0;p<event.getPointerCount();p++){int id=event.getPointerId(p);Integer held=fingers.get(id);boolean stickHeld=held!=null&&(held==10||held==13);
                 int found=stickHeld?held:hit(event.getX(p),event.getY(p));
                 if((found==10||found==13)&&!stickHeld&&fingers.containsValue(found))found=-1;
                 if(found>=0)fingers.put(id,found);else fingers.remove(id);}changed();return true;}
             pinch.onTouchEvent(event);if(event.getPointerCount()>1){dragging=false;return true;}
-            if(event.getActionMasked()==MotionEvent.ACTION_DOWN){int found=hit(event.getX(),event.getY());dragging=found>=0;if(dragging){active=found;dx=event.getX()-x(active);dy=event.getY()-y(active);changed();}return true;}
-            if(event.getActionMasked()==MotionEvent.ACTION_MOVE&&dragging&&!pinch.isInProgress()){float rx=radius(active)*Math.max(1,TouchIcons.BOUNDS[active][0]),ry=radius(active)*Math.max(1,TouchIcons.BOUNDS[active][1]);layout.values[active][0]=Math.max(rx,Math.min(width()-rx,event.getX()-dx-safe.left))/width();layout.values[active][1]=Math.max(ry,Math.min(height()-ry,event.getY()-dy-safe.top))/height();changed();}
-            else if(event.getActionMasked()==MotionEvent.ACTION_UP||event.getActionMasked()==MotionEvent.ACTION_CANCEL)dragging=false;
+            if(event.getActionMasked()==MotionEvent.ACTION_DOWN){int found=hit(event.getX(),event.getY());dragging=found>=0;if(dragging){history.record(layout.serialize());gesture=true;active=found;dx=event.getX()-x(active);dy=event.getY()-y(active);changed();}return true;}
+            if(event.getActionMasked()==MotionEvent.ACTION_MOVE&&dragging&&!pinch.isInProgress()){float rx=radius(active)*Math.max(1,TouchIcons.BOUNDS[layout.mapping[active]][0]),ry=radius(active)*Math.max(1,TouchIcons.BOUNDS[layout.mapping[active]][1]);layout.values[active][0]=Math.max(rx,Math.min(width()-rx,event.getX()-dx-safe.left))/width();layout.values[active][1]=Math.max(ry,Math.min(height()-ry,event.getY()-dy-safe.top))/height();changed();}
+            else if(event.getActionMasked()==MotionEvent.ACTION_UP||event.getActionMasked()==MotionEvent.ACTION_CANCEL){dragging=false;gesture=false;changed();}
             return true;
         }
     }

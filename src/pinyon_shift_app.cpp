@@ -818,10 +818,17 @@ bool PinyonShiftApp::SetupPresentation() {
   if (!pinyon_shift::fh1_render_test::Enabled()) {
     pinyon_shift::platform::ShowFatalError(
         "Graphics unavailable",
+#if defined(__ANDROID__)
+        "FH4Droid could not start this graphics driver. Vulkan 1.1 or newer, "
+        "independent blending, vertex/fragment stores and atomics, and usable "
+        "colour/depth formats are required. Try the system driver or share a "
+        "problem report, which lists the missing capabilities.");
+#else
         "Pinyon Shift could not start the graphics device. It needs a GPU whose "
         "driver supports Vulkan 1.3. Install the newest driver from AMD, Intel or "
         "NVIDIA, then retry. Older integrated graphics, such as Intel HD Graphics "
         "before the 6th generation, cannot run the game.");
+#endif
   }
   pinyon_shift::platform::ExitImmediately(1308);
 }
@@ -895,9 +902,12 @@ bool PinyonShiftApp::EnsureHostUi() {
     });
     host_ui_->SetOverlaySource([this] {
       auto& pad = pinyon_shift::ui::TouchPad::Get();
+      if(window())pad.UpdateViewport(float(window()->GetActualPhysicalWidth()),float(window()->GetActualPhysicalHeight()));
       if (!window() || !pad.Visible() || (host_ui_ && host_ui_->is_open())) {
         return std::vector<pinyon_shift::hostui::HostUi::OverlayDisc>{};
       }
+      const auto safe=window()->GetSafeAreaInsets();
+      pad.SetSafeArea(float(safe.left),float(safe.top),float(safe.right),float(safe.bottom));
       return pinyon_shift::ui::TouchOverlayForShapes(
           pad.Shapes(float(window()->GetActualPhysicalWidth()),
                      float(window()->GetActualPhysicalHeight())), pad.Opacity());
@@ -986,11 +996,13 @@ void PinyonShiftApp::ApplyMapView(bool open) {
   // The HUD scale (#520) is for the gameplay HUD; the map's and the menus'
   // screens are drawn through the same HUD view and keep their size.
   rex::cvar::SetFlagByName("fh1_hud_scale_suspended", open ? "true" : "false");
-  if (!REXCVAR_GET(pinyon_shift_hor_plus)) return;
+  pinyon_shift::ui::TouchPad::Get().SetMenuContext(open);
+  if (!REXCVAR_GET(pinyon_shift_hor_plus)) { PinyonShiftCommitMapView(open); return; }
   // Wider View stretches the widened gameplay frame over the window; the
   // title's 16:9 screens (menus, Autoshow, map) are letterboxed (#363).
   rex::cvar::SetFlagByName("present_letterbox", open ? "true" : "false");
   UpdateHorPlus();
+  PinyonShiftCommitMapView(open);
   pinyon_shift::diagnostics::RecordEvent("display.hor_plus_view", {{"wide", open ? "0" : "1"}});
 }
 
@@ -1021,7 +1033,10 @@ void PinyonShiftApp::OnPostSetup() {
   // this same gameplay-view switch.
   PinyonShiftSetMapViewCallback([this](bool open) {
     if (window()) {
-      window()->app_context().CallInUIThreadDeferred([this, open] { ApplyMapView(open); });
+      const uint64_t request=++view_request_generation_;
+      window()->app_context().CallInUIThreadDeferred([this,open,request] {
+        if(request==view_request_generation_.load())ApplyMapView(open);
+      });
     }
   });
   rex::ui::RegisterBind("bind_game_menu", pinyon_shift::config::kGameMenuKeys,

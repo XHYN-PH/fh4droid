@@ -49,7 +49,7 @@ final class FestivalUi {
   }
   static TextView text(Activity a, String s, int size, int color) {
     TextView v = new TextView(a);
-    v.setText(s);
+    v.setText(AppLanguage.text(a,s));
     v.setTextSize(Math.max(size>=18?16:13,size * scale(a)));
     v.setTextColor(color);
     v.setTypeface(Typeface.create("sans-serif", 0));
@@ -88,7 +88,7 @@ final class FestivalUi {
   }
   static Button button(Activity a, String title, boolean primary) {
     Button b = new Button(a);
-    b.setText(title);
+    b.setText(AppLanguage.text(a,title));
     b.setAllCaps(false);
     b.setTextSize(Math.max(15,16 * scale(a)));
     b.setTextColor(primary ? BG : TEXT);
@@ -154,6 +154,7 @@ final class FestivalUi {
     View panel = panel(a, title, body, () -> ref[0].dismiss());
     AlertDialog d = new AlertDialog.Builder(a).setView(panel).create();
     ref[0] = d;
+    d.setOnKeyListener((dialog,key,event)->ControllerPrompts.handle(a,d.getWindow(),key,event,d::dismiss));
     d.setOnShowListener(x -> {
       Window w = d.getWindow();
       if (w != null) {
@@ -318,7 +319,7 @@ final class FestivalUi {
   static void explain(Activity a, String title, String help) {
     if (help != null && !help.isEmpty())
       new AlertDialog.Builder(a)
-          .setTitle(title)
+          .setTitle(AppLanguage.text(a,title))
           .setMessage(help)
           .setPositiveButton("Got it", null)
           .show();

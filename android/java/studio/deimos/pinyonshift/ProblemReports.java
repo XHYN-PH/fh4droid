@@ -30,7 +30,7 @@ final class ProblemReports {
             info.append(Build.MANUFACTURER).append(' ').append(Build.MODEL).append("\nAndroid ").append(Build.VERSION.RELEASE).append(" (").append(Build.VERSION.SDK_INT).append(")\nABIs ").append(Arrays.toString(Build.SUPPORTED_ABIS)).append("\nApp ").append(version);
             ActivityManager manager=(ActivityManager)c.getSystemService(Context.ACTIVITY_SERVICE);
             if(manager!=null){ActivityManager.MemoryInfo memory=new ActivityManager.MemoryInfo();manager.getMemoryInfo(memory);info.append("\nRAM total ").append(memory.totalMem).append(", available ").append(memory.availMem).append(", pressure ").append(memory.lowMemory);
-                for(ApplicationExitInfo exit:manager.getHistoricalProcessExitReasons(c.getPackageName(),0,20))if((c.getPackageName()+":game").equals(exit.getProcessName()))info.append("\nGame exit at ").append(exit.getTimestamp()).append(": ").append(ReportFiles.exitLabel(exit.getReason(),exit.getStatus())).append(", status ").append(exit.getStatus()).append(", PSS KiB ").append(exit.getPss());}
+                PlatformCompat.exitHistory(manager,c.getPackageName(),info);}
             PowerManager power=(PowerManager)c.getSystemService(Context.POWER_SERVICE);if(power!=null){int status=power.getCurrentThermalStatus();info.append("\nThermal status ").append(ReportFiles.thermalLabel(status)).append(" (severity ").append(status).append(", not degrees)");}
             info.append("\nSaved settings (may include next-launch changes)\n").append(MobileConfig.read(c));
             info.append("\nDriver test\n").append(AdrenoSettings.reportDetails(c));
@@ -40,13 +40,17 @@ final class ProblemReports {
             String latest="";Map<String,org.json.JSONObject> builds=new HashMap<>();
             for(File file:files){String session=ReportFiles.sessionName(file.getName());if(session!=null&&file.getName().endsWith(".jsonl")){if(session.compareTo(latest)>0)latest=session;builds.put(session,sessionBuild(file));}}
             info.append("\nLatest native session: ").append(latest.isEmpty()?"No native session recorded":latest).append("\nThe history folder contains earlier sessions. Shared logs can contain several builds. See report-index.json for provenance and truncation.\n");
+            File runtimeLog=new File(state,"logs/runtime.log");
+            if(runtimeLog.isFile()){byte[] retained=ReportFiles.tail(runtimeLog,2*1024*1024);entry(zip,"current-warning-summary.txt",RuntimeWarnings.summarize(new String(retained,StandardCharsets.UTF_8),latest,retained.length<runtimeLog.length()).getBytes(StandardCharsets.UTF_8));}
             entry(zip,"device-and-settings.txt",info.toString().getBytes(StandardCharsets.UTF_8));
             if(manifest!=null)entry(zip,"build-manifest.json",manifest);
             org.json.JSONObject index=new org.json.JSONObject();org.json.JSONArray exported=new org.json.JSONArray();
             try{index.put("schema",1);index.put("app_version",version);index.put("app_source_commit",appCommit);index.put("latest_session_matches_app",!appCommit.equals("unknown")&&builds.containsKey(latest)&&appCommit.equals(builds.get(latest).optString("pinyon_shift_commit")));index.put("exported_ms",System.currentTimeMillis());index.put("latest_session",latest);index.put("files",exported);}catch(org.json.JSONException error){throw new IOException(error);}
+            final String latestSession=latest;
+            files.sort((a,b)->{int pa=reportPriority(a,latestSession),pb=reportPriority(b,latestSession);return pa!=pb?Integer.compare(pa,pb):Long.compare(b.lastModified(),a.lastModified());});
             long budget=16L*1024*1024;int count=0;
             for(File file:files){
-                if(count>=12||budget<=0)break;int limit=(int)Math.min(2L*1024*1024,budget);long original=file.length();if(original<=0)continue;
+                if(count>=18||budget<=0)break;int limit=(int)Math.min(file.getName().endsWith(".csv")&&latest.equals(ReportFiles.sessionName(file.getName()))?8L*1024*1024:2L*1024*1024,budget);long original=file.length();if(original<=0)continue;
                 byte[] data=ReportFiles.tail(file,limit);if(data.length==0)continue;
                 String session=ReportFiles.sessionName(file.getName());boolean sameBuild=session!=null&&builds.containsKey(session)&&!appCommit.equals("unknown")&&appCommit.equals(builds.get(session).optString("pinyon_shift_commit"));String kind=session==null?"shared":session.equals(latest)&&sameBuild?"current":"history";
                 String name="logs/"+kind+"/"+(++count)+"-"+file.getName().replaceAll("[^a-zA-Z0-9._-]","_");entry(zip,name,data);budget-=data.length;
@@ -58,6 +62,7 @@ final class ProblemReports {
             entry(zip,"report-index.json",index.toString().getBytes(StandardCharsets.UTF_8));
         }
     }
+    private static int reportPriority(File file,String latest){String session=ReportFiles.sessionName(file.getName());if(latest.equals(session))return file.getName().endsWith(".csv")?1:0;if(file.getName().startsWith("android-")||file.getName().equals("runtime.log"))return 2;return 3;}
     private static void collect(File dir,List<File> out,int depth){
         if(depth>3||out.size()>300||java.nio.file.Files.isSymbolicLink(dir.toPath()))return;File[] files=dir.listFiles();if(files==null)return;
         for(File f:files){if(java.nio.file.Files.isSymbolicLink(f.toPath()))continue;if(f.isDirectory())collect(f,out,depth+1);

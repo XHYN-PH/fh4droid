@@ -13,7 +13,7 @@ The launcher runs these same scripts. Use a checkout when you're changing host o
 
 - Windows 10 or 11, x64, PowerShell 5.1 or newer.
 - Visual Studio 2022 C++ Build Tools 17.1 or newer. Setup installs them if missing.
-- A GPU with Vulkan 1.3, an internet connection and about 30 GB free.
+- A supported Vulkan GPU, an internet connection and about 30 GB free. Android targets API 31 and ARMv8-A; Vulkan 1.1/1.2 capability paths are experimental. See [Android requirements](android.md#r7-changes-and-limits).
 
 Setup checks the C++ library and the Windows SDK before building, and stops with compiler diagnostics if they're too old.
 

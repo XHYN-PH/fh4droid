@@ -43,5 +43,7 @@ void PinyonShiftSetViewportAspectScale(float scale);
 // gameplay view (false) and the title's 16:9 screens (true): menus, the
 // Autoshow, loading and the pause map.
 void PinyonShiftSetMapViewCallback(std::function<void(bool open)> callback);
+// Commit alongside the host's presentation change, not ahead of its UI queue.
+void PinyonShiftCommitMapView(bool open);
 
 void PinyonShiftSetPauseSettingsHandler(std::function<void()> handler);

@@ -17,7 +17,7 @@
 #include "ui/settings_menu.h"
 #include "ui/touch_pad.h"
 extern "C" __attribute__((used, visibility("default")))
-const char fh4droid_native_bridge_abi[] = "fh4droid-native-bridge:r6-modern-controls-v1";
+const char fh4droid_native_bridge_abi[] = "fh4droid-native-bridge:r7-budget-controls-v1";
 namespace {
 std::mutex bridge_mutex;
 std::function<void(bool)> menu_handler;
@@ -133,6 +133,8 @@ Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeApplySetting(
       "pad_gyro_sensitivity",
       "pinyon_shift_ai_opponents"};
   static const std::unordered_set<std::string> extra = {
+      "pinyon_shift_camera_gforce", "pinyon_shift_camera_lean",
+      "pinyon_shift_camera_shake", "pinyon_shift_camera_head",
       "pinyon_shift_fov_scale", "fh4droid_pad_inner",
       "fh4droid_pad_outer",     "fh4droid_pad_curve",
       "fh4droid_trigger_inner", "fh4droid_trigger_outer",
@@ -183,6 +185,21 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeFrameCount(JNIEnv *,
                                                                     jclass) {
   return jlong(rex::perf::SourceFrameCount());
+}
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativePerformance(JNIEnv *env,jclass) {
+  const jlong values[] = {
+      rex::perf::GetSnapshotCounter(rex::perf::CounterId::kFrameTimeUs),
+      jlong(rex::perf::ProcessResidentBytes()/1048576),
+      rex::perf::GetSnapshotCounter(rex::perf::CounterId::kMemoryDeviceUsageMb),
+      rex::perf::GetSnapshotCounter(rex::perf::CounterId::kMemoryDeviceBudgetMb)};
+  auto out=env->NewLongArray(4);
+  if(out)env->SetLongArrayRegion(out,0,4,values);
+  return out;
+}
+extern "C" JNIEXPORT jboolean JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeMenuContext(JNIEnv *,jclass) {
+  return pinyon_shift::ui::TouchPad::Get().MenuContext();
 }
 extern "C" JNIEXPORT jstring JNICALL
 Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeAchievements(

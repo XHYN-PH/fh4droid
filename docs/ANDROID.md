@@ -2,7 +2,9 @@
 
 ## FH4Droid Android-only fork
 
-FH4Droid focuses on Android only. The `0.6.7-r6` testing build uses application ID `ph.xhyn.fh4droid`. Install the APK and choose your own supported USA retail ISO or complete extracted game folder; the phone does not compile the game. See the [fork release notes](releases/fh4droid-0.6.7-r6.md) for requirements and limitations. The r6 integration has not been tested on a physical Android device. The [current Android guide](../site/pages/android.md) describes the launcher, drawer, settings, profiles, controls and reports; the upstream sections below retain their named historical measurements.
+FH4Droid focuses on Android only. The `0.6.8-r7` testing build uses application ID `ph.xhyn.fh4droid`. Install the APK and choose your own supported USA retail ISO or complete extracted game folder; the phone does not compile the game. See the [fork release notes](releases/fh4droid-0.6.8-r7.md) for requirements and limitations. The r7 integration has not been tested on a physical Android device. The [current Android guide](../site/pages/android.md) describes the launcher, drawer, settings, profiles, controls and reports; the upstream sections below retain their named historical measurements.
+
+The current minimum is Android 12/API 31 with ARMv8-A. Vulkan 1.1/1.2, Mali and Xclipse are experimental capability paths, not qualified gameplay claims. The [70-item review](releases/fh4droid-0.6.8-r7-review.md) lists unresolved bugs and device tests.
 
 The developer build instructions and historical measurements below are inherited from upstream. Current FH4Droid source uses local ISO/folder import; its PC discovery, pairing, Wi-Fi transfer and network app-update client have been removed. Its private-build distribution policy describes upstream Pinyon Shift; this fork's prebuilt APK release is separate and contains compiled game translations. Raw game files, generated source, native build products and signing keys remain excluded from the source repository.
 

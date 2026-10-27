@@ -74,6 +74,7 @@ final class SettingsHub {
         head.addView(FestivalUi.text(a,section,18,FestivalUi.TEXT),new LinearLayout.LayoutParams(0,-2,1));
         Button actions=FestivalUi.button(a,"Actions",false);head.addView(actions);actions.setOnClickListener(v->{PopupMenu popup=new PopupMenu(a,actions);popup.getMenu().add("Reset this section").setOnMenuItemClickListener(i->{resetSection(a,section,runtime,()->FestivalUi.refreshTree(root));return true;});popup.getMenu().add("Undo last change").setOnMenuItemClickListener(i->{undo(a,runtime);FestivalUi.refreshTree(root);return true;});popup.show();});
         if(section.equals("Controls")){
+          column.addView(FestivalUi.text(a,ControllerPrompts.hints(),12,FestivalUi.MUTED));
           FestivalUi.action(a,column,"Edit touch layout",editor);
           FestivalUi.action(a,column,"Touch buttons and steering",()->page(a,"Touch",runtime,editor));
           FestivalUi.action(a,column,"Phone tilt and vibration",()->page(a,"Phone",runtime,editor));
@@ -192,7 +193,8 @@ final class SettingsHub {
     return a.getSharedPreferences("setting_pins", 0).getBoolean(key, false);
   }
   private static String literal(MobileSettings.Option o, String value) {
-    return o.string ? MobileConfig.quote(value) : value;
+    if(o.string)return MobileConfig.quote(value);
+    try{return new java.math.BigDecimal(value).stripTrailingZeros().toPlainString();}catch(NumberFormatException ignored){return value;}
   }
   private static String plain(String literal) {
     return literal.startsWith("\"") && literal.endsWith("\"")
@@ -337,6 +339,7 @@ final class SettingsHub {
       Toast.makeText(a,"Previous values restored",Toast.LENGTH_SHORT).show();
     }else UNDO.put(a,c);
   }
+  private static String screenActive(MobileSettings.Runtime runtime){if(runtime==null)return "";Map<String,String> values=new LinkedHashMap<>();for(String key:GraphicsProfiles.screenMode(0).keySet()){String v=active(runtime,key);if(v==null)return " · running mode unavailable";values.put(key,SettingValues.plain(v));}return "\nRunning: "+GraphicsProfiles.SCREEN_MODES[GraphicsProfiles.screenModeIndex(values)];}
   private static int integer(String value, int fallback) {
     try {
       return Integer.parseInt(value);
@@ -346,7 +349,13 @@ final class SettingsHub {
   }
   private static void extras(
       Activity a, LinearLayout rows, String page, MobileSettings.Runtime runtime, Runnable editor) {
+    if(page.equals("Audio"))FestivalUi.action(a,rows,"Use my music player",()->new AlertDialog.Builder(a).setTitle("Use external music?").setMessage("Turn off the game radio and menu music at the next launch, keeping engine, tyres and effects. This app does not request exclusive Android audio focus. Start your music player normally.").setNegativeButton("Cancel",null).setPositiveButton("Turn game music off",(d,w)->apply(a,runtime,Collections.singletonMap("pinyon_shift_mix_music","0"),true)).show());
     if (page.equals("Graphics")) {
+      TextView activeStatus=FestivalUi.text(a,"",13,FestivalUi.ORANGE);rows.addView(activeStatus);
+      FestivalUi.onRefresh(activeStatus,()->{
+        String saved=value(a,"fh1_render_scale_percent","100"),running=active(runtime,"fh1_render_scale_percent");
+        activeStatus.setText(running==null?"Next launch: "+saved+"% render resolution":SettingValues.same(saved,running)?"Running: "+SettingValues.plain(running)+"% render resolution":"Running: "+SettingValues.plain(running)+"% · next launch: "+saved+"%");
+      });
       SeekBar resolution = FestivalUi.slider(a, rows, "Render resolution · next launch",
           "Lower values reduce GPU work. Restart avoids rebuilding game "
               + "render resources "
@@ -382,16 +391,16 @@ final class SettingsHub {
                 apply(a, runtime, values, true);
                 FestivalUi.refreshTree(rows);
               }));
+      if(runtime!=null){TextView aaActive=FestivalUi.text(a,"",12,FestivalUi.MUTED);rows.addView(aaActive);FestivalUi.onRefresh(aaActive,()->aaActive.setText("Running MSAA: "+(active(runtime,"fh1_msaa_single_sample")==null||active(runtime,"fh1_msaa_2x")==null?"unavailable":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_single_sample")))?"Off":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_2x")))?"2×":"4×")));}
       FestivalUi.action(a, rows, "Graphics presets", () -> presets(a, runtime));
+      FestivalUi.action(a, rows, "My graphics profiles", () -> GraphicsProfilePage.show(a,runtime));
       FestivalUi.action(a,rows,"Graphics drivers",()->{if(a instanceof LauncherActivity)((LauncherActivity)a).openDrivers();else FestivalUi.explain(a,"Graphics drivers","Quit to the launcher to select a driver.");});
     }
     if (page.equals("Graphics")) {
       Button screen = FestivalUi.action(a, rows, "", () -> {});
       FestivalUi.onRefresh(screen,
           ()
-              -> screen.setText("Screen: "
-                  + GraphicsProfiles
-                        .SCREEN_MODES[GraphicsProfiles.screenModeIndex(MobileConfig.read(a))]));
+              -> screen.setText("Screen · next launch: "+GraphicsProfiles.SCREEN_MODES[GraphicsProfiles.screenModeIndex(MobileConfig.read(a))]+screenActive(runtime)));
       screen.setOnClickListener(v
           -> FestivalUi.choose(a, "Screen layout · next launch", GraphicsProfiles.SCREEN_MODES,
               GraphicsProfiles.screenModeIndex(MobileConfig.read(a)), i -> {
@@ -431,6 +440,8 @@ final class SettingsHub {
           });
       pref(a, rows, "Menu animations", "animations", true);
       pref(a, rows, "Show FPS", "show_fps", false);
+      pref(a, rows, "Show latest frame time (with FPS)", "show_frame_time", false);
+      pref(a, rows, "Show RAM and thermal severity (with FPS)", "show_memory_heat", false);
       pref(a, rows, "Match display refresh", "match_refresh", true);
     }
     if (page.equals("Touch")) {
@@ -522,7 +533,9 @@ final class SettingsHub {
           a, rows, "Test and calibrate controller", () -> ControllerTools.show(a, runtime));
     if (page.equals("Advanced")) {
       FestivalUi.action(a, rows, "Adreno options", () -> AdrenoSettings.show(a, runtime));
+      if(runtime!=null){TextView aaActive=FestivalUi.text(a,"",12,FestivalUi.MUTED);rows.addView(aaActive);FestivalUi.onRefresh(aaActive,()->aaActive.setText("Running MSAA: "+(active(runtime,"fh1_msaa_single_sample")==null||active(runtime,"fh1_msaa_2x")==null?"unavailable":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_single_sample")))?"Off":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_2x")))?"2×":"4×")));}
       FestivalUi.action(a, rows, "Graphics presets", () -> presets(a, runtime));
+      FestivalUi.action(a, rows, "My graphics profiles", () -> GraphicsProfilePage.show(a,runtime));
       pref(a, rows, "Sustained performance mode", "sustained_mode", false);
       pref(a, rows, "Detailed GPU timings · next launch", "detailed_gpu", false);
       rows.addView(FestivalUi.text(a,
@@ -556,7 +569,10 @@ final class SettingsHub {
   }
   private static void presets(Activity a, MobileSettings.Runtime runtime) {
     FestivalUi.choose(a, "Graphics presets", GraphicsProfiles.NAMES, -1,
-        i -> apply(a, runtime, GraphicsProfiles.preset(i), true));
+        i -> {
+          Map<String,String> values=GraphicsProfiles.preset(i);
+          new AlertDialog.Builder(a).setTitle("Apply "+GraphicsProfiles.NAMES[i]+"?").setMessage("These graphics apply at the next launch.\n\n"+GraphicsProfileStore.describe(values)).setNegativeButton("Keep my settings",null).setPositiveButton("Apply",(d,w)->apply(a,runtime,values,true)).show();
+        });
   }
   private SettingsHub() {}
 }

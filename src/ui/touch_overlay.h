@@ -19,6 +19,7 @@ struct TouchOverlayDisc {
   bool driving_icons=true,button_hints=true;
   float icon_opacity=.95f;
   bool thumb_knob=false;
+  float amount=0;
 };
 // Build both halves of a stick with its real identity: the base owns the
 // modern icon/caption, the moving knob stays unlabelled in driving mode.
@@ -27,7 +28,7 @@ inline std::vector<TouchOverlayDisc> TouchOverlayForShapes(const auto& shapes,fl
   for(const auto& shape:shapes){
     discs.push_back({shape.x,shape.y,shape.radius,shape.label,
         shape.pressed&&!shape.stick,opacity*shape.opacity,shape.driving_icons,
-        shape.button_hints,shape.icon_opacity*shape.opacity,false});
+        shape.button_hints,shape.icon_opacity*shape.opacity,false,shape.amount});
     if(shape.stick)discs.push_back({shape.stick_x,shape.stick_y,shape.radius*.55f,
         shape.label,shape.pressed,opacity*shape.opacity,shape.driving_icons,
         shape.button_hints,shape.icon_opacity*shape.opacity,true});
@@ -92,6 +93,10 @@ inline std::vector<TouchOverlayBatch> BuildTouchOverlay(std::span<const TouchOve
         (disc.label=="RT"||disc.label=="LT"||disc.label=="LB");
     if(!pedal)AppendTouchFrame(batches_,disc.x,disc.y,disc.radius*icon->width,disc.radius*icon->height,
                    icon->rectangular,stroke,fill,border);
+    if(disc.driving_icons&&!disc.thumb_knob&&disc.amount>0){
+      const float w=disc.radius*.85f*std::clamp(disc.amount,0.f,1.f);
+      AppendTouchFrame(batches_,disc.x-disc.radius*.425f+w*.5f,disc.y+disc.radius*.65f,w,disc.radius*.065f,true,0,TouchRgba(255,165,94,int(240*ink)),0);
+    }
     if(disc.thumb_knob&&disc.driving_icons)continue;
     // In classic mode the stick letters follow the knob; modern captions
     // remain on the stationary base so they do not drift during steering.

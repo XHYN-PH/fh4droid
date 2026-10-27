@@ -116,10 +116,11 @@ const std::vector<TouchPad::Layout>& TouchPad::Controls() {
 void TouchPad::LoadLayout(const std::filesystem::path& path) {
   {
     std::lock_guard lock(mutex_);
-    controls_ = Controls(); hidden_.assign(controls_.size(), false);
+    controls_ = Controls(); mapping_.clear(); hidden_.assign(controls_.size(), false);
     timeouts_.assign(controls_.size(),-1);activity_.assign(controls_.size(),{});
     opacity_ = 0.55f; icon_opacity_ = .95f; auto_hide_ = true; arrow_steering_ = true; fingers_.clear();
     analog_pedals_ = false; high_contrast_ = false; steering_response_ms_ = 0;
+    steering_return_ms_ = -1; steering_lock_ = 1.f;
     steering_value_ = 0; steering_updated_ = {};
     idle_seconds_=20;left_mode_=right_mode_=0;driving_icons_=button_hints_=true;
     std::ifstream in(path);
@@ -139,6 +140,8 @@ void TouchPad::LoadLayout(const std::filesystem::path& path) {
       else if (label == "steering") { std::string value; if (row >> value && (value == "arrows" || value == "stick")) arrow_steering_ = value == "arrows"; }
       else if (label == "steering_buttons") { int value; if (row >> value && (value == 0 || value == 1)) arrow_steering_ = value == 1; }
       else if (label == "steering_response_ms") { int value; if (row >> value) steering_response_ms_ = std::clamp(value, 0, 500); }
+      else if (label == "steering_return_ms") { int value; if (row >> value) steering_return_ms_ = std::clamp(value, -1, 500); }
+      else if (label == "steering_lock") { float value; if (row >> value && std::isfinite(value)) steering_lock_ = std::clamp(value, .25f, 1.f); }
       else if (label == "analog_pedals") { int value; if (row >> value) analog_pedals_ = value != 0; }
       else if (label == "high_contrast") { int value; if (row >> value) high_contrast_ = value != 0; }
       else if (label == "idle_seconds") {float value;if(row>>value && std::isfinite(value))idle_seconds_=std::clamp(value,0.f,120.f);}
@@ -146,6 +149,13 @@ void TouchPad::LoadLayout(const std::filesystem::path& path) {
       else if (label == "right_mode") {int value;if(row>>value)right_mode_=std::clamp(value,0,2);}
       else if (label == "driving_labels") {int value;if(row>>value)driving_icons_=value!=0;}
       else if (label == "button_hints") {int value;if(row>>value)button_hints_=value!=0;}
+      else if (label == "map") {
+        std::string from,to;if(row>>from>>to){
+          const auto find=[&](const std::string& name){for(const auto& c:Controls())if(name==c.label)return c.control;return Control::kNone;};
+          const auto valid=[](Control c){return c!=Control::kNone&&c!=Control::kStick&&c!=Control::kRightStick&&c!=Control::kSteerLeft&&c!=Control::kSteerRight;};
+          auto source=find(from),target=find(to);if(valid(source)&&valid(target))mapping_[source]=target;
+        }
+      }
       else if (label == "timeout") {
         std::string name;float value;
         if(row>>name>>value && std::isfinite(value)){
@@ -177,6 +187,26 @@ void TouchPad::SetPhysicalController(bool connected) {
   { std::lock_guard lock(mutex_); if (physical_controller_ == connected) return; physical_controller_ = connected; fingers_.clear(); steering_value_ = 0; steering_updated_ = {}; }
   Changed();
 }
+void TouchPad::UpdateViewport(float width,float height) {
+  std::lock_guard lock(mutex_);
+  if(!std::isfinite(width)||!std::isfinite(height)||width<=0||height<=0){fingers_.clear();steering_value_=0;steering_updated_={};return;}
+  if(width_>0&&height_>0&&(width_!=width||height_!=height)){
+    fingers_.clear();steering_value_=0;steering_updated_={};
+  }
+  width_=width;height_=height;
+}
+void TouchPad::SetSafeArea(float left,float top,float right,float bottom) {
+  const auto safe=[](float x){return std::isfinite(x)?std::max(0.f,x):0.f;};
+  std::lock_guard lock(mutex_);
+  left=safe(left);top=safe(top);right=safe(right);bottom=safe(bottom);
+  if(left!=safe_left_||top!=safe_top_||right!=safe_right_||bottom!=safe_bottom_){fingers_.clear();steering_value_=0;steering_updated_={};}
+  safe_left_=left;safe_top_=top;safe_right_=right;safe_bottom_=bottom;
+}
+void TouchPad::SetMenuContext(bool menu) {
+  {std::lock_guard lock(mutex_);if(menu_context_==menu)return;menu_context_=menu;fingers_.clear();steering_value_=0;steering_updated_={};}
+  Changed();
+}
+bool TouchPad::MenuContext() const {std::lock_guard lock(mutex_);return menu_context_;}
 float TouchPad::Opacity() const { std::lock_guard lock(mutex_); return high_contrast_ ? std::max(opacity_, .85f) : opacity_; }
 std::string TouchPad::PressedControls() const {
   std::lock_guard lock(mutex_);
@@ -185,7 +215,7 @@ std::string TouchPad::PressedControls() const {
   const auto& controls=controls_.empty()?Controls():controls_;
   for(const auto& control:controls){
     if(std::any_of(fingers_.begin(),fingers_.end(),[&](const auto& entry){return entry.second.control==control.control;})){
-      if(!names.empty())names+='|';names+=control.label;
+      if(!names.empty())names+='|';names+=DisplayLabel(control);
     }
   }
   return names;
@@ -227,7 +257,7 @@ void TouchPad::SetSuspended(bool suspended) {
 }
 
 float TouchPad::Radius(const Layout& control, float width, float height) const {
-  const auto* icon=FindTouchIcon(control.label);
+  const auto* icon=FindTouchIcon(DisplayLabel(control));
   const float w=std::max(1.f,width-safe_left_-safe_right_);
   const float h=std::max(1.f,height-safe_top_-safe_bottom_);
   return std::min({control.radius*height,w*.49f/std::max(1.f,icon?icon->width:1.f),
@@ -241,7 +271,7 @@ void TouchPad::Place(const Layout& control, float width, float height, float& x,
   const float safe_width = std::max(1.0f, width - safe_left_ - safe_right_);
   const float safe_height = std::max(1.0f, height - safe_top_ - safe_bottom_);
   const float r=Radius(control,width,height);
-  const auto* icon=FindTouchIcon(control.label);
+  const auto* icon=FindTouchIcon(DisplayLabel(control));
   const float rx=r*std::max(1.f,icon?icon->width:1.f),ry=r*std::max(1.f,icon?icon->height:1.f);
   x = safe_left_ + std::clamp(control.x * safe_width, rx, safe_width - rx);
   y = safe_top_ + std::clamp(control.y * safe_height, ry, safe_height - ry);
@@ -252,7 +282,7 @@ TouchPad::Control TouchPad::Hit(float x, float y, float width, float height) con
   float best_distance = 0.0f;
   const auto& controls = controls_.empty() ? Controls() : controls_;
   for (size_t i = 0; i < controls.size(); ++i) {
-    if ((!hidden_.empty() && hidden_[i]) || !Enabled(controls[i].control)) continue;
+    if ((!hidden_.empty() && hidden_[i] && !(menu_context_&&MenuControl(controls[i].control)&&controls[i].control!=Control::kRightStick&&controls[i].control!=Control::kLeftStickClick&&controls[i].control!=Control::kRightStickClick)) || !Enabled(controls[i].control)) continue;
     const Layout& control = controls[i];
     if((control.control==Control::kStick && left_mode_==2)||(control.control==Control::kRightStick && right_mode_==2))continue;
     float control_x, control_y;
@@ -261,7 +291,7 @@ TouchPad::Control TouchPad::Hit(float x, float y, float width, float height) con
     const float dy = y - control_y;
     // A generous target: a thumb lands off-centre.
     const float distance = std::sqrt(dx * dx + dy * dy);
-    const auto* icon = FindTouchIcon(control.label);
+    const auto* icon = FindTouchIcon(DisplayLabel(control));
     const float reach = Radius(control,width,height)*1.15f;
     const bool inside = icon && icon->rectangular
         ? std::abs(dx) <= icon->width * reach && std::abs(dy) <= icon->height * reach
@@ -284,10 +314,21 @@ TouchPad::Control TouchPad::Hit(float x, float y, float width, float height) con
   return best;
 }
 
+TouchPad::Control TouchPad::Action(Control source) const {
+  const auto it=mapping_.find(source);return menu_context_||it==mapping_.end()?source:it->second;
+}
+const char* TouchPad::DisplayLabel(const Layout& control) const {
+  const auto action=Action(control.control);for(const auto& c:Controls())if(c.control==action)return c.label;return control.label;
+}
 bool TouchPad::Enabled(Control control) const {
+  if(menu_context_)return MenuControl(control);
   if (control == Control::kStick) return !arrow_steering_;
   if (control == Control::kSteerLeft || control == Control::kSteerRight) return arrow_steering_;
   return true;
+}
+bool TouchPad::MenuControl(Control control) {
+  return control!=Control::kNone && control!=Control::kThrottle && control!=Control::kBrake &&
+      control!=Control::kSteerLeft && control!=Control::kSteerRight && control!=Control::kStick;
 }
 
 bool TouchPad::IsDpad(Control control) {
@@ -360,20 +401,11 @@ void TouchPad::OnTouchEvent(rex::ui::TouchEvent& e) {
   if (width <= 0.0f || height <= 0.0f) {
     return;
   }
+  UpdateViewport(width,height);
+  const auto safe=window->GetSafeAreaInsets();
+  SetSafeArea(float(safe.left),float(safe.top),float(safe.right),float(safe.bottom));
   {
     std::lock_guard lock(mutex_);
-    width_ = width;
-    height_ = height;
-    const auto insets = window->GetSafeAreaInsets();
-    if (float(insets.left) != safe_left_ || float(insets.top) != safe_top_ ||
-        float(insets.right) != safe_right_ || float(insets.bottom) != safe_bottom_) {
-      REXLOG_INFO("Touch controls: safe area insets left {} top {} right {} bottom {}",
-                  insets.left, insets.top, insets.right, insets.bottom);
-    }
-    safe_left_ = float(insets.left);
-    safe_top_ = float(insets.top);
-    safe_right_ = float(insets.right);
-    safe_bottom_ = float(insets.bottom);
     HandleTouch(e, width, height);
   }
   Changed();
@@ -392,14 +424,15 @@ void TouchPad::Changed() {
 
 bool TouchPad::Visible() const {
   std::lock_guard lock(mutex_);
-  if(suspended_||(auto_hide_&&physical_controller_)||last_touch_==std::chrono::steady_clock::time_point{})return false;
+  if(suspended_||(auto_hide_&&physical_controller_))return false;
   const auto& controls=controls_.empty()?Controls():controls_;
   for(size_t i=0;i<controls.size();i++)if(Enabled(controls[i].control)&&
-      (hidden_.empty()||!hidden_[i])&&Alpha(i)>0)return true;
+      (hidden_.empty()||!hidden_[i]||menu_context_)&&Alpha(i)>0)return true;
   return false;
 }
 
 float TouchPad::Alpha(size_t index) const {
+  if(menu_context_)return 1.f;
   const auto& controls=controls_.empty()?Controls():controls_;
   if(std::any_of(fingers_.begin(),fingers_.end(),[&](const auto& p){return p.second.control==controls[index].control;}))return 1.f;
   const float timeout=index<timeouts_.size()?timeouts_[index]:-1.f;
@@ -423,11 +456,11 @@ rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
     if (!analog_pedals_) return 255;
     const auto& controls = controls_.empty() ? Controls() : controls_;
     const auto found = std::find_if(controls.begin(), controls.end(), [&](const auto& c) { return c.control == finger.control; });
-    const float travel = std::max(1.f, found->radius * height_ * 2.f);
+    const float travel = std::max(1.f, (found==controls.end()?.1f:found->radius) * height_ * 2.f);
     return uint8_t(std::clamp(.5f + (finger.origin_y - finger.y) / travel, 0.f, 1.f) * 255.f);
   };
   for (const auto& [id, finger] : fingers_) {
-    switch (finger.control) {
+    switch (Action(finger.control)) {
       case Control::kStick:
       case Control::kRightStick: {
         const auto& controls = controls_.empty() ? Controls() : controls_;
@@ -508,11 +541,17 @@ rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
   if ((buttons & horizontal) == horizontal) buttons &= ~horizontal;
   pad.buttons = buttons;
   if (arrow_steering_) {
-    const float target = float(int(right) - int(left));
+    float target = float(int(right) - int(left)) * steering_lock_;
+    if(left&&right)steering_value_=0;
+    // Finish centring before starting the opposite turn, so a fast return
+    // rate cannot become a fast turn-in on a direction reversal.
+    if(target*steering_value_<0 && (steering_response_ms_>0||steering_return_ms_>0))target=0;
     const auto now = std::chrono::steady_clock::now();
-    if (!steering_response_ms_) steering_value_ = target;
+    const bool outward=target!=0 && target*steering_value_>=0 && std::abs(target)>std::abs(steering_value_);
+    const int response=outward||steering_return_ms_<0?steering_response_ms_:steering_return_ms_;
+    if (!response) steering_value_ = target;
     else if (steering_updated_ != std::chrono::steady_clock::time_point{}) {
-      const float step = std::chrono::duration<float, std::milli>(now - steering_updated_).count() / steering_response_ms_;
+      const float step = std::max(0.f,std::chrono::duration<float, std::milli>(now - steering_updated_).count()) / response;
       steering_value_ += std::clamp(target - steering_value_, -step, step);
     }
     // Opposite arrows are always neutral, regardless of the response setting.
@@ -521,23 +560,31 @@ rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
     pad.thumb_lx = int16_t(std::clamp(steering_value_, -1.f, 1.f) * 32767);
   }
   const bool manual=std::any_of(fingers_.begin(),fingers_.end(),[](const auto& p){return p.second.control==Control::kStick||p.second.control==Control::kSteerLeft||p.second.control==Control::kSteerRight;});
-  if(phone_enabled_&&!physical_controller_&&!manual)pad.thumb_lx=int16_t(phone_steering_*32767.f);
+  if(phone_enabled_&&!physical_controller_&&!manual&&!menu_context_)pad.thumb_lx=int16_t(phone_steering_*32767.f);
   return pad;
 }
 
 std::vector<TouchPad::Shape> TouchPad::Shapes(float width, float height) const {
+  const auto output=State();
   std::vector<Shape> shapes;
   std::lock_guard lock(mutex_);
   const auto& controls = controls_.empty() ? Controls() : controls_;
   for (size_t i = 0; i < controls.size(); ++i) {
-    if ((!hidden_.empty() && hidden_[i]) || !Enabled(controls[i].control)) continue;
+    if ((!hidden_.empty() && hidden_[i] && !(menu_context_&&MenuControl(controls[i].control)&&controls[i].control!=Control::kRightStick&&controls[i].control!=Control::kLeftStickClick&&controls[i].control!=Control::kRightStickClick)) || !Enabled(controls[i].control)) continue;
     if((controls[i].control==Control::kStick&&left_mode_==2)||(controls[i].control==Control::kRightStick&&right_mode_==2))continue;
     const Layout& control = controls[i];
     Shape shape;
     Place(control, width, height, shape.x, shape.y);
     shape.radius = Radius(control,width,height);
-    shape.label = control.label;
-    shape.opacity=Alpha(i);shape.icon_opacity=icon_opacity_;shape.driving_icons=driving_icons_;shape.button_hints=button_hints_;
+    shape.label = DisplayLabel(control);
+    if(!menu_context_){switch(Action(control.control)){
+      case Control::kThrottle:shape.amount=output.right_trigger/255.f;break;
+      case Control::kBrake:shape.amount=output.left_trigger/255.f;break;
+      case Control::kSteerLeft:shape.amount=std::max(0.f,-output.thumb_lx/32767.f);break;
+      case Control::kSteerRight:shape.amount=std::max(0.f,output.thumb_lx/32767.f);break;
+      default:break;}}
+
+    shape.opacity=Alpha(i);shape.icon_opacity=icon_opacity_;shape.driving_icons=driving_icons_&&!menu_context_;shape.button_hints=button_hints_;
     shape.stick = control.control == Control::kStick || control.control == Control::kRightStick;
     shape.stick_x = shape.x;
     shape.stick_y = shape.y;

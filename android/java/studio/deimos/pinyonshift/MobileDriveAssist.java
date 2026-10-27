@@ -145,7 +145,7 @@ final class MobileDriveAssist implements SensorEventListener {
     if (!Float.isFinite(x) || !Float.isFinite(y) || Math.hypot(x, y) < 1)
       return;
     int rotation =
-        activity.getDisplay() == null ? Surface.ROTATION_90 : activity.getDisplay().getRotation();
+        activity.getWindowManager().getDefaultDisplay().getRotation();
     angle = (float) Math.toDegrees(rotation == Surface.ROTATION_90 ? Math.atan2(y, -x)
             : rotation == Surface.ROTATION_270                     ? Math.atan2(-y, x)
             : rotation == Surface.ROTATION_180                     ? Math.atan2(x, -y)

@@ -71,6 +71,7 @@ class PinyonShiftApp final : public rex::ReXApp {
   // Under Hor+, present frames without the gameplay view 16:9 letterboxed.
   void ApplyMapView(bool open);
   bool map_view_open_ = false;
+  std::atomic<uint64_t> view_request_generation_{0};
   // LS-1.5: on the launch that created the config, raise LOW-SPEC 60 to
   // PERFORMANCE 120 on a capable machine.
   void ApplyFirstRunHardwareDefaults(const rex::ui::vulkan::VulkanDevice& device);

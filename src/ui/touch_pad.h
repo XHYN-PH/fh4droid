@@ -35,6 +35,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
     float opacity = 1.f;
     bool driving_icons = true, button_hints = true;
     float icon_opacity = .95f;
+    float amount = 0;
   };
 
   static TouchPad& Get();
@@ -48,6 +49,12 @@ class TouchPad final : public rex::ui::WindowInputListener {
   void SetSuspended(bool suspended);
   void LoadLayout(const std::filesystem::path& path);
   void SetPhysicalController(bool connected);
+  void SetMenuContext(bool menu);
+  bool MenuContext() const;
+  // Refresh before drawing as well as on input, so the first frame uses the
+  // same safe area as the fullscreen editor.
+  void SetSafeArea(float left, float top, float right, float bottom);
+  void UpdateViewport(float width,float height);
   float Opacity() const;
   std::string PressedControls() const;
   void SetPhoneSteering(float steering, bool enabled);
@@ -101,6 +108,9 @@ class TouchPad final : public rex::ui::WindowInputListener {
 
   static const std::vector<Layout>& Controls();
   std::vector<Layout> controls_;
+  std::map<Control,Control> mapping_;
+  Control Action(Control source) const;
+  const char* DisplayLabel(const Layout& control) const;
   std::vector<bool> hidden_;
   std::vector<float> timeouts_;
   std::vector<std::chrono::steady_clock::time_point> activity_;
@@ -110,6 +120,8 @@ class TouchPad final : public rex::ui::WindowInputListener {
   bool analog_pedals_ = false;
   bool high_contrast_ = false;
   int steering_response_ms_ = 0;
+  int steering_return_ms_ = -1;
+  float steering_lock_ = 1.f;
   float idle_seconds_ = 20.f;
   int left_mode_ = 0, right_mode_ = 0;
   bool driving_icons_ = true, button_hints_ = true, phone_enabled_ = false;
@@ -123,6 +135,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
   void Place(const Layout& control, float width, float height, float& x, float& y) const;
   Control Hit(float x, float y, float width, float height) const;
   bool Enabled(Control control) const;
+  static bool MenuControl(Control control);
   static bool IsDpad(Control control);
   float Alpha(size_t index) const;
   // Event adapter and tests share the same state transitions; mutex_ is held.
@@ -135,6 +148,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
   // The display cutout's margins (Window::GetSafeAreaInsets), in pixels.
   float safe_left_ = 0.0f, safe_top_ = 0.0f, safe_right_ = 0.0f, safe_bottom_ = 0.0f;
   bool suspended_ = false;
+  bool menu_context_ = false;
   std::chrono::steady_clock::time_point last_touch_{};
   std::function<void()> changed_;
 };

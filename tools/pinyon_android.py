@@ -392,6 +392,16 @@ def _dirty(status: str) -> str:
     return "unknown" if status == "unknown" else str(bool(status)).lower()
 
 
+def _cpu_baseline() -> str:
+    # Read the actual configured native build, including explicit optimized builds.
+    cache = ROOT / "out" / "build" / CONFIG["configure_preset"] / "CMakeCache.txt"
+    if cache.is_file():
+        match = re.search(r"(?m)^PINYON_SHIFT_ANDROID_MARCH:STRING=([^\r\n]+)$", cache.read_text(encoding="utf-8"))
+        if match:
+            return match.group(1)
+    return CONFIG.get("cpu_baseline", "armv8-a")
+
+
 def _build_manifest(tools: Tools, version_name: str, libraries: list[Path]) -> dict:
     """The provenance the game logs at start and puts in crash reports
     (AP-6.4), as tools/build-preview.ps1 writes it beside the executable."""
@@ -402,7 +412,7 @@ def _build_manifest(tools: Tools, version_name: str, libraries: list[Path]) -> d
         "configuration": "Release",
         "platform": "android-arm64",
         "version": version_name,
-        "cpu_baseline": "armv8.2-a",
+        "cpu_baseline": _cpu_baseline(),
         "ndk": CONFIG["android_sdk"]["ndk"],
         "min_sdk": CONFIG["min_sdk"],
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -446,6 +456,22 @@ def bundled_driver_files() -> list[tuple[Path, str]]:
     return files
 
 
+def validation_library(args: argparse.Namespace) -> Path | None:
+    path = getattr(args, "validation_layer", None)
+    if path is None:
+        return None
+    if not getattr(args, "debuggable", False):
+        raise AndroidError("A validation layer requires --debuggable; omit it for a normal release APK")
+    path = Path(path)
+    if path.name != "libVkLayer_khronos_validation.so" or not path.is_file():
+        raise AndroidError("Choose the arm64 libVkLayer_khronos_validation.so from Khronos")
+    with path.open("rb") as stream:
+        header = stream.read(20)
+    if len(header) < 20 or header[:6] != b"\x7fELF\x02\x01" or int.from_bytes(header[18:20], "little") != 183:
+        raise AndroidError("The validation library must be an ARM64 Android ELF library")
+    return path
+
+
 def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
     signing = _release_signing(args)
     tools = tools or Tools()
@@ -461,6 +487,9 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
     if fidelityfx.is_file():
         libraries.append(fidelityfx)
     libraries.append(tools.libcxx)
+    validation = validation_library(args)
+    if validation is not None:
+        libraries.append(validation)
 
     staging = WORK / "package"
     if staging.exists():
@@ -511,6 +540,9 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
 
     # Reports must identify the bytes shipped in the APK, after stripping.
     manifest = _build_manifest(tools, version_name, stripped)
+    manifest["validation_layer"] = validation is not None
+    if validation is not None:
+        manifest["validation_layer_sha256"] = hashlib.sha256(validation.read_bytes()).hexdigest()
     (staging / "pinyon_shift_build.json").write_text(json.dumps(manifest, indent=2) + "\n",
                                                      encoding="utf-8")
     # Android 15 devices with 16 KiB pages refuse libraries whose load
@@ -527,6 +559,9 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
     with zipfile.ZipFile(unsigned, "a", compression=zipfile.ZIP_DEFLATED) as apk:
         apk.write(staging / "dex" / "classes.dex", "classes.dex")
         apk.write(staging / "pinyon_shift_build.json", "assets/pinyon_shift_build.json")
+        if validation is not None:
+            for name in ("LICENSE.txt", "NOTICE.txt"):
+                apk.write(ROOT / "android" / "validation" / name, "assets/validation/" + name)
         for library in stripped:
             apk.write(library, f"lib/{CONFIG['abi']}/{library.name}")
         for path, name in bundled_driver_files():
@@ -905,12 +940,16 @@ def add_parser(commands) -> None:
                         help="the v4 title-update build (tools/build-v4.ps1 generates its code)")
     parser.add_argument("--debuggable", action="store_true",
                         help="let adb attach (thread dumps with debuggerd, run-as)")
+    parser.add_argument("--validation-layer", type=Path,
+                        help="package the ARM64 Khronos validation library in an opt-in debuggable diagnostic APK")
     parser = command("package", package, "package already built libraries into the APK")
     _signing_arguments(parser)
     parser.add_argument("--title-update-v4", action="store_true",
                         help="package the v4 title-update build")
     parser.add_argument("--debuggable", action="store_true",
                         help="let adb attach (thread dumps with debuggerd, run-as)")
+    parser.add_argument("--validation-layer", type=Path,
+                        help="package the ARM64 Khronos validation library in an opt-in debuggable diagnostic APK")
     command("install", install, "install the APK on the device")
     parser = command("push-data", push_data, "copy the extracted game files to the device")
     parser.add_argument("--game-root", type=Path)
