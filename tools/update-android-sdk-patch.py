@@ -15,7 +15,7 @@ if subprocess.check_output(["git","-C",str(sdk),"rev-parse","HEAD"],text=True).s
 diff=subprocess.check_output(["git","-C",str(sdk),"diff","--binary","--ignore-submodules=all"])
 parts=[b"diff --git "+p for p in diff.split(b"diff --git ")[1:]]
 directory=root/"cmake/patches";directory.mkdir(exist_ok=True)
-independent={"shiftglue-fh4droid-z-driver-preflight.patch","shiftglue-fh4droid-input.patch"}
+independent={"shiftglue-fh4droid-z-driver-preflight.patch","shiftglue-fh4droid-input.patch","shiftglue-fh4droid-zz-validation.patch"}
 driver_paths={line.split(b" b/",1)[1] for name in independent if (directory/name).exists()
               for line in (directory/name).read_bytes().splitlines() if line.startswith(b"diff --git ")}
 runtime=[];groups=[];group=b""

@@ -36,7 +36,7 @@ python tools/pinyon.py android package --configuration Release --debuggable \
   --storepass-file /private/storepass.txt --keypass-file /private/keypass.txt
 ```
 
-Use the pinned [Khronos Vulkan SDK 1.4.363.0 Android binaries](https://github.com/KhronosGroup/Vulkan-ValidationLayers/releases/tag/vulkan-sdk-1.4.363.0). The tarball SHA-256 is `b2727789f4c4d83b7149e904768bbaf54e8236ec912691730a70e22aebcba419`; the ARM64 library SHA-256 is `db7447027e28db95584e9fde8a57cc1f28c2dd09defcbe2f2b76ee2bbc65bf09`. Packaging rejects another architecture, requires `--debuggable` and checks 16 KiB load alignment. Build metadata enables Vulkan validation and synchronization validation for this APK only.
+Use the pinned [Khronos Vulkan SDK 1.4.363.0 Android binaries](https://github.com/KhronosGroup/Vulkan-ValidationLayers/releases/tag/vulkan-sdk-1.4.363.0). The tarball SHA-256 is `b2727789f4c4d83b7149e904768bbaf54e8236ec912691730a70e22aebcba419`; the ARM64 library SHA-256 is `db7447027e28db95584e9fde8a57cc1f28c2dd09defcbe2f2b76ee2bbc65bf09`. Packaging rejects another architecture, requires `--debuggable` and checks 16 KiB load alignment. Build metadata enables Vulkan validation and synchronization validation for this APK only. Layer discovery queries the selected layer's extension count, explicitly enables its validation-features extension, and clears layer-only state when retrying without a layer.
 
 Android's loader must discover the packaged layer. On a test phone with adb enabled, use:
 

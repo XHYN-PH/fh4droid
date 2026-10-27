@@ -1,0 +1,48 @@
+diff --git a/src/ui/vulkan/vulkan_instance.cpp b/src/ui/vulkan/vulkan_instance.cpp
+--- a/src/ui/vulkan/vulkan_instance.cpp
++++ b/src/ui/vulkan/vulkan_instance.cpp
+@@ -155,6 +155,9 @@
+   // Name pointers from `requested_extensions` will be used in the enabled
+   // extensions vector.
+   std::unordered_map<std::string, bool*> requested_extensions;
++  bool ext_validation_features=false;
++  if(try_enable_validation && REXCVAR_GET(vulkan_validation_sync))
++    requested_extensions.emplace(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME,&ext_validation_features);
+   if (vulkan_instance->api_version_ >= VK_MAKE_API_VERSION(0, 1, 1, 0)) {
+     vulkan_instance->extensions_.ext_1_1_KHR_get_physical_device_properties2 = true;
+   } else {
+@@ -316,7 +319,7 @@
+         while (true) {
+           uint32_t supported_layer_extension_count = 0;
+           const VkResult get_supported_layer_extension_count_result =
+-              ifn.vkEnumerateInstanceExtensionProperties(nullptr, &supported_layer_extension_count,
++              ifn.vkEnumerateInstanceExtensionProperties(available_layer.layerName, &supported_layer_extension_count,
+                                                          nullptr);
+           if (get_supported_layer_extension_count_result != VK_SUCCESS &&
+               get_supported_layer_extension_count_result != VK_INCOMPLETE) {
+@@ -356,7 +359,7 @@
+           // provided by the implementation itself or by another layer.
+           if (!*requested_extension_it->second) {
+             enabled_extensions.emplace_back(requested_extension_it->first.c_str());
+-            enabled_layer_extension_enablement_bools.push_back(requested_layer_it->second);
++            enabled_layer_extension_enablement_bools.push_back(requested_extension_it->second);
+             *requested_extension_it->second = true;
+           }
+         }
+@@ -408,7 +411,7 @@
+   validation_features.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
+   validation_features.enabledValidationFeatureCount = 1;
+   validation_features.pEnabledValidationFeatures = &sync_validation;
+-  if (layer_khronos_validation && REXCVAR_GET(vulkan_validation_sync)) {
++  if (layer_khronos_validation && ext_validation_features && REXCVAR_GET(vulkan_validation_sync)) {
+     instance_create_info.pNext = &validation_features;
+     REXLOG_INFO("Vulkan validation: synchronization validation enabled");
+   }
+@@ -424,6 +427,7 @@
+     for (const std::pair<std::string, bool*>& requested_layer : requested_layers) {
+       *requested_layer.second = false;
+     }
++    instance_create_info.pNext = nullptr;  // No layer-only validation features on fallback.
+     instance_create_info.enabledLayerCount = 0;
+     instance_create_info.enabledExtensionCount = uint32_t(enabled_implementation_extension_count);
+     instance_create_result =
