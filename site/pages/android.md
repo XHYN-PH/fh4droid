@@ -14,7 +14,7 @@ Android 12 or newer is required. Snapdragon 845/Adreno 630, Mali-G52 and Xclipse
 
 View changes use host-time hysteresis and discard obsolete queued requests. The reported sudden shrinking/sidebars needs transition testing on the phone; the white-car overexposure remains unresolved. The probe checks 8-bit/10-bit/float16 clear and readback with both render-pass paths, which does not test the paint shaders.
 
-Save management supports Normal/Modded/Both archives and reversible restore. Offline Profile edits local name/picture without changing XUID. Xenia ZIP import preserves its source XUID, keeps existing profiles, backs up settings and refuses detected TU4 saves in this base build. This is separate from Xbox LIVE, which is not provided.
+Save management supports Normal/Modded/Both archives and reversible restore. Offline Profile edits local name/picture without changing XUID. Phone JPEG rotation and mirroring are applied before the bounded centre crop. Xenia ZIP import preserves its source XUID, keeps existing profiles, backs up settings and refuses detected TU4 saves in this base build. This is separate from Xbox LIVE, which is not provided.
 
 Named graphics profiles and a manually marked working snapshot support recovery. Resolution, MSAA and screen mode distinguish running and next-launch values; presets show changes before applying. Budget preview targets 30 FPS at 50% with one shader worker, without a measured 4 GB performance claim. Native/classic renderer options remain experimental. Camera comfort options use existing native hooks.
 

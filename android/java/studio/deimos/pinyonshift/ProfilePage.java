@@ -44,6 +44,21 @@ final class ProfilePage {
         if(bounds.outWidth<=0||bounds.outHeight<=0||bounds.outWidth>16384||bounds.outHeight>16384||(long)bounds.outWidth*bounds.outHeight>64000000)throw new IOException("Choose a valid image up to 64 megapixels.");
         BitmapFactory.Options options=new BitmapFactory.Options();options.inSampleSize=1;while(Math.max(bounds.outWidth,bounds.outHeight)/options.inSampleSize>512)options.inSampleSize=options.inSampleSize<=1?2:options.inSampleSize*2;
         Bitmap source=BitmapFactory.decodeByteArray(data,0,data.length,options);if(source==null)throw new IOException("The image could not be decoded.");
+        // Phone JPEGs often store rotation/mirroring in EXIF rather than pixels.
+        // Apply it before the centre crop, with the already sampled image.
+        Matrix orientation=new Matrix();int exif=1;
+        try{exif=new android.media.ExifInterface(new ByteArrayInputStream(data)).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION,1);}catch(IOException ignored){}
+        switch(exif){
+            case 2:orientation.setScale(-1,1);break;
+            case 3:orientation.setRotate(180);break;
+            case 4:orientation.setScale(1,-1);break;
+            case 5:orientation.setRotate(90);orientation.postScale(-1,1);break;
+            case 6:orientation.setRotate(90);break;
+            case 7:orientation.setRotate(90);orientation.postScale(1,-1);break;
+            case 8:orientation.setRotate(270);break;
+            default:break;
+        }
+        if(!orientation.isIdentity()){Bitmap rotated=Bitmap.createBitmap(source,0,0,source.getWidth(),source.getHeight(),orientation,true);if(rotated!=source){source.recycle();source=rotated;}}
         Bitmap icon=Bitmap.createBitmap(128,128,Bitmap.Config.ARGB_8888);
         try{
             int side=Math.min(source.getWidth(),source.getHeight()),left=(source.getWidth()-side)/2,top=(source.getHeight()-side)/2;
