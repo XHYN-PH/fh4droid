@@ -26,15 +26,15 @@ Reports refresh live state every five seconds and on pause/view changes, priorit
 
 The app uses fixed landscape orientation for the launcher, local import, touch editor, driver probe and game. SDL window requests retain the landscape lock.
 
-The compact launcher puts Play and the main actions at the lower left, with brighter branding and a settings summary. Pages open on the right on wide screens and fill the window on narrow screens or with large text. In-game pages use a right-side drawer with a sticky Resume action. Back returns through the page stack and restores scroll and focus. Menu scale is adjustable from 70% to 105%; optional transitions honour Android's animator setting.
+The compact launcher puts Play and the main actions at the lower left, with brighter branding and a settings summary. Pages (Game files, Drivers, Saves, More and Settings) open as full-window pages with the FH4Droid header and a Back button. On wide screens their cards stay in the left 60% so the artwork remains visible, and on narrow screens or with large text they fill the width. In-game pages use a right-side drawer with a sticky Resume action. Back returns through the page stack and restores scroll and focus. Menu scale is adjustable from 70% to 105%; optional transitions honour Android's animator setting.
 
-The main menu displays the supplied transparent FH4Droid logo and one primary Play action, with Settings and Controls beneath it. Game files, Saves and More remain quiet secondary shortcuts.
+The main menu displays the supplied transparent FH4Droid logo and one primary Play action, with Settings and Controls beneath it. Game files, Drivers, Saves and More are four icon shortcuts beneath them.
 
-The launcher footer uses text-only YouTube, Telegram and GitHub links on the left. The right footer reads the installed Android package version and build number and shows game-file readiness. Secondary shortcuts use the same lightweight text treatment; focus feedback and generous touch targets remain available.
+The launcher footer uses text-only YouTube, Telegram and GitHub links on the left. The right footer reads the installed Android package version and build number and shows game-file readiness. The shortcuts are frosted icon tiles with focus feedback and generous touch targets. Menu pages share one card style: an icon, a title and a one-line description, with a pink outline on the selected choice.
 
 Settings has categories, search and pinned favourites. Rows distinguish active runtime values from saved next-launch changes. Section resets require confirmation, and Undo restores the last section change. Presets write as one atomic transaction; failed writes leave the displayed value unchanged. Advanced quoted settings decode TOML escapes before preflight.
 
-Drivers are tested in a fresh helper process before activation and before Play. Results show device/API information, required feature checks and a small render/readback test. Preflight and gameplay share the custom loader and saved environment. Failed custom loads do not silently select the system driver. Readable imported-driver names and confirmed removal are available; removing the active imported driver selects System. A successful probe does not establish gameplay compatibility.
+Drivers are tested in a fresh helper process before activation and before Play. Results show device/API information, required feature checks and a small render/readback test. Preflight and gameplay share the custom loader and saved environment. Failed custom loads do not silently select the system driver. The Drivers page lists each choice as a radio card, with Import driver, Test driver and Remove driver actions beneath. Readable imported-driver names and confirmed removal are available; removing the active imported driver selects System. A successful probe does not establish gameplay compatibility.
 
 Graphics cache management lists only recognized shader and raster caches, and requires the game to be closed before deletion. It never selects saves, imported game files or the Rally adapter. First visits after clearing can pause while graphics are prepared.
 
@@ -42,7 +42,7 @@ Graphics cache management lists only recognized shader and raster caches, and re
 
 Use Game files → Choose game ISO or Choose extracted game folder, with the player's own supported USA base-game dump. The ISO stays in place with persistent document permission and a seekable descriptor held by the game process. The game mounts the SDK's read-only disc-image device. Only executables and host UI/audio support files (about 100 MB, allow 150 MB free) are copied locally. Keep the ISO accessible while playing. The bounded Java inspector and native reader reject truncated directories and cycles.
 
-Folder import compares all catalogued paths and sizes, verifies the executables before replacing an installation, verifies SHA-256 on copied/resumed files and checks space for the files still needing a copy. A partial import remains marked incomplete. Check installed game files performs a complete content check; it can take several minutes.
+Folder import compares all catalogued paths and sizes, verifies the executables before replacing an installation, verifies SHA-256 on copied/resumed files and checks space for the files still needing a copy. A partial import remains marked incomplete. Tapping the Installation status card performs a complete content check; it can take several minutes.
 
 Import/check screens show current-file progress and offer cooperative cancellation between reads. Completed files are kept; choose the same source folder to resume a stopped copy. Successful folder copies clear the previous ISO selection only after the copy finishes. Cancellation may wait for a file-provider read to return. In ISO mode, the existing content check covers the disc image; it does not also check the locally cached support files.
 
@@ -84,7 +84,7 @@ Saves exports Normal, Modded or Both base-game save trees. Imports validate the 
 
 ## Reports and recovery
 
-Settings → Advanced → Record a performance comparison launches a session with bounded native CSV logging. Drive the same route for each configuration, then use More → Report a problem (or the in-game action). Normal play keeps detailed profiling off.
+Settings → Advanced → Record a performance comparison launches a session with bounded native CSV logging. Drive the same route for each configuration, then use More → Diagnostics / Reports (or the in-game action). Normal play keeps detailed profiling off.
 
 Exports retain CSV headers and whole rows. The report index identifies file size/truncation, originating session and source commit, and separates the latest session from older history and shared logs. A session from an older APK is not labelled current after an update. Thermal values are named severity levels, not temperatures, and normal self-exits are distinguished from crashes and low-memory kills. Saved, launch and live settings have separate snapshots; phone FPS/thermal samples carry session/build provenance.
 
