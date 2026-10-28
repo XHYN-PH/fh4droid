@@ -58,7 +58,7 @@ Keep the ISO accessible while playing. ISO mode caches only the menu and audio c
 
 While playing, tap **☰** or press Android Back for the in-game menu. Choose **Advanced game settings** for the full game settings and controller mapping. **Controls** on the launcher opens the touch editor.
 
-Use **Saves** to export or restore the standard base-game profile while the game is closed. The trainer uses a separate modded profile; normal save exports do not include it. Use **Settings → Advanced → Record a performance comparison** when reproducing a problem, then **More → Report a problem**. Normal play leaves detailed profiling off.
+Use **Saves** to export or restore the standard base-game profile while the game is closed. The trainer uses a separate modded profile; normal save exports do not include it. Use **Settings → Advanced → Record a performance comparison** when reproducing a problem, then **More → Diagnostics / Reports**. Normal play leaves detailed profiling off.
 
 The launcher uses the transparent FH4Droid logo, one primary Play action and text footer links. Settings are grouped into Graphics, Controls, Audio, Interface, Gameplay and Advanced. The full-window touch editor has a separate full-window Properties view, a Test mode and explicit Save/Cancel. Modern racing controls use the same antialiased PNG artwork in the editor and native overlay; backing and symbol opacity are independent. Existing custom positions are retained. Choose Modern racing or Full controller explicitly under layout presets.
 
