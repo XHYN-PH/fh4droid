@@ -15,6 +15,17 @@ import pinyon_android
 
 
 class ReleaseSigningTests(unittest.TestCase):
+    def test_release_signing_resolves_pinned_android_tools(self):
+        with tempfile.TemporaryDirectory() as temp:
+            sdk=pathlib.Path(temp)
+            with mock.patch.object(pinyon_android,"sdk_root",return_value=sdk), \
+                 mock.patch.object(pinyon_android,"java_home",return_value=None), \
+                 mock.patch.object(pinyon_android.Tools,"_find",return_value=None):
+                tools=pinyon_android.Tools()
+            build=sdk/"build-tools"/pinyon_android.CONFIG["android_sdk"]["build_tools"]
+            self.assertEqual(tools.zipalign,build/pinyon_android._exe("zipalign"))
+            self.assertEqual(tools.apksigner,build/pinyon_android._script("apksigner"))
+
     def test_bundled_driver_notice_has_one_destination(self):
         with tempfile.TemporaryDirectory() as temp:
             root=pathlib.Path(temp);work=root/"work";binary=work/"drivers/driver";notice=root/"android/drivers/driver"

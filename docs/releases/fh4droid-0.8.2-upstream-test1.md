@@ -56,7 +56,7 @@ fixed by this update. Xbox LIVE authentication/services are not implemented.
 ## Validation
 
 The matching ARM64 game library and native helper compile and link. The Python
-suite runs 719 tests with 99 skipped; Java compilation and 3,010 host checks
+suite runs 720 tests with 99 skipped; Java compilation and 3,010 host checks
 pass. Native touch/view/stall, configuration/save, disc-image bounds and software
 Vulkan regression checks pass. The GPU checks cover Vulkan 1.1/1.2/1.3 dynamic
 and legacy render/readback and 6,304,254 colour/depth pixel comparisons across

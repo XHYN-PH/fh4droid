@@ -188,6 +188,10 @@ class Tools:
         self.adb = self.sdk / "platform-tools" / _exe("adb")
         self.aapt2 = self.build_tools / _exe("aapt2")
         self.d8 = self.build_tools / _script("d8")
+        # Explicit release keys use the Android signing tools; ordinary local
+        # builds retain upstream's pure-Python signing path.
+        self.zipalign = self.build_tools / _exe("zipalign")
+        self.apksigner = self.build_tools / _script("apksigner")
         # The pinned command-line tools when build-android.ps1 unpacked them:
         # newer ones replace sdkmanager with a shim that split "ndk;<version>"
         # into two unknown packages (#567).
