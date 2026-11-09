@@ -120,6 +120,20 @@ set(PINYON_SHIFT_HOST_LOCAL_SOURCES
 set(PINYON_SHIFT_HOST_SHARED_SOURCES ${PINYON_SHIFT_HOST_SOURCES})
 list(REMOVE_ITEM PINYON_SHIFT_HOST_SHARED_SOURCES ${PINYON_SHIFT_HOST_LOCAL_SOURCES})
 
+if(ANDROID)
+    add_library(fh4droid_android SHARED android/native/driver_probe.cpp
+        android/native/content_tools.cpp src/content/dlc_extract.cpp)
+    target_include_directories(fh4droid_android PRIVATE
+        ${REXSDK_DIR}/thirdparty/vulkan-headers/include
+        ${REXSDK_DIR}/thirdparty/tomlplusplus/include src)
+    target_link_libraries(fh4droid_android PRIVATE rex::runtime android log dl)
+    target_link_options(fh4droid_android PRIVATE -Wl,-z,max-page-size=16384)
+    add_library(pinyon_shift_android_ui_check OBJECT EXCLUDE_FROM_ALL
+        src/android_bridge.cpp src/android_achievement_art.cpp src/ui/hostui/host_ui.cpp)
+    target_include_directories(pinyon_shift_android_ui_check PRIVATE src ${REXSDK_DIR}/thirdparty/imgui)
+    target_link_libraries(pinyon_shift_android_ui_check PRIVATE rex::runtime)
+endif()
+
 if(PINYON_SHIFT_HOST_OBJECTS_ONLY)
     # The release's prebuilt host objects only: no game, no generated code.
     pinyon_shift_add_host_objects("")
@@ -132,6 +146,8 @@ elseif(ANDROID)
     # runtime, the GPU plugin and the facades are libraries beside it.
     add_library(pinyon_shift SHARED ${PINYON_SHIFT_HOST_LOCAL_SOURCES})
     set_target_properties(pinyon_shift PROPERTIES OUTPUT_NAME main)
+    target_sources(pinyon_shift PRIVATE src/android_bridge.cpp src/android_achievement_art.cpp)
+    add_dependencies(pinyon_shift fh4droid_android)
     # Every generated function is a default-visibility weak symbol, so in a
     # shared library each call between them went through the PLT (4-6 % of
     # the guest threads on the Odin, #431). Bind them to their definitions
@@ -183,6 +199,12 @@ endif()
 # so they need the source tree; a build from the prebuilt kit (TP-3) has only
 # the game.
 if(REXSDK_DIR)
+add_executable(pinyon_shift_view_policy_tests EXCLUDE_FROM_ALL tests/ui/view_policy_test.cpp)
+target_include_directories(pinyon_shift_view_policy_tests PRIVATE src)
+
+add_executable(pinyon_shift_stall_timer_tests EXCLUDE_FROM_ALL tests/stall_timer_test.cpp)
+target_include_directories(pinyon_shift_stall_timer_tests PRIVATE src)
+
 add_executable(pinyon_shift_fh1_ui_api_tests EXCLUDE_FROM_ALL
     tests/ui/fh1_ui_api_test.cpp
     src/ui/fh1_ui_api.cpp
@@ -300,6 +322,18 @@ add_executable(pinyon_shift_overlay_device_tests EXCLUDE_FROM_ALL
 target_include_directories(pinyon_shift_overlay_device_tests PRIVATE src)
 target_link_libraries(pinyon_shift_overlay_device_tests PRIVATE rex::runtime)
 
+add_executable(pinyon_shift_fh1_raster_scale_tests EXCLUDE_FROM_ALL
+    tests/native_renderer/fh1_raster_scale_test.cpp)
+target_include_directories(pinyon_shift_fh1_raster_scale_tests PRIVATE ${REXSDK_DIR}/include)
+add_executable(pinyon_shift_disc_image_bounds_tests EXCLUDE_FROM_ALL
+    tests/native_renderer/disc_image_bounds_test.cpp)
+target_link_libraries(pinyon_shift_disc_image_bounds_tests PRIVATE rex::runtime)
+
+add_executable(pinyon_shift_touch_overlay_tests EXCLUDE_FROM_ALL
+    tests/ui/touch_overlay_test.cpp src/ui/touch_pad.cpp)
+target_include_directories(pinyon_shift_touch_overlay_tests PRIVATE src ${REXSDK_DIR}/thirdparty/stb)
+target_link_libraries(pinyon_shift_touch_overlay_tests PRIVATE rex::runtime)
+
 # Every host-side test, for CI (PINYON_SHIFT_HOST_TESTS_ONLY) and local runs.
 add_executable(pinyon_shift_camera_tuning_tests tests/camera_tuning_tests.cpp)
 target_include_directories(pinyon_shift_camera_tuning_tests PRIVATE src)
@@ -312,8 +346,16 @@ if(WIN32)
 endif()
 
 add_custom_target(pinyon_shift_host_tests)
+add_executable(pinyon_shift_touch_pad_tests EXCLUDE_FROM_ALL
+    tests/ui/touch_pad_test.cpp src/ui/touch_pad.cpp)
+target_include_directories(pinyon_shift_touch_pad_tests PRIVATE src)
+target_link_libraries(pinyon_shift_touch_pad_tests PRIVATE rex::runtime)
 add_dependencies(pinyon_shift_host_tests
     pinyon_shift_camera_tuning_tests
+    pinyon_shift_touch_overlay_tests
+    pinyon_shift_touch_pad_tests
+    pinyon_shift_view_policy_tests
+    pinyon_shift_stall_timer_tests
     pinyon_shift_fh1_ui_api_tests
     pinyon_shift_frame_inspector_tests
     pinyon_shift_frame_inspector_input_tests
@@ -331,6 +373,8 @@ add_dependencies(pinyon_shift_host_tests
     pinyon_shift_overlay_device_tests
     pinyon_shift_fh1_edram_tiles_tests
     pinyon_shift_head_tracking_tests
+    pinyon_shift_fh1_raster_scale_tests
+    pinyon_shift_disc_image_bounds_tests
     pinyon_shift_mod_hello_telemetry)
 if(TARGET pinyon_shift_shader_override_tests)
     add_dependencies(pinyon_shift_host_tests pinyon_shift_shader_override_tests)

@@ -1,67 +1,132 @@
 ---
-title: Android
+title: FH4Droid on Android
 section: Playing
 order: 2
-description: Build Pinyon Shift for an Android handheld from the launcher and install it over Wi-Fi.
+description: FH4Droid launcher, game files, settings, controls and troubleshooting on Android.
 ---
 
-# Android
 
-A developer alpha. The Android build is the same recompiled game, cross-compiled for arm64 on your PC from your own disc and installed on your own device. It's never published or shared.
+FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source targets the 0.8.2-upstream-test1 APK, integrating stable Pinyon Shift 0.8.2. An uploaded vivo V2425A report covers one r7 session; the unreleased follow-up below has not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
 
-## Requirements
+## Current changes and limits
 
-- A Windows PC where the game is already built and plays.
-- About 15 GB free on the PC's install drive. The launcher downloads the pinned Android SDK, NDK and JDK 17 when the PC has none, after you accept the Android SDK license. With Android Studio's SDK already installed, it adds the missing packages to that SDK with its own pinned command-line tools. When the release carries a prebuilt app shell (the app, runtime and renderer, nothing from the game), the launcher downloads only the shell, the NDK and platform-tools: no JDK, no SDK manager, and the PC compiles only the game code. The launcher aligns and signs the APK itself, with the same key as before.
-- An arm64 device with an ARMv8.2 CPU (for example, Cortex-A55 or Cortex-A75), Android 13 or later and a Vulkan 1.3 driver, about 8 GB free, on the same network as the PC. A later phone release date alone does not establish the CPU's instruction support.
-- Tuned for Snapdragon 8 Gen 2 or newer (Adreno 740 and up).
-- **Mali, Tensor, Exynos and Dimensity GPUs** need an opt-in on the app's setup screen before the game starts: tick **Allow GPUs without vertex shader stores** (long-press the icon, **Get files from PC**, scroll to Experimental). The setup screen shows a hint when the device has no Qualcomm GPU driver. See [troubleshooting](#troubleshooting).
+Android 13 or newer is required. Snapdragon 845/Adreno 630, Mali-G52 and Xclipse need device qualification; an Android 10 stock phone does not meet this OS floor. Start Mali/Xclipse with the system Vulkan driver. Turnip controls are Adreno-only, and PanVK is not a universal Mali fallback.
 
-Tested chips: Snapdragon 8 Gen 2 (Adreno 740) and 8 Elite (Adreno 830) in the table below, a Pixel 7 Pro (Mali-G710, with the opt-in) at about 43 fps, and a Galaxy Tab S10 Ultra (Dimensity 9300+, Mali-G720 Immortalis MC12, with the opt-in). On the tablet the race route at the Android defaults with no frame limit runs at a median of 21.7-23.0 ms a frame (43-46 fps), limited by the GPU (21.3-22.3 ms of GPU time a frame), in two runs. Two defaults for Mali GPUs and large screens bring it to about 20 ms in the race's busiest stretch (frames over 33 ms from about 20 to 4-5 a run): a new setup on a Mali GPU starts at SCENE SHADING > COARSE, and on a screen larger than twice the game's output the image is presented at half the display's size and scaled up by the display hardware. Builds before ShiftGlue's two Mali fixes of 2026-11-01 (an oversized bindless set and a doubly ended occlusion query) crash there within a race. Every other chip, including Exynos, has not been tested.
+View changes use host-time hysteresis and discard obsolete queued requests. The reported sudden shrinking/sidebars needs transition testing on the phone; the white-car overexposure remains unresolved. The probe checks 8-bit/10-bit/float16 clear and readback with both render-pass paths, which does not test the paint shaders.
 
-Older devices remain unqualified. The [minimum-requirements audit](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/android/MINIMUM_REQUIREMENTS.md) explains which CPU instructions, Android APIs and Vulkan features the build uses, and what must be tested before lowering these requirements.
+The unreleased follow-up gives map signals a separate continuous grace interval, so a brief map sample cannot inherit an older camera-gap timer. A sampling gap longer than one second preserves the committed framing and starts fresh transition evidence. The stall watchdog excludes background suspension and grants a new grace interval on resume. Optional detailed GPU profiling skips timestamp commands when the selected queue does not support them. These changes pass host regression and Android compilation checks; phone transition testing remains necessary. See the [pre-UI audit](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-pre-ui-audit-2026-10-27.md) for evidence and unresolved items.
 
-## Install over Wi-Fi
+Save management supports Normal/Modded/Both archives and reversible restore. Offline Profile edits local name/picture without changing XUID. Phone JPEG rotation and mirroring are applied before the bounded centre crop. Xenia ZIP import preserves its source XUID, keeps existing profiles, backs up settings and refuses detected TU4 saves in this base build. This is separate from Xbox LIVE, which is not provided.
 
-1. In the launcher, choose **Android**, then **Build APK**. The first build takes 20 to 60 minutes.
-2. Choose **Share on Wi-Fi**. Scan the QR code with the device's camera, download the app and open it. Android asks once to allow the browser to install apps; Windows asks once to allow the launcher on private networks.
-3. The app finds the PC on the local network and asks for the six-digit code the launcher shows. It then lists what the PC offers: the game files (7.2 GB, required), title update v4, imported DLC, the PC's enabled mods, custom radio stations and the XE mod, and your PC save. Then **Play**.
+Named graphics profiles and a manually marked working snapshot support recovery. Resolution, MSAA and screen mode distinguish running and next-launch values; presets show changes before applying. Budget preview targets 30 FPS at 50% with one shader worker, without a measured 4 GB performance claim. Native/classic renderer options remain experimental. Camera comfort options use existing native hooks.
 
-No USB debugging is needed. Your PC save is never copied unless you select it, and the device's own save is backed up first. An interrupted copy resumes where it stopped. To copy more later, long-press the app icon and choose **Get files from PC**. When the PC offers a newer build of the app, the setup screen says so and offers **Install update**; a base build is never offered to a device that has title update v4.
+Interface offers separate app/game languages: English or Filipino core menus (detailed help stays English) and game choices limited to archives present in the owned files. Controls hand off between keyboard, gamepad and touch, with Android menu hints and A/B navigation. Use my music player turns off game music at next launch while preserving engine/effects.
 
-Mods, radio and XE copy together, because the patches the PC builds for them match exactly its set of enabled mods. Files the PC no longer has are moved to `backups` on the device. Native mods (a PC library) aren't shared, and XE isn't shared to a v4 app.
+Reports refresh live state every five seconds and on pause/view changes, prioritize the current CSV and identify truncation. More → Mark a visual issue records a frame/time/view marker for an external screenshot. Latest frame time, RAM and thermal severity are optional FPS details; severity is not temperature. See the [complete review](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.8-r7-review.md) for all 70 dispositions and remaining device tests, and [release notes](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.8-r7.md) for opt-in validation packaging. The diagnostic path queries extensions from the selected layer, enables validation features explicitly and clears layer-only state on fallback.
 
-The launcher serves only while sharing is on, only to private network addresses, and only the files it listed. The pairing code changes each time sharing starts, and ten wrong codes stop the share. Nothing goes from the device to the PC.
+## Launcher
 
-## Install over USB
+The app uses fixed landscape orientation for the launcher, local import, touch editor, driver probe and game. SDL window requests retain the landscape lock.
 
-With USB debugging on, **Install over USB** in the launcher does the same with adb. From a repository checkout:
+The launcher puts Play and the main actions at the lower left, with a settings summary. Launcher pages fill the window with a branded header and Back action. On wide screens ordinary card pages use the left part of the screen; settings keep their full-width layout, horizontal categories and side details panel. Tapping a setting label displays its purpose and saved or running value. The background blurs while a launcher page is open, and supported devices can blur behind dialogs. In-game pages use a right-side drawer with a Resume action. Back returns through the page stack and restores scroll and focus. Menu scale is adjustable from 70% to 105%; optional transitions honour Android's animator setting.
 
-```bash
-python tools/pinyon.py android build
-python tools/pinyon.py android install
-python tools/pinyon.py android push-data
-```
+The main menu displays the supplied transparent FH4Droid logo with a text wordmark and one primary Play action. Settings and Controls sit beneath it; Game files, Drivers, Saves and More are four icon shortcuts. The Android UI patch test build uses magenta primary buttons and shared outlined cards for these menus.
 
-`push-data` copies the extracted game into `Android/data/studio.deimos.pinyonshift/files/game/base` and resumes if interrupted. It also sends the list of free-roam pipelines the game builds behind the title (written from your disc and DLC on the first push), so new scenery doesn't stop a frame to compile; pass `--state-root` to take it from another PC state. Saves, settings, logs and mods live beside it in `files/state`, laid out as on the PC.
+The launcher footer uses text-only YouTube, Telegram and GitHub links on the left. The right footer reads the installed Android package version and build number and shows game-file readiness. Secondary shortcuts use the same lightweight text treatment; focus feedback and generous touch targets remain available.
 
-After the game has run once on a device, `python tools/pinyon.py android shader-pack` makes a shader pack for it: it starts the game to the title screen over adb, collects the SPIR-V of every shader the device's pipeline storage names, builds a pack and puts it in the state's shader cache. Later starts load the pack instead of translating those shaders: on the Odin 2 (Adreno 740), 711 shaders, shader translation at start 0.52 to 0.07 s and start to title 2.99 to 2.66 s. The pack belongs to the device and build it was made on; run the command again after updating. Stop the game first; the command refuses while it runs.
+Settings has categories, search and pinned favourites. Rows distinguish active runtime values from saved next-launch changes. Section resets require confirmation, and Undo restores the last section change. Presets write as one atomic transaction; failed writes leave the displayed value unchanged. Advanced quoted settings decode TOML escapes before preflight.
 
-## Presets and drivers
+Drivers are tested in a fresh helper process before activation and before Play. Results show device/API information, required feature checks and a small render/readback test. Preflight and gameplay share the custom loader and saved environment. Failed custom loads do not silently select the system driver. The Drivers page lists radio cards plus Import, Test and Remove actions. Readable imported-driver names and confirmed removal are available; removing the active imported driver selects System. A successful probe does not establish gameplay compatibility.
 
-**SETTINGS > GRAPHICS > GRAPHICS PRESET** has three choices:
+Graphics cache management lists only recognized shader and raster caches, and requires the game to be closed before deletion. It never selects saves, imported game files or the Rally adapter. First visits after clearing can pause while graphics are prepared.
 
-| Preset | MSAA | Sun shadows | Rate |
-| --- | --- | --- | ---: |
-| ULTRA LOW 30 | Off | Off | 30 |
-| SMOOTH 60 | 2x | Off | 60 |
-| QUALITY 30 | 4x | On | 30 |
+## Game files
 
-ULTRA LOW 30 is for entry-level phones and also keeps textures at most 256 texels across (**TEXTURE SIZE**), which saves memory a phone shares with the CPU. All three draw the game's three predicated tiles in one pass and redraw the reflection map at a quarter of the game's rate.
+Use Game files → Choose game ISO or Choose extracted game folder, with the player's own supported USA base-game dump. The ISO stays in place with persistent document permission and a seekable descriptor held by the game process. The game mounts the SDK's read-only disc-image device. Only executables and host UI/audio support files (about 100 MB, allow 150 MB free) are copied locally. Keep the ISO accessible while playing. The bounded Java inspector and native reader reject truncated directories and cycles.
 
-On Adreno 7xx and 8xx the bundled Mesa Turnip driver (Gen8 V37) is chosen automatically. It is much faster than the stock driver on the Adreno 740 and takes about a fifth less GPU time on the Adreno 830. Other GPUs use the system driver. **SETTINGS > GRAPHICS > GPU DRIVER** picks the driver for the next start. **IMPORT DRIVER (.ZIP)** adds an adrenotools package, including Qualcomm driver packages; the log's `Vulkan device` line shows which driver version runs.
+Folder import compares all catalogued paths and sizes, verifies the executables before replacing an installation, verifies SHA-256 on copied/resumed files and checks space for the files still needing a copy. A partial import remains marked incomplete. Check installed game files performs a complete content check; it can take several minutes.
 
-Where a phone's fastest cores form their own cluster of two or more (the Snapdragon 8 Elite's two 4.32 GHz cores), the GPU command decoder thread is pinned to them. Left to the scheduler it spent whole stretches on the slower cores: in an in-run A/B on the Astra at the 60 fps limit, 25 % of frames took over 17.5 ms and the decoder 16.2 ms of CPU a frame, against 2 % and 10.2 ms pinned, with the same GPU time. Phones with a single fastest core, such as the 8 Gen 2 and 8 Gen 3, are left alone. The `android_thread_cores` setting overrides it (`NAME=CORES` entries separated by semicolons, `off` to disable).
+Import/check screens show current-file progress and offer cooperative cancellation between reads. Completed files are kept; choose the same source folder to resume a stopped copy. Successful folder copies clear the previous ISO selection only after the copy finishes. Cancellation may wait for a file-provider read to return. In ISO mode, the existing content check covers the disc image; it does not also check the locally cached support files.
+
+The Android app imports local files. PC discovery, pairing, Wi-Fi copying and network APK updates have been removed. Copy your own extracted folder to the device over USB before selecting it; install app updates through Android’s installer. File-replacing overlays work in ISO mode, but mods which add files to directory enumerations should use the complete extracted folder.
+
+## Mods, DLC and prepared shaders
+
+Open More → Mods, DLC and shaders while the game is closed. Import one mod ZIP or folder, enable it, and adjust its priority or manifest options. Earlier enabled mods win file conflicts. Festival pacing and Hidden cars are included as optional installs. Database edits rebuild a separate overlay and use the modded profile. Disable and remove an installed mod before replacing it. Archive-member patches need PC preparation; native plugins need a compatible Android ARM64 build.
+
+The DLC tab accepts original Marketplace packages, folders and ZIPs nested at most three levels. It checks the supported catalog, raw package hash, extracted payload and licence header. Imports start disabled. Unsupported inputs are reported individually; completed imports survive cancellation. Enable dependencies first. UDLC links explain the compatible inputs; no content is downloaded automatically. Rally requires a verified prepared adapter folder from the matching upstream PC tools before it can be enabled. This APK targets the supported USA base game, without title update v4.
+
+The Shaders tab imports a compatible prepared `.xpso` pipeline list from the player's files. Preparation can run before play or during the title screen. Import checks structure and version; the renderer validates shader hashes. It cannot eliminate all shader-compilation pauses.
+
+The game menu opens upstream's achievement screen with categories, counted progress, nearest unlocks, tracking and notifications. The launcher keeps its offline summary. Live chase-camera controls and the 80–200% global FOV setting are in Settings. Graceful Quit to launcher requests the upstream shutdown path. None of these features supplies Xbox LIVE service access.
+
+## Rendering resolution
+
+Graphics offers raster resolution from 25% to 100% in one-percent steps, custom frame limits, FSR output profiles, screen modes and graphics presets. Presets coordinate related values and clear incompatible settings from the previous preset. The default raster scale is 100%.
+
+Native attachment dimensions, viewport/scissor, depth/colour transfers and source reads scale together. Guest resolve destinations retain their original layout. Fractional resolutions use separate raster-v3 shader/pipeline caches; the precompiled SPIR-V pack is used only at 100%. Shader preparation is scheduled with bounded concurrency, and detailed GPU timestamp profiling is opt-in.
+
+A software Vulkan readback suite checked 953,854 colour/depth values across every supported scale, including generic and specialized paths. Vulkan 1.2 extension and 1.3 core probe paths passed on that software driver. These checks establish neither phone-driver compatibility nor sustained FPS. No performance gain is claimed. Compare the same route, captures, duration and thermal conditions before recommending a preset.
+
+## Controls
+
+Touch steering defaults to separate left and right arrow buttons. Holding both gives neutral steering; sliding between them changes direction, and moving outside them releases steering. Every control has drawn artwork: pedals, handbrake, shifting, rewind, clutch, camera, map and pause. Small button/action captions keep menu prompts recognizable; action symbols assume the game's default bindings and do not remap buttons. The right look stick, four D-pad directions and L3/R3 stick clicks are also editable. D-pad presses stay separate from steering, and the look stick works while holding steering and a pedal. Touch drawing and its button hints do not require the game's font archive.
+
+Controls opens a full-window touch canvas. Properties opens a separate full-window view with Control, Layout, Driving and Appearance tabs. Drag or pinch controls, or set size/position with sliders. Hide tools clears the canvas for placement; Show tools restores Save/Cancel and Test. Test highlights touches locally without sending inputs to the game. Saving is atomic; cancelling keeps the previous layout. Hidden controls remain selectable under Properties. Edit offers bounded undo/redo, overlap/small-target checks and Hide tools. Back/Cancel asks before discarding a changed draft. Safe-area data refreshes before native rendering as well as input.
+
+The editor and native overlay use the same antialiased PNG atlas for all 20 icons, classic letters and button/action captions. Accelerator and brake use simple outlined pedal faces; pressed controls use pink accents. All symbols are rendered from square SVGs with their proportions preserved. The camera uses a circular lens. Separate button-code badges sit above the symbols and short action labels below them. The Modern racing preset groups map, camera and pause at the upper right, with rewind and handbrake above the pedals. It adapts the spacing to the screen aspect ratio so pedal and steering clusters stay separated on tablets and wide phones. Existing custom positions stay in place until a preset is applied. Always visible works before the first tap. Separate turn-in/return rates and steering lock control the arrows; opposed arrows cancel immediately. Output amount bars show pedal and arrow values. Icon opacity is independent of backing opacity. Normal, pressed and held states use the same artwork. Optional pressed-button names briefly identify touched controls at the top of the screen. Digital touch remapping updates artwork/captions and hit bounds; action names still assume the game's default controller bindings. Detected menus keep their original Confirm/Back actions.
+
+New layouts start with the compact Modern racing preset. Existing layouts keep their saved positions and visibility. Apply Modern racing, Full controller or a handed preset explicitly to replace positions. Steering has Arrows and Stick choices; floating, fixed and invisible modes remain available for each stick. The optional manual group shows clutch and both gear controls together.
+
+**Steering: Arrows / Stick** is available both in Touch settings and the editor. Switching preserves positions for both. The left and right sticks each offer floating, fixed and invisible modes. Invisible sticks use the corresponding lower screen region; visible buttons take priority. The independent D-pad and look stick remain available. Older layouts retain their positions, including the hotfix's separate D-pad and steering controls.
+
+Local named layouts, left/right-handed templates, compact driving and full-controller templates help configure the pad. Full controller selects stick steering and Xbox labels; driving templates use arrows and racing artwork. Switching between driving and controller styles remembers each style separately. Layout document import/export is not provided.
+
+Held controls remain visible. Global and per-control idle timers control fading; controller auto-hide is optional. Cancellation, menus, controller changes and lifecycle suspension release touch input. Driving options include immediate/120 ms/240 ms arrow response, optional sliding pedals, high contrast, button/action captions and touch haptics. Action icons assume default game bindings and do not remap buttons.
+
+Controller calibration applies deadzones, curves and trigger ranges to physical SDL controllers, without changing touch or wheel input. Optional phone tilt has sensitivity, deadzone and centre calibration; deliberate stick/controller steering takes priority. Phone rumble has its own strength and stops when paused or menus capture input. These features await physical-device validation.
+
+Phone tilt is independent of the Arrows / Stick layout choice. If tilt is enabled, holding only the accelerator still permits phone steering. Turn it off under Phone for arrows-only steering. Holding a steering arrow or touching the steering stick takes priority over tilt; a physical controller suppresses phone steering. Host regressions cover accelerator-only input, dragging a pedal over an arrow, and simultaneous accelerator/arrow/tilt input.
+
+Achievements shows current progress with cached artwork. The trainer operates on a separate modded profile; enabling it requires a restart. Opt-in sustained mode requests supported Android performance mode and temporarily caps a severe thermal state at 30 FPS, or keeps a lower selected limit. It restores the saved target after a minute at light-or-lower severity without rewriting the preset. Adreno experiments are gated to matching hardware and provide a reset; they can reduce stability.
+
+Android Back opens a five-action pause drawer: Resume, Settings, Controls, More and Quit. Settings use six categories: Graphics, Controls, Audio, Interface, Gameplay and Advanced. Controls separates touch, phone and physical-controller options. Search/favourites and section Reset/Undo are secondary tools. Advanced → Original game settings opens the original host menu for controller mapping and other existing features. Android photo capture and minimap repositioning are omitted.
+
+## Saves
+
+Saves exports Normal, Modded or Both base-game save trees. Imports validate the entire archive in staging, reject path escapes/duplicates and retain selected previous trees before replacement. Multi-tree failures roll back and Restore keeps the current trees so the operation is reversible. Legacy normal-only archives remain readable. Quit the game before save management. The page shows backup status and configured profile selection. Base-game and TU4 saves are incompatible; guided Xenia import refuses detected TU4 data for this APK.
+
+## Reports and recovery
+
+Settings → Advanced → Record a performance comparison launches a session with bounded native CSV logging. Drive the same route for each configuration, then use More → Diagnostics / Reports (or the in-game action). Normal play keeps detailed profiling off.
+
+Exports retain CSV headers and whole rows. The report index identifies file size/truncation, originating session and source commit, and separates the latest session from older history and shared logs. A session from an older APK is not labelled current after an update. Thermal values are named severity levels, not temperatures, and normal self-exits are distinguished from crashes and low-memory kills. Saved, launch and live settings have separate snapshots; phone FPS/thermal samples carry session/build provenance.
+
+The report analyzer, `tools/analyze-android-report.py REPORT.zip --target-fps 30 --skip-seconds 10 --duration 60`, summarizes an explicit capture window. Menus/loading remain included unless the selected window excludes them. Audio-counter overlap is correlation, not a diagnosis. Truncated captures describe their exported tail, not the whole run.
+
+Repeated export taps are blocked during preparation. Each share uses its own completed ZIP. Reports include device/settings/driver data and bounded logs, not saves or game media; review them before sharing.
+
+The launcher and game run in different processes. A session marker distinguishes a normal exit from an interrupted game; recovery offers a system-driver launch or a report. Android low-memory kills and native crashes are different failure causes and should not be treated as proof of a driver problem.
+
+An intentional native window close records a clean exit before the runtime's hard termination. Finishing the game activity also records that intent before SDL teardown, so a normal quit does not depend on Java cleanup running after native shutdown.
+
+## Build and implementation notes
+
+The pinned ShiftGlue SDK is 101ad468, matching upstream 0.8.2. Reviewed runtime changes and regenerated Vulkan helpers are stored in cmake/patches and applied idempotently before configuring the source SDK. This avoids a submodule commit unavailable from the upstream remote. Regenerate helpers with compile-fh1-native.sh (SPIRV_ONLY=1 and GLSLANG set), then run tools/update-android-sdk-patch.py after reviewing the SDK worktree.
+
+The current minimum is Android 13/API 33 and the native CPU baseline is ARMv8-A. Vulkan 1.1/1.2 capability paths, Mali/Immortalis and Samsung Xclipse are experimental; a GPU name or API version does not qualify gameplay. Packaging reads the configured CPU baseline so an optimized ARMv8.2 build cannot be labelled ARMv8-A. 16 KiB native/ZIP alignment remains required. Run tools/test-android-mobile.py and the renderer/parser host tests before packaging. No physical-device or sustained performance claim follows from compilation or SPIR-V validation.
+
+A reviewed generated-code snapshot can be built with `PINYON_SHIFT_FROZEN_CODEGEN=ON`; this mode requires the complete generated modules and stamp, but not the standalone generator. It does not regenerate code when game inputs or generator settings change. Keep generated game code private and use the matching source/SDK revisions.
+
+CI also checks shared touch geometry, runs the Java mobile suite with the pinned platform/JDK, and compiles the Android driver probe and native UI bridge without game-generated source. The independent input-calibration and shared-driver loader patches are retained when shader patches are regenerated.
+
+The docs workflow builds a site artifact from main or the published release tag. This fork has no configured GitHub Pages site; an owner can enable Pages with the Actions source and set the repository variable `FH4DROID_PAGES_ENABLED=true` to deploy it. Android APK publication does not depend on website deployment.
+
+[Player setup and limitations](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-0.6.8-r7.md). [Upstream Android research](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID_PORT_BACKLOG.md).
+
+### Fractional-resolution lines
+
+A software Vulkan regression reproduced a band-boundary clear bug: a post-resolve clear rounded the bottom of an intermediate band up, erasing a reduced-resolution texel still used by the next band. Intermediate clears now retain that shared row. The final band copy also calculates its extent from rounded endpoints, preventing a one-row attachment overrun at scales such as 59%. The fixture checks three successive band resolves at every integer resolution from 25% through 100% with the shipped resolve SPIR-V. Old clear bounds corrupt 13,600 pixels; corrected bounds pass 4,377,600 tiled-resolve pixels, in addition to 953,854 existing colour/depth resolve and transfer checks. Another 972,800 colour values cover guest 2×/4× MSAA using single-sample or 4× host surfaces, including sample averaging, at every supported scale. These are correctness checks on llvmpipe, not phone performance measurements. The reported phone artifact still needs an on-device retest; screen filters and physical display behavior are not covered by this fixture.
 
 ## HDR calibration
 
@@ -78,42 +143,3 @@ there is no measured Astra preset. The reported luminance is not a panel
 measurement. The [Android reference](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID.md#hdr-calibration)
 describes the driver comparison, display diagnostics and measurements needed
 to qualify it.
-
-## Measured devices
-
-| Device | SoC and GPU | Driver | SMOOTH 60 |
-| --- | --- | --- | --- |
-| AYN Odin 2 Portal | Snapdragon 8 Gen 2, Adreno 740 | Turnip Gen8 V37 | About 60 fps |
-| AYN Thor (Max) | Snapdragon 8 Gen 2, Adreno 740 | Turnip Gen8 V37 | About 60 fps |
-| RedMagic Astra (nubia NP05J) | Snapdragon 8 Elite, Adreno 830 | Qualcomm | 60 fps while cool, falling toward 30 as it heats up |
-
-The Thor and the Astra were measured before SMOOTH 60 moved from no MSAA to 2x.
-
-## Controls
-
-A built-in, Bluetooth or USB controller works as on the PC. On a touch screen, on-screen controls appear at the first touch and hide 20 seconds after the last one. Android's Back opens **SETTINGS**; inside the menus it steps back. Clicking both sticks shows the performance panel.
-
-## Troubleshooting
-
-On older Linux kernels, including the Pixel 3 XL's reported 4.9.337 kernel,
-the runtime now checks that a fixed allocation actually maps the requested
-address. This prevents a relocated mapping from leaving a reused guest stack's
-guard inaccessible. A native ARM64 probe on the Odin 2 Portal's 4 KB pages
-reproduced the failure with old-kernel mapping behavior simulated and passed
-with the fix. A current Pixel 3 XL launch is still needed to qualify that
-device. The stack fault in issue #556
-does not by itself show GPU memory exhaustion. The investigation is recorded
-in [facade lifetime faults](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/FACADE_LIFETIME_FAULTS.md).
-
-| Symptom | Cause |
-| --- | --- |
-| Build APK reports `symbol-order-base.txt`, `symbol-order-v4.txt` or `camera_tuning_tests.cpp` missing | An older source ZIP omitted required build inputs. Update the launcher and its installed sources, then retry Build APK |
-| Build APK stops at "Install the Android SDK packages" | The packages download from dl.google.com. The launcher retries a failed download three times; if it still fails, the log (`.local/logs/android-sdk-install.log`) shows the connection error, so try another network or a VPN and run Build APK again, which keeps what was installed. "Java version 17 or higher is required" meant an old Java on the PC; the launcher now ignores any JDK older than 17 or without `keytool` and downloads its own |
-| Build APK stops at "Build the Android package" with "could not find git" | CMake fetches AMD's FidelityFX source with git. The launcher now puts the Git it already installed for the PC build on the path for that step |
-| The app doesn't find the PC | Different networks, a network that blocks broadcasts, or Windows Firewall. Enter the address the launcher shows and allow the launcher on private networks |
-| The app closes at once | The game files are missing. Open it from the app icon, or run `push-data` again |
-| The game closes at start on a Mali GPU (Google Tensor, Exynos, Dimensity) | The GPU can't write memory from vertex shaders. Experimental: open the setup screen (long-press the icon, **Get files from PC**) and tick **Allow GPUs without vertex shader stores**. The game skips those writes; none were seen in FH1's censused scenes, and a Pixel 7 Pro (Mali-G710) ran at about 43 fps ([details](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID.md#troubleshooting)) |
-| RESOLUTION SCALE offers only 1X | Higher scales need more shared memory than a phone has |
-| No sound | No output device could be opened. The game runs silently instead of stopping |
-
-The full Android reference, including DLC and title update v4 on Android, is in [docs/ANDROID.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ANDROID.md).

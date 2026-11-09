@@ -5,6 +5,8 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# The Android-only fork publishes independently verified signed APKs. These
+# inherited jobs package desktop launchers and must not handle its release tags.
 permissions:
   contents: write
 
@@ -16,7 +18,7 @@ jobs:
   # so a failed prebuilt job slows first setup down but does not block
   # the release.
   prebuilt-windows:
-    if: github.event.repository.visibility == 'public'
+    if: github.event.repository.visibility == 'public' && github.repository != 'XHYN-PH/fh4droid'
     runs-on: windows-latest
     continue-on-error: true
     steps:
@@ -81,7 +83,7 @@ jobs:
           path: .artifacts/prebuilt/
 
   prebuilt-linux:
-    if: github.event.repository.visibility == 'public'
+    if: github.event.repository.visibility == 'public' && github.repository != 'XHYN-PH/fh4droid'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -101,7 +103,7 @@ jobs:
           path: .artifacts/prebuilt/
 
   prebuilt-macos:
-    if: github.event.repository.visibility == 'public'
+    if: github.event.repository.visibility == 'public' && github.repository != 'XHYN-PH/fh4droid'
     runs-on: macos-latest
     continue-on-error: true
     steps:
@@ -116,7 +118,7 @@ jobs:
   # Intel Macs (experimental): the same kit and host objects, built on an
   # Intel runner so the translator and runtime are native x86_64.
   prebuilt-macos-intel:
-    if: github.event.repository.visibility == 'public'
+    if: github.event.repository.visibility == 'public' && github.repository != 'XHYN-PH/fh4droid'
     runs-on: macos-15-intel
     continue-on-error: true
     steps:
@@ -141,7 +143,7 @@ jobs:
   # TP-5: the Android shell (ShiftGlue for Android, the app's code and
   # resources), so a PC builds the APK with only the NDK, CMake and Ninja.
   prebuilt-android:
-    if: github.event.repository.visibility == 'public'
+    if: github.event.repository.visibility == 'public' && github.repository != 'XHYN-PH/fh4droid'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -170,7 +172,7 @@ jobs:
     # A prebuilt job can also end cancelled when GitHub has no runner for
     # it; package without that asset, as after a failure. !cancelled()
     # still stops here when someone cancels the whole run.
-    if: ${{ !cancelled() && github.event.repository.visibility == 'public' }}
+    if: ${{ !cancelled() && github.event.repository.visibility == 'public' && github.repository != 'XHYN-PH/fh4droid' }}
     needs: [prebuilt-windows, prebuilt-linux, prebuilt-macos, prebuilt-macos-intel, prebuilt-android]
     runs-on: windows-latest
     steps:
@@ -200,7 +202,7 @@ jobs:
         shell: powershell
         run: |
           $release = Get-Content config/release.json -Raw | ConvertFrom-Json
-          $branch = if ($release.channel -eq 'preview') { 'dev' } else { 'main' }
+          $branch = if ($release.repository -eq 'https://github.com/XHYN-PH/fh4droid') { 'main' } elseif ($release.channel -eq 'preview') { 'dev' } else { 'main' }
           python tools/verify-release-tag.py --tag "${{ github.ref_name }}" --main-ref "refs/remotes/origin/$branch"
       - uses: actions/download-artifact@v7
         continue-on-error: true
@@ -230,7 +232,7 @@ jobs:
     # A prebuilt job can also end cancelled when GitHub has no runner for
     # it; package without that asset, as after a failure. !cancelled()
     # still stops here when someone cancels the whole run.
-    if: ${{ !cancelled() && github.event.repository.visibility == 'public' }}
+    if: ${{ !cancelled() && github.event.repository.visibility == 'public' && github.repository != 'XHYN-PH/fh4droid' }}
     needs: [prebuilt-windows, prebuilt-linux, prebuilt-macos, prebuilt-macos-intel, prebuilt-android]
     runs-on: ubuntu-latest
     steps:
@@ -259,7 +261,7 @@ jobs:
     # A prebuilt job can also end cancelled when GitHub has no runner for
     # it; package without that asset, as after a failure. !cancelled()
     # still stops here when someone cancels the whole run.
-    if: ${{ !cancelled() && github.event.repository.visibility == 'public' }}
+    if: ${{ !cancelled() && github.event.repository.visibility == 'public' && github.repository != 'XHYN-PH/fh4droid' }}
     needs: [prebuilt-windows, prebuilt-linux, prebuilt-macos, prebuilt-macos-intel, prebuilt-android]
     runs-on: macos-latest
     steps:

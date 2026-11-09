@@ -2,6 +2,8 @@
 
 #include <mutex>
 #include <set>
+#include <cstdlib>
+#include <rex/filesystem/devices/disc_image_device.h>
 
 #include <rex/filesystem/entry.h>
 #include <rex/logging.h>
@@ -15,6 +17,11 @@ OverlayDevice::OverlayDevice(std::string_view mount_path, const std::filesystem:
                              std::vector<std::filesystem::path> overlay_roots)
     : Device(mount_path) {
   // Game files are read-only, the base and every overlay alike.
+#if defined(__ANDROID__)
+  const char* iso = std::getenv("PINYON_SHIFT_GAME_ISO");
+  if (iso && *iso) base_ = std::make_unique<rex::filesystem::DiscImageDevice>(mount_path, iso);
+  else
+#endif
   base_ = std::make_unique<rex::filesystem::HostPathDevice>(mount_path, base_root, true);
   for (const auto& root : overlay_roots) {
     overlays_.push_back(
@@ -41,7 +48,9 @@ bool OverlayDevice::Initialize() {
   // first, as they win when opening.
   size_t listed = 0;
   for (const auto& overlay : overlays_) {
-    listed += base_->MergeTree(overlay->host_path());
+    if (auto* host = dynamic_cast<rex::filesystem::HostPathDevice*>(base_.get())) {
+      listed += host->MergeTree(overlay->host_path());
+    }
   }
   if (listed) {
     diagnostics::RecordEvent("mod.overlay.listed", {{"entries", std::to_string(listed)}});

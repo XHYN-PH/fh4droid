@@ -1,0 +1,813 @@
+diff --git a/include/rex/filesystem/devices/disc_image_device.h b/include/rex/filesystem/devices/disc_image_device.h
+index 21832129..225bdd3f 100644
+--- a/include/rex/filesystem/devices/disc_image_device.h
++++ b/include/rex/filesystem/devices/disc_image_device.h
+@@ -13,6 +13,7 @@
+ 
+ #include <memory>
+ #include <string>
++#include <unordered_set>
+ 
+ #include <rex/filesystem/device.h>
+ #include <rex/memory/mapped_memory.h>
+@@ -77,13 +78,14 @@ class DiscImageDevice : public Device {
+     size_t root_sector;  // Offset (sector) of root.
+     size_t root_offset;  // Offset (bytes) of root.
+     size_t root_size;    // Size (bytes) of root.
++    std::unordered_set<size_t> visited;
+   } ParseState;
+ 
+   Error Verify(ParseState* state);
+   bool VerifyMagic(ParseState* state, size_t offset);
+   Error ReadAllEntries(ParseState* state, const uint8_t* root_buffer);
+   bool ReadEntry(ParseState* state, const uint8_t* buffer, uint16_t entry_ordinal,
+-                 DiscImageEntry* parent);
++                 DiscImageEntry* parent, size_t directory_size, uint32_t depth = 0);
+ };
+ 
+ }  // namespace rex::filesystem
+diff --git a/include/rex/graphics/fh1_raster_scale.h b/include/rex/graphics/fh1_raster_scale.h
+new file mode 100644
+index 00000000..0d108db2
+--- /dev/null
++++ b/include/rex/graphics/fh1_raster_scale.h
+@@ -0,0 +1,35 @@
++#pragma once
++#include <cstdint>
++namespace rex::graphics {
++// Raster surfaces may be smaller than guest EDRAM. Resolves still write the
++// original guest texture layout; only their source coordinate is reduced.
++struct Fh1RasterScale {
++  uint32_t units = 100;  // Integer percentages from 25 to 100
++  explicit constexpr Fh1RasterScale(int percent)
++      : units(percent < 25 ? 25u : percent > 100 ? 100u : uint32_t(percent)) {}
++  constexpr uint32_t Pixels(uint32_t guest, uint32_t integer_scale = 1) const {
++    return uint32_t((uint64_t(guest) * integer_scale * units + 99) / 100);
++  }
++  constexpr int32_t Origin(int32_t guest, uint32_t integer_scale = 1) const {
++    const int64_t n = int64_t(guest) * integer_scale * units;
++    return int32_t(n >= 0 ? n / 100 : -((-n + 99) / 100));
++  }
++  constexpr int32_t End(int32_t guest, uint32_t integer_scale = 1) const {
++    const int64_t n = int64_t(guest) * integer_scale * units;
++    return int32_t(n >= 0 ? (n + 99) / 100 : -((-n) / 100));
++  }
++  // A post-resolve clear must retain the texel shared with the next band.
++  // Resolves sample floor(guest * scale): ceil(end) would erase that texel
++  // before the next band's resolve can read it from the untiled surface.
++  constexpr int32_t ClearEnd(int32_t guest, bool next_band,
++                             uint32_t integer_scale = 1) const {
++    return next_band ? Origin(guest, integer_scale) : End(guest, integer_scale);
++  }
++  // Copy extents use rounded endpoints so offset + extent never exceeds
++  // the rounded attachment size at fractional scales.
++  constexpr uint32_t Span(uint32_t start,uint32_t length,uint32_t integer_scale=1) const {
++    return Pixels(start+length,integer_scale)-Pixels(start,integer_scale);
++  }
++  constexpr uint32_t Code() const { return 100 - units; }
++};
++}
+diff --git a/include/rex/graphics/flags.h b/include/rex/graphics/flags.h
+index da5a4f7e..a08c3e88 100644
+--- a/include/rex/graphics/flags.h
++++ b/include/rex/graphics/flags.h
+@@ -23,6 +23,7 @@ REXCVAR_DECLARE(bool, async_shader_compilation);
+ REXCVAR_DECLARE(int32_t, resolution_scale);
+ REXCVAR_DECLARE(int32_t, draw_resolution_scale_x);
+ REXCVAR_DECLARE(int32_t, draw_resolution_scale_y);
++REXCVAR_DECLARE(int32_t, fh1_render_scale_percent);
+ REXCVAR_DECLARE(bool, resolve_resolution_scale_fill_half_pixel_offset);
+ REXCVAR_DECLARE(std::string, readback_resolve);
+ REXCVAR_DECLARE(bool, occlusion_query_enable);
+diff --git a/include/rex/graphics/vulkan/fh1_native_executor.h b/include/rex/graphics/vulkan/fh1_native_executor.h
+index 32513274..5d63cc31 100644
+--- a/include/rex/graphics/vulkan/fh1_native_executor.h
++++ b/include/rex/graphics/vulkan/fh1_native_executor.h
+@@ -202,6 +202,7 @@ class Fh1NativeExecutor {
+   }
+   // Host depth to the camera depth copy's (float24 depth is kept halved).
+   float camera_depth_scale() const { return camera_depth_scale_; }
++  float raster_scale() const { return float(raster_units_) * 0.01f; }
+ 
+   void LogStats(uint64_t frame);
+   // Native surfaces alive and the device memory their images take (LS-0.4).
+@@ -519,6 +520,10 @@ class Fh1NativeExecutor {
+   };
+   SurfaceFront surface_front_[16];
+   uint32_t scale_ = 1;
++  uint32_t raster_units_ = 100;
++  uint32_t HostPixels(uint32_t pixels) const {
++    return uint32_t((uint64_t(pixels) * scale_ * raster_units_ + 99) / 100);
++  }
+   // fh1_untile_predicated_tiling: the screen height the images hold, and the
+   // last later-tile band resolved from each surface since the tiling began.
+   uint32_t untile_height_ = 0;
+diff --git a/include/rex/perf/counter.h b/include/rex/perf/counter.h
+index 71c25eca..0cdadce7 100644
+--- a/include/rex/perf/counter.h
++++ b/include/rex/perf/counter.h
+@@ -287,6 +287,10 @@ int64_t GetCounter(CounterId id);
+ // are not reset by the per-frame CSV snapshot.
+ int64_t GetTotalCounter(CounterId id);
+ 
++// Monotonic source swaps, independent of optional CSV/profiling.
++uint64_t SourceFrameCount();
++void AdvanceSourceFrame();
++
+ // Current host thread's accumulated user + kernel CPU time, or zero if unavailable.
+ int64_t CurrentThreadCpuTimeNs();
+ 
+@@ -342,6 +346,7 @@ class Profiler {
+   static void ThreadEnter(const char* name = nullptr) { OnThreadEnter(name); }
+   static void ThreadExit() {}
+   static void Flip() {
++    AdvanceSourceFrame();
+ #ifdef REXGLUE_ENABLE_PROFILING
+     if (tracy::IsProfilerStarted()) {
+       FrameMark;
+diff --git a/src/core/perf/counter.cpp b/src/core/perf/counter.cpp
+index 8b3263cf..41bb1421 100644
+--- a/src/core/perf/counter.cpp
++++ b/src/core/perf/counter.cpp
+@@ -68,6 +68,10 @@ REXCVAR_DEFINE_BOOL(perf_inject_cpu_thread, true, "Perf",
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
+ namespace rex::perf {
++namespace { std::atomic<uint64_t> source_frame_count{0}; }
++uint64_t SourceFrameCount() { return source_frame_count.load(std::memory_order_relaxed); }
++void AdvanceSourceFrame() { source_frame_count.fetch_add(1, std::memory_order_relaxed); }
++
+ 
+ namespace {
+ 
+diff --git a/src/filesystem/devices/disc_image_device.cpp b/src/filesystem/devices/disc_image_device.cpp
+index bce00ddf..50e9e8ca 100644
+--- a/src/filesystem/devices/disc_image_device.cpp
++++ b/src/filesystem/devices/disc_image_device.cpp
+@@ -89,14 +89,16 @@ DiscImageDevice::Error DiscImageDevice::Verify(ParseState* state) {
+   }
+ 
+   // Read sector 32 to get FS state.
+-  if (state->size < state->game_offset + (32 * kXESectorSize)) {
++  if (state->size < state->game_offset + (32 * kXESectorSize) + 32) {
+     return Error::kErrorReadError;
+   }
+   uint8_t* fs_ptr = state->ptr + state->game_offset + (32 * kXESectorSize);
+   state->root_sector = memory::load<uint32_t>(fs_ptr + 20);
+   state->root_size = memory::load<uint32_t>(fs_ptr + 24);
+   state->root_offset = state->game_offset + (state->root_sector * kXESectorSize);
+-  if (state->root_size < 13 || state->root_size > 32_MiB) {
++  if (state->root_size < 14 || state->root_size > 32_MiB ||
++      state->root_offset > state->size ||
++      state->root_size > state->size - state->root_offset) {
+     return Error::kErrorDamagedFile;
+   }
+ 
+@@ -109,7 +111,7 @@ DiscImageDevice::Error DiscImageDevice::Verify(ParseState* state) {
+ }
+ 
+ bool DiscImageDevice::VerifyMagic(ParseState* state, size_t offset) {
+-  if (offset >= state->size) {
++  if (offset > state->size || state->size - offset < 20) {
+     return false;
+   }
+ 
+@@ -123,16 +125,23 @@ DiscImageDevice::Error DiscImageDevice::ReadAllEntries(ParseState* state,
+   root_entry->attributes_ = kFileAttributeDirectory;
+   root_entry_ = std::unique_ptr<Entry>(root_entry);
+ 
+-  if (!ReadEntry(state, root_buffer, 0, root_entry)) {
+-    return Error::kErrorOutOfMemory;
++  if (!ReadEntry(state, root_buffer, 0, root_entry, state->root_size)) {
++    return Error::kErrorDamagedFile;
+   }
+ 
+   return Error::kSuccess;
+ }
+ 
+ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16_t entry_ordinal,
+-                                DiscImageEntry* parent) {
+-  const uint8_t* p = buffer + (entry_ordinal * 4);
++                                DiscImageEntry* parent, size_t directory_size, uint32_t depth) {
++  const size_t base = size_t(reinterpret_cast<uintptr_t>(buffer) -
++                             reinterpret_cast<uintptr_t>(state->ptr));
++  const size_t ordinal = size_t(entry_ordinal) * 4;
++  if (depth > 128 || directory_size < 14 || directory_size > 32_MiB ||
++      base > state->size || directory_size > state->size - base ||
++      ordinal > directory_size - 14 || state->visited.size() >= 100000 ||
++      !state->visited.insert(base + ordinal).second) return false;
++  const uint8_t* p = buffer + ordinal;
+ 
+   uint16_t node_l = memory::load<uint16_t>(p + 0);
+   uint16_t node_r = memory::load<uint16_t>(p + 2);
+@@ -140,13 +149,18 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
+   size_t length = memory::load<uint32_t>(p + 8);
+   uint8_t attributes = memory::load<uint8_t>(p + 12);
+   uint8_t name_length = memory::load<uint8_t>(p + 13);
++  if (!name_length || name_length > directory_size - ordinal - 14) return false;
++  const size_t data_offset = state->game_offset + sector * kXESectorSize;
++  if (data_offset > state->size || length > state->size - data_offset) return false;
+   auto name_buffer = reinterpret_cast<const char*>(p + 14);
+ 
+-  if (node_l && !ReadEntry(state, buffer, node_l, parent)) {
++  if (node_l && !ReadEntry(state, buffer, node_l, parent, directory_size, depth + 1)) {
+     return false;
+   }
+ 
+   auto name = std::string(name_buffer, name_length);
++  if (name == "." || name == ".." || name.find_first_of("/\\") != std::string::npos ||
++      name.find('\0') != std::string::npos || parent->GetChild(name)) return false;
+ 
+   auto entry = DiscImageEntry::Create(this, parent, name, mmap_.get());
+   entry->attributes_ = attributes | kFileAttributeReadOnly;
+@@ -170,7 +184,7 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
+       }
+       // Read child list.
+       uint8_t* folder_ptr = state->ptr + state->game_offset + (sector * kXESectorSize);
+-      if (!ReadEntry(state, folder_ptr, 0, entry.get())) {
++      if (!ReadEntry(state, folder_ptr, 0, entry.get(), length, depth + 1)) {
+         return false;
+       }
+     }
+@@ -186,7 +200,7 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
+   parent->children_.emplace_back(std::move(entry));
+ 
+   // Read next file in the list.
+-  if (node_r && !ReadEntry(state, buffer, node_r, parent)) {
++  if (node_r && !ReadEntry(state, buffer, node_r, parent, directory_size, depth + 1)) {
+     return false;
+   }
+ 
+diff --git a/src/graphics/flags.cpp b/src/graphics/flags.cpp
+index 786133db..04b600a3 100644
+--- a/src/graphics/flags.cpp
++++ b/src/graphics/flags.cpp
+@@ -10,6 +10,11 @@
+  */
+ 
+ #include <rex/graphics/flags.h>
++REXCVAR_DEFINE_INT32(fh1_render_scale_percent, 100, "GPU",
++                     "FH1 Vulkan raster resolution: 25 through 100 percent. "
++                     "Guest resolve textures retain their original layout.")
++    .range(25, 100)
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ #include <rex/logging.h>
+ #include <rex/ui/renderdoc_api.h>
+ 
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+index 3a564a5f..20a84a77 100644
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -25,6 +25,7 @@
+ #include <rex/graphics/pipeline/shader/spirv_translator.h>
+ 
+ #include <rex/cvar.h>
++#include <rex/graphics/flags.h>
+ #include <rex/math.h>
+ #include <rex/platform.h>
+ #include <rex/string/buffer.h>
+@@ -3475,6 +3476,17 @@ void SpirvShaderTranslator::StartFragmentShaderInMain() {
+           spv::OpFMul, type_float_, param_gen_x,
+           builder_->makeFloatConstant(1.0f / float(draw_resolution_scale_x_)));
+     }
++    const int raster_percent_x = REXCVAR_GET(fh1_render_scale_percent);
++    if (draw_resolution_scale_x_ == 1 && draw_resolution_scale_y_ == 1 &&
++        (raster_percent_x >= 25 && raster_percent_x < 100)) {
++      // Recover the original guest pixel centre before supplying vPos.
++      param_gen_x = builder_->createNoContractionBinOp(spv::OpFAdd, type_float_,
++          param_gen_x, builder_->makeFloatConstant(0.5f));
++      param_gen_x = builder_->createNoContractionBinOp(spv::OpFMul, type_float_,
++          param_gen_x, builder_->makeFloatConstant(100.0f / float(raster_percent_x)));
++      param_gen_x = builder_->createUnaryBuiltinCall(type_float_, ext_inst_glsl_std_450_,
++          GLSLstd450Floor, param_gen_x);
++    }
+     param_gen_x = builder_->createUnaryBuiltinCall(type_float_, ext_inst_glsl_std_450_,
+                                                    GLSLstd450FAbs, param_gen_x);
+     if (!modification.pixel.param_gen_point) {
+@@ -3511,6 +3523,17 @@ void SpirvShaderTranslator::StartFragmentShaderInMain() {
+           spv::OpFMul, type_float_, param_gen_y,
+           builder_->makeFloatConstant(1.0f / float(draw_resolution_scale_y_)));
+     }
++    const int raster_percent_y = REXCVAR_GET(fh1_render_scale_percent);
++    if (draw_resolution_scale_x_ == 1 && draw_resolution_scale_y_ == 1 &&
++        (raster_percent_y >= 25 && raster_percent_y < 100)) {
++      // Recover the original guest pixel centre before supplying vPos.
++      param_gen_y = builder_->createNoContractionBinOp(spv::OpFAdd, type_float_,
++          param_gen_y, builder_->makeFloatConstant(0.5f));
++      param_gen_y = builder_->createNoContractionBinOp(spv::OpFMul, type_float_,
++          param_gen_y, builder_->makeFloatConstant(100.0f / float(raster_percent_y)));
++      param_gen_y = builder_->createUnaryBuiltinCall(type_float_, ext_inst_glsl_std_450_,
++          GLSLstd450Floor, param_gen_y);
++    }
+     param_gen_y = builder_->createUnaryBuiltinCall(type_float_, ext_inst_glsl_std_450_,
+                                                    GLSLstd450FAbs, param_gen_y);
+     if (modification.pixel.param_gen_point) {
+diff --git a/src/graphics/shaders/compile-fh1-native.sh b/src/graphics/shaders/compile-fh1-native.sh
+index 9aa33446..75234637 100644
+--- a/src/graphics/shaders/compile-fh1-native.sh
++++ b/src/graphics/shaders/compile-fh1-native.sh
+@@ -35,8 +35,10 @@ compile() {  # profile file name defines...
+   local args=()
+   local define
+   for define in "$@"; do args+=(//D "$define"); done
+-  "$FXC" //nologo //T "$profile" //E main //O3 "${args[@]}" //Vn "$name" \
+-    //Fh "bytecode/d3d12_5_1/$name.h" "$file" > /dev/null
++  if [[ ${SPIRV_ONLY:-0} != 1 ]]; then
++    "$FXC" //nologo //T "$profile" //E main //O3 "${args[@]}" //Vn "$name" \
++      //Fh "bytecode/d3d12_5_1/$name.h" "$file" > /dev/null
++  fi
+   compile_spirv "$profile" "$file" "$name" "$@"
+ }
+ for source_kind in color depth uint; do
+diff --git a/src/graphics/shaders/fh1_native_edram.hlsli b/src/graphics/shaders/fh1_native_edram.hlsli
+index 08b295ef..65e3d23b 100644
+--- a/src/graphics/shaders/fh1_native_edram.hlsli
++++ b/src/graphics/shaders/fh1_native_edram.hlsli
+@@ -86,12 +86,20 @@ static float fh1_fixed16_scale = 32.0f;
+ // source's guest pixel, as both surfaces are at the same scale).
+ #define FH1_FLAG_SCALE_SHIFT 12u  // transfer flags: resolution scale - 1, 12:13
+ static uint fh1_scale = 1u;
++// Fractional raster surfaces use percentages; resolved guest textures stay 1x.
++static uint fh1_raster_units = 100u;
+ // Untiled predicated tiling: a later tile's band is this many guest rows below
+ // the EDRAM rows of the source surface.
+ static uint fh1_source_row_offset = 0u;
+ static uint2 fh1_subpixel = uint2(0u, 0u);
+-void SetScaledPixel(inout uint2 pixel, uint scale) {
++void SetScaledPixel(inout uint2 pixel, uint scale, uint raster_units = 100u) {
+   fh1_scale = scale;
++  fh1_raster_units = raster_units;
++  if (raster_units != 100u) {
++    fh1_subpixel = uint2(0u, 0u);
++    pixel = (pixel * 100u + raster_units - 1u) / raster_units;
++    return;
++  }
+   fh1_subpixel = pixel % scale;
+   pixel /= scale;
+ }
+@@ -378,6 +386,8 @@ uint LoadSourceWord(uint reader_layout, uint2 pixel, uint sample, uint half,
+   host_sample = HostSample(guest_sample, source_msaa, LayoutHostSampleMode(source_layout));
+   }
+ 
++  // Source coordinates name guest pixels, attachments store reduced rasters.
++  source_pixel = (source_pixel * int(fh1_raster_units)) / 100;
+ #ifdef FH1_SOURCE_DEPTH
+ #ifdef FH1_SOURCE_MSAA
+   float depth = fh1_source_depth.Load(source_pixel, host_sample);
+diff --git a/src/graphics/shaders/fh1_native_resolve_memory.cs.hlsl b/src/graphics/shaders/fh1_native_resolve_memory.cs.hlsl
+index a8136cf7..f29736e8 100644
+--- a/src/graphics/shaders/fh1_native_resolve_memory.cs.hlsl
++++ b/src/graphics/shaders/fh1_native_resolve_memory.cs.hlsl
+@@ -226,6 +226,7 @@ void main(uint3 thread : SV_DispatchThreadID) {
+   } else {
+     SetScaledPixel(pixel, scale);
+   }
++  fh1_raster_units = 100u - ((FH1_DEST_INFO >> 23u) & 127u);
+ 
+   uint pack = FH1_DEST_INFO & 7u;
+   uint endian = (FH1_DEST_INFO >> 3u) & 7u;
+diff --git a/src/graphics/shaders/fh1_native_transfer.ps.hlsl b/src/graphics/shaders/fh1_native_transfer.ps.hlsl
+index e18e8272..4655c531 100644
+--- a/src/graphics/shaders/fh1_native_transfer.ps.hlsl
++++ b/src/graphics/shaders/fh1_native_transfer.ps.hlsl
+@@ -55,7 +55,8 @@ uint LoadWord(float4 position, uint host_sample, uint half) {
+   uint guest_sample = GuestSample(host_sample, LayoutMsaa(FH1_DEST_LAYOUT),
+                                   LayoutHostSampleMode(FH1_DEST_LAYOUT));
+   uint2 pixel = uint2(position.xy);
+-  SetScaledPixel(pixel, ((FH1_FLAGS >> FH1_FLAG_SCALE_SHIFT) & 3u) + 1u);
++  SetScaledPixel(pixel, ((FH1_FLAGS >> FH1_FLAG_SCALE_SHIFT) & 3u) + 1u,
++                 100u - ((FH1_FLAGS >> 14u) & 127u));
+   return LoadSourceWord(FH1_DEST_LAYOUT, pixel, guest_sample, half, FH1_SOURCE_LAYOUT,
+                         FH1_FLAGS);
+ }
+diff --git a/src/graphics/shaders/fh1_native_transfer_words.cs.hlsl b/src/graphics/shaders/fh1_native_transfer_words.cs.hlsl
+index 81943436..b1d80c34 100644
+--- a/src/graphics/shaders/fh1_native_transfer_words.cs.hlsl
++++ b/src/graphics/shaders/fh1_native_transfer_words.cs.hlsl
+@@ -36,7 +36,8 @@ void main(uint3 thread : SV_DispatchThreadID) {
+     uint guest_sample = GuestSample(host_sample, LayoutMsaa(fh1_dest_layout),
+                                     LayoutHostSampleMode(fh1_dest_layout));
+     uint2 guest_pixel = pixel;
+-    SetScaledPixel(guest_pixel, ((fh1_flags >> FH1_FLAG_SCALE_SHIFT) & 3u) + 1u);
++    SetScaledPixel(guest_pixel, ((fh1_flags >> FH1_FLAG_SCALE_SHIFT) & 3u) + 1u,
++                   100u - ((fh1_flags >> 14u) & 127u));
+     fh1_words.Store((base + host_sample) * 4u,
+                     LoadSourceWord(fh1_dest_layout, guest_pixel, guest_sample, 0u,
+                                    fh1_source_layout, fh1_flags));
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+index fc0ab779..b2498ade 100644
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -9463,7 +9463,8 @@ void VulkanCommandProcessor::UpdateDynamicState(const draw_util::ViewportInfo& v
+   // fh1_debug_raster_percent: the draw rasterizes a top-left share of its
+   // target (RS-0.3 probe; the image is wrong).
+   const float raster_fraction =
+-      fh1_native_executor_ ? fh1_native_executor_->draw_raster_fraction() : 1.0f;
++      fh1_native_executor_ ? fh1_native_executor_->draw_raster_fraction() *
++                                 fh1_native_executor_->raster_scale() : 1.0f;
+   if (raster_fraction < 1.0f) {
+     viewport.x *= raster_fraction;
+     viewport.y *= raster_fraction;
+diff --git a/src/graphics/vulkan/fh1_native_executor.cpp b/src/graphics/vulkan/fh1_native_executor.cpp
+index 43ebe5ab..cae1d6ab 100644
+--- a/src/graphics/vulkan/fh1_native_executor.cpp
++++ b/src/graphics/vulkan/fh1_native_executor.cpp
+@@ -12,6 +12,7 @@
+ 
+ #include <rex/cvar.h>
+ #include <rex/graphics/flags.h>
++#include <rex/graphics/fh1_raster_scale.h>
+ #include <rex/graphics/register_file.h>
+ #include <rex/graphics/pipeline/shader/shader.h>
+ #include <rex/graphics/pipeline/texture/util.h>
+@@ -488,6 +489,9 @@ bool Fh1NativeExecutor::Initialize(const Fh1VulkanExecutorConfig& config) {
+   if (!config_.memory || !config_.textures || !config_.render_targets) return false;
+   async_specialize_ = REXCVAR_GET(fh1_async_specialized_passes);
+   scale_ = config_.textures->draw_resolution_scale_x();
++  raster_units_ = scale_ == 1 ? Fh1RasterScale(REXCVAR_GET(fh1_render_scale_percent)).units : 100;
++  REXGPU_INFO("FH1 raster resolution: {} percent; guest resolves retain their layout",
++              raster_units_);
+   untile_height_ = config_.untile_height;
+   UpdateCoarseShading();
+   single_sample_msaa_ = (scale_ >= 2 && REXCVAR_GET(fh1_scaled_msaa_single_sample)) ||
+@@ -516,14 +520,28 @@ bool Fh1NativeExecutor::Initialize(const Fh1VulkanExecutorConfig& config) {
+   const VkDevice device = vulkan_device->device();
+ 
+   if (REXCVAR_GET(fh1_native_gpu_profile)) {
+-    VkQueryPoolCreateInfo query_pool_info = {};
+-    query_pool_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+-    query_pool_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+-    query_pool_info.queryCount = kGpuProfileSlots * kGpuProfileQueries;
+-    if (dfn.vkCreateQueryPool(device, &query_pool_info, nullptr, &gpu_query_pool_) !=
+-        VK_SUCCESS) {
+-      gpu_query_pool_ = VK_NULL_HANDLE;
+-      REXGPU_WARN("FH1 native executor (Vulkan): no timestamp query pool for the GPU profile");
++    // Timestamp support is optional even on a graphics-capable queue. Do
++    // not record timestamp commands on queues whose valid-bit count is 0.
++    const auto& ifn = vulkan_device->vulkan_instance()->functions();
++    uint32_t family_count = 0;
++    ifn.vkGetPhysicalDeviceQueueFamilyProperties(vulkan_device->physical_device(),
++                                                &family_count, nullptr);
++    std::vector<VkQueueFamilyProperties> families(family_count);
++    ifn.vkGetPhysicalDeviceQueueFamilyProperties(vulkan_device->physical_device(),
++                                                &family_count, families.data());
++    const uint32_t family = vulkan_device->queue_family_graphics_compute();
++    if (family >= family_count || !families[family].timestampValidBits) {
++      REXGPU_WARN("FH1 native executor (Vulkan): GPU profile disabled: queue has no timestamp support");
++    } else {
++      VkQueryPoolCreateInfo query_pool_info = {};
++      query_pool_info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
++      query_pool_info.queryType = VK_QUERY_TYPE_TIMESTAMP;
++      query_pool_info.queryCount = kGpuProfileSlots * kGpuProfileQueries;
++      if (dfn.vkCreateQueryPool(device, &query_pool_info, nullptr, &gpu_query_pool_) !=
++          VK_SUCCESS) {
++        gpu_query_pool_ = VK_NULL_HANDLE;
++        REXGPU_WARN("FH1 native executor (Vulkan): no timestamp query pool for the GPU profile");
++      }
+     }
+   }
+   if (REXCVAR_GET(fh1_visibility_census) > 0) {
+@@ -735,13 +753,15 @@ uint32_t Fh1NativeExecutor::SurfaceHeight(uint32_t pitch_tiles, uint32_t msaa) c
+ }
+ 
+ Fh1NativeExecutor::Rect Fh1NativeExecutor::HostRect(const Rect& rect) const {
+-  return {rect.left * int32_t(scale_), rect.top * int32_t(scale_), rect.right * int32_t(scale_),
+-          rect.bottom * int32_t(scale_)};
++  const Fh1RasterScale raster{int(raster_units_)};
++  return {raster.Origin(rect.left, scale_), raster.Origin(rect.top, scale_),
++          raster.End(rect.right, scale_), raster.End(rect.bottom, scale_)};
+ }
+ 
+ uint32_t Fh1NativeExecutor::TransferFlags() const {
+   return (config_.depth_float24_round ? 1u : 0u) | (config_.gamma_as_unorm16 ? 2u : 0u) |
+-         (config_.fixed16_truncated ? 0u : 4u) | ((scale_ - 1) << 12);
++         (config_.fixed16_truncated ? 0u : 4u) | ((scale_ - 1) << 12) |
++         ((100u - raster_units_) << 14);
+ }
+ 
+ Fh1NativeExecutor::Surface* Fh1NativeExecutor::FindSurface(uint32_t packed_key) {
+@@ -822,7 +842,7 @@ void Fh1NativeExecutor::BeginSurfaceRendering(Surface& surface, bool uint_view)
+   attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+   VkRenderingInfo info = {};
+   info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+-  info.renderArea.extent = {surface.width * scale_, surface.image_height * scale_};
++  info.renderArea.extent = {HostPixels(surface.width), HostPixels(surface.image_height)};
+   info.layerCount = 1;
+   if (surface.key.is_depth) {
+     info.pDepthAttachment = &attachment;
+@@ -852,9 +872,10 @@ void Fh1NativeExecutor::EndUntiledTiling() {
+     VkImageCopy region = {};
+     region.srcSubresource = {AspectMask(*surface), 0, 0, 1};
+     region.dstSubresource = region.srcSubresource;
+-    region.srcOffset = {0, int32_t(band * scale_), 0};
++    region.srcOffset = {0, int32_t(HostPixels(band)), 0};
+     // Rows past the band would overlap their own destination.
+-    region.extent = {surface->width * scale_, std::min(untile_height_ - band, band) * scale_, 1};
++    region.extent = {HostPixels(surface->width),
++        Fh1RasterScale(int(raster_units_)).Span(band,std::min(untile_height_ - band, band),scale_),1};
+     command_processor_.deferred_command_buffer().CmdVkCopyImage(
+         surface->image, VK_IMAGE_LAYOUT_GENERAL, surface->image, VK_IMAGE_LAYOUT_GENERAL, region);
+     Count("untile_copy_down");
+@@ -907,7 +928,7 @@ Fh1NativeExecutor::Surface* Fh1NativeExecutor::GetOrCreateSurface(const SurfaceK
+   VkClearAttachment clear = {};
+   clear.aspectMask = AspectMask(stored);
+   VkClearRect clear_rect = {};
+-  clear_rect.rect.extent = {stored.width * scale_, stored.image_height * scale_};
++  clear_rect.rect.extent = {HostPixels(stored.width), HostPixels(stored.image_height)};
+   clear_rect.layerCount = 1;
+   command_processor_.deferred_command_buffer().CmdVkClearAttachments(1, &clear, 1, &clear_rect);
+   Count("surface_created");
+@@ -926,7 +947,7 @@ bool Fh1NativeExecutor::CreateSurfaceImage(Surface& surface) {
+                          : 0;
+   image_info.imageType = VK_IMAGE_TYPE_2D;
+   image_info.format = surface.format;
+-  image_info.extent = {surface.width * scale_, surface.image_height * scale_, 1};
++  image_info.extent = {HostPixels(surface.width), HostPixels(surface.image_height), 1};
+   image_info.mipLevels = 1;
+   image_info.arrayLayers = 1;
+   image_info.samples = VkSampleCountFlagBits(surface.samples);
+@@ -1063,7 +1084,7 @@ void Fh1NativeExecutor::EnsureSurfaceRows(Surface& surface, uint32_t rows) {
+   VkImageCopy region = {};
+   region.srcSubresource = {aspect, 0, 0, 1};
+   region.dstSubresource = region.srcSubresource;
+-  region.extent = {surface.width * scale_, old_rows * scale_, 1};
++  region.extent = {HostPixels(surface.width), HostPixels(old_rows), 1};
+   commands.CmdVkCopyImage(surface.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, grown.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, region);
+   // The old image lives until the GPU has finished this submission.
+@@ -1097,8 +1118,8 @@ void Fh1NativeExecutor::EnsureSurfaceRows(Surface& surface, uint32_t rows) {
+   VkClearAttachment clear = {};
+   clear.aspectMask = aspect;
+   VkClearRect clear_rect = {};
+-  clear_rect.rect.offset = {0, int32_t(old_rows * scale_)};
+-  clear_rect.rect.extent = {surface.width * scale_, (new_rows - old_rows) * scale_};
++  clear_rect.rect.offset = {0, int32_t(HostPixels(old_rows))};
++  clear_rect.rect.extent = {HostPixels(surface.width), HostPixels((new_rows - old_rows))};
+   clear_rect.layerCount = 1;
+   commands.CmdVkClearAttachments(1, &clear, 1, &clear_rect);
+   Count("surface_grown");
+@@ -1958,7 +1979,7 @@ void Fh1NativeExecutor::FlushDepthTransfers(Surface& dest, size_t first, size_t
+       const uint32_t constants[kComputeConstantCount] = {
+           uint32_t(rect.left) | (uint32_t(rect.top) << 16),
+           uint32_t(rect.right - rect.left) | (uint32_t(rect.bottom - rect.top) << 16),
+-          LayoutConstant(dest), LayoutConstant(*source), flags, dest.width * scale_,
++          LayoutConstant(dest), LayoutConstant(*source), flags, HostPixels(dest.width),
+           dest.samples, 0};
+       command_buffer.CmdVkPushConstants(compute_pipeline_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                                         sizeof(constants), constants);
+@@ -2015,7 +2036,7 @@ void Fh1NativeExecutor::FlushDepthTransfers(Surface& dest, size_t first, size_t
+       set_bound = true;
+     }
+     const uint32_t constants[kTransferConstantCount] = {
+-        LayoutConstant(dest), (dest.width * scale_) | (dest.samples << 16),
++        LayoutConstant(dest), (HostPixels(dest.width)) | (dest.samples << 16),
+         flags | (pass ? (pass - 1) << 8 : 0)};
+     command_buffer.CmdVkPushConstants(words_pipeline_layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                       sizeof(constants), constants);
+@@ -2651,8 +2672,8 @@ void Fh1NativeExecutor::BeginDrawRendering() {
+       bound[i] = FindSurface(pending_keys_[i].Pack());
+       if (!bound[i]) continue;
+       clears |= !bound[i]->pending_clears.empty();
+-      clear_width = std::min(clear_width, bound[i]->width * scale_);
+-      clear_height = std::min(clear_height, bound[i]->image_height * scale_);
++      clear_width = std::min(clear_width, HostPixels(bound[i]->width));
++      clear_height = std::min(clear_height, HostPixels(bound[i]->image_height));
+     }
+     if (clears) {
+       FoldPendingClears(bound, clear_width, clear_height, nullptr, nullptr, true);
+@@ -2701,8 +2722,8 @@ void Fh1NativeExecutor::BeginDrawRendering() {
+       }
+     }
+     if (i) color_count = i;
+-    width = std::min(width, surface->width * scale_);
+-    height = std::min(height, surface->image_height * scale_);
++    width = std::min(width, HostPixels(surface->width));
++    height = std::min(height, HostPixels(surface->image_height));
+   }
+   if (width == UINT32_MAX) {
+     // No attachments: the surface pitch bounds the draw.
+@@ -2710,8 +2731,8 @@ void Fh1NativeExecutor::BeginDrawRendering() {
+     const uint32_t msaa = uint32_t(surface_info.msaa_samples);
+     const uint32_t pitch_tiles = std::max(Fh1PitchTiles(surface_info.surface_pitch, msaa), 1u);
+     const uint32_t msaa_x_log2 = uint32_t(msaa >= uint32_t(xenos::MsaaSamples::k4X));
+-    width = pitch_tiles * (xenos::kEdramTileWidthSamples >> msaa_x_log2) * scale_;
+-    height = SurfaceHeight(pitch_tiles, msaa) * scale_;
++    width = HostPixels(pitch_tiles * (xenos::kEdramTileWidthSamples >> msaa_x_log2));
++    height = HostPixels(SurfaceHeight(pitch_tiles, msaa));
+   }
+   const uint64_t id = bound_id;
+   if (attachment_barriers_skipped_) {
+@@ -2784,7 +2805,11 @@ void Fh1NativeExecutor::NativeDrawIssued(const Fh1DrawInfo& draw) {
+ void Fh1NativeExecutor::ClearSurfaceRect(Surface& surface, const Rect& guest_rect,
+                                          uint32_t clear_value, uint32_t clear_value_lo) {
+   if (REXCVAR_GET(fh1_debug_skip_clears)) return;
+-  const Rect rect = HostRect(guest_rect);
++  Rect rect = HostRect(guest_rect);
++  if (untile_height_ && guest_rect.bottom < int32_t(untile_height_)) {
++    rect.bottom = Fh1RasterScale(int(raster_units_)).ClearEnd(guest_rect.bottom, true, scale_);
++  }
++  if (rect.left >= rect.right || rect.top >= rect.bottom) return;
+   VkClearAttachment clear = {};
+   if (surface.key.is_depth) {
+     const uint32_t depth_bits = (clear_value >> 8) & 0xFFFFFF;
+@@ -3010,7 +3035,11 @@ bool Fh1NativeExecutor::ResolveToMemory(const SourceRect& source, const SurfaceK
+       vulkan_device->device(), image_view != VK_NULL_HANDLE ? 5 : 3, writes, 0, nullptr);
+   const SurfaceKey& owner = surface.key;
+   const uint32_t host_sample_mode = HostSampleMode(surface);
+-  const Rect rect = unscaled_dest ? source.rect : HostRect(source.rect);
++  // Resolves expand the reduced raster into the original guest layout.
++  // Raster HostRect is for attachment work only, never destination addressing.
++  const Rect rect = unscaled_dest ? source.rect :
++      Rect{source.rect.left * int32_t(scale_), source.rect.top * int32_t(scale_),
++           source.rect.right * int32_t(scale_), source.rect.bottom * int32_t(scale_)};
+   uint32_t constants[kComputeConstantCount + 3];
+   constants[0] = uint32_t(rect.left) | (uint32_t(rect.top) << 16);
+   constants[1] = uint32_t(rect.right - rect.left) | (uint32_t(rect.bottom - rect.top) << 16);
+@@ -3059,7 +3088,8 @@ bool Fh1NativeExecutor::ResolveToMemory(const SourceRect& source, const SurfaceK
+     }
+   }
+   constants[4] = sample_select;
+-  constants[5] = dest_info | ((scale_ - 1) << 20) | (unscaled_dest ? 1u << 22 : 0u);
++  constants[5] = dest_info | ((scale_ - 1) << 20) | (unscaled_dest ? 1u << 22 : 0u) |
++                 ((100u - raster_units_) << 23);
+   constants[6] = dest_base;
+   constants[7] = dest_pitch;
+   constants[8] = image_row * scale_;
+@@ -3773,9 +3803,9 @@ void Fh1NativeExecutor::MaybeSnapshotBeforeHud(const Fh1DrawInfo& draw) {
+     hud_snapshot_taken_ = false;
+     return;
+   }
+-  const uint32_t width = surface->width * scale_;
++  const uint32_t width = HostPixels(surface->width);
+   // The rows the image holds: on demand they may stop short of the period.
+-  const uint32_t height = surface->image_height * scale_;
++  const uint32_t height = HostPixels(surface->image_height);
+   const ui::vulkan::VulkanDevice* vulkan_device = command_processor_.GetVulkanDevice();
+   const auto& dfn = vulkan_device->functions();
+   const VkDevice device = vulkan_device->device();
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+index 65e3f007..5f78f40e 100644
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -475,6 +475,9 @@ bool VulkanPipelineCache::Initialize() {
+     size_t creation_thread_count;
+     if (REXCVAR_GET(vulkan_pipeline_creation_threads) < 0) {
+       creation_thread_count = std::max(logical_processor_count * 3 / 4, uint32_t(1));
++#if REX_PLATFORM_ANDROID
++      creation_thread_count = std::min(creation_thread_count, size_t(2));
++#endif
+     } else {
+       creation_thread_count = std::min(uint32_t(REXCVAR_GET(vulkan_pipeline_creation_threads)),
+                                        logical_processor_count);
+@@ -491,7 +494,7 @@ bool VulkanPipelineCache::Initialize() {
+   return true;
+ }
+ 
+-void VulkanPipelineCache::InitializeShaderStorage(const std::filesystem::path& cache_root,
++void VulkanPipelineCache::InitializeShaderStorage(const std::filesystem::path& source_cache_root,
+                                                   uint32_t title_id, bool blocking) {
+   ShutdownShaderStorage();
+   {
+@@ -499,6 +502,9 @@ void VulkanPipelineCache::InitializeShaderStorage(const std::filesystem::path& c
+     startup_loading_ = false;
+   }
+ 
++  const int raster_percent = std::clamp(REXCVAR_GET(fh1_render_scale_percent),25,100);
++  const auto cache_root = (raster_percent < 100)
++      ? source_cache_root / ("raster-v3-" + std::to_string(raster_percent)) : source_cache_root;
+   auto shader_storage_root = cache_root / "shaders";
+   auto shader_storage_shareable_root = shader_storage_root / "shareable";
+   if (!std::filesystem::exists(shader_storage_shareable_root)) {
+@@ -514,7 +520,7 @@ void VulkanPipelineCache::InitializeShaderStorage(const std::filesystem::path& c
+   bool edram_fragment_shader_interlock =
+       render_target_cache_.GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
+ 
+-  if (title_id == 0x4D5309C9) {
++  if (title_id == 0x4D5309C9 && raster_percent == 100) {
+     const Fh1ShaderPack::Config pack_config = Fh1ShaderPackConfig();
+     const auto pack_path =
+         shader_storage_shareable_root / Fh1ShaderPack::FileName(title_id, pack_config);
+@@ -539,6 +545,11 @@ void VulkanPipelineCache::InitializeShaderStorage(const std::filesystem::path& c
+   auto pipeline_storage_file_path =
+       shader_storage_shareable_root /
+       fmt::format("{:08X}.{}.vk.xpso", title_id, edram_fragment_shader_interlock ? "fsi" : "fbo");
++  std::error_code cache_error;
++  const auto cache_bytes=std::filesystem::file_size(pipeline_storage_file_path,cache_error);
++  REXGPU_INFO("FH4Droid cache startup: raster {}%, namespace {}, stored descriptions {} ({} bytes)",
++      raster_percent, raster_percent<100?"raster-v3":"original",
++      !cache_error&&cache_bytes>12?"present":"empty",cache_error?uintmax_t(0):cache_bytes);
+   pipeline_storage_file_ = rex::filesystem::OpenFile(pipeline_storage_file_path, "a+b");
+   if (!pipeline_storage_file_) {
+     REXGPU_ERROR(
+@@ -864,6 +875,9 @@ void VulkanPipelineCache::InitializeShaderStorage(const std::filesystem::path& c
+       creation_thread_count = 1;
+     } else if (REXCVAR_GET(vulkan_pipeline_creation_threads) < 0) {
+       creation_thread_count = std::max(logical_processor_count * 3 / 4, uint32_t(1));
++#if REX_PLATFORM_ANDROID
++      creation_thread_count = std::min(creation_thread_count, size_t(2));
++#endif
+     } else {
+       creation_thread_count = std::min(uint32_t(REXCVAR_GET(vulkan_pipeline_creation_threads)),
+                                        logical_processor_count);
+@@ -964,6 +978,9 @@ void VulkanPipelineCache::StartBackgroundPrewarm(
+   size_t thread_count;
+   if (threads < 0) {
+     thread_count = std::max(logical_processor_count * 3 / 4, uint32_t(1));
++#if REX_PLATFORM_ANDROID
++    thread_count = std::min(thread_count, size_t(2));
++#endif
+   } else {
+     thread_count = std::clamp(uint32_t(threads), uint32_t(1), logical_processor_count);
+   }
+@@ -973,6 +990,10 @@ void VulkanPipelineCache::StartBackgroundPrewarm(
+               thread_count);
+   for (size_t i = 0; i < thread_count; ++i) {
+     std::unique_ptr<rex::thread::Thread> thread = rex::thread::Thread::Create({}, [this]() {
++      #if REX_PLATFORM_ANDROID
++      // Let title and audio work run ahead of speculative cache preparation.
++      rex::thread::Thread::GetCurrentThread()->set_priority(rex::thread::ThreadPriority::kBelowNormal);
++#endif
+       BackgroundPrewarm& prewarm = *background_prewarm_;
+       while (!prewarm.stop.load(std::memory_order_acquire)) {
+         const size_t index = prewarm.next.fetch_add(1, std::memory_order_relaxed);
+diff --git a/src/system/runtime.cpp b/src/system/runtime.cpp
+index eb0734a4..362a66c2 100644
+--- a/src/system/runtime.cpp
++++ b/src/system/runtime.cpp
+@@ -14,6 +14,8 @@
+ #include <rex/chrono/clock.h>
+ #include <rex/cvar.h>
+ #include <rex/filesystem/devices/host_path_device.h>
++#include <rex/filesystem/devices/disc_image_device.h>
++#include <cstdlib>
+ #include <rex/filesystem/devices/null_device.h>
+ #include <rex/filesystem/vfs.h>
+ #include <rex/logging.h>
+@@ -321,8 +323,18 @@ bool Runtime::SetupVfs() {
+ 
+   // Mount game_data_root as \Device\Harddisk0\Partition1
+   auto mount_path = "\\Device\\Harddisk0\\Partition1";
+-  auto device = std::make_unique<rex::filesystem::HostPathDevice>(
+-      mount_path, abs_game_root, !REXCVAR_GET(allow_game_relative_writes));
++  std::unique_ptr<rex::filesystem::Device> device;
++#if defined(__ANDROID__)
++  const char* iso = std::getenv("PINYON_SHIFT_GAME_ISO");
++  if (iso && *iso) {
++    device = std::make_unique<rex::filesystem::DiscImageDevice>(mount_path, iso);
++    REXSYS_INFO("Mounting the selected read-only disc image");
++  } else
++#endif
++  {
++    device = std::make_unique<rex::filesystem::HostPathDevice>(
++        mount_path, abs_game_root, !REXCVAR_GET(allow_game_relative_writes));
++  }
+   if (!device->Initialize()) {
+     REXSYS_ERROR("Runtime::SetupVfs: Failed to initialize host path device");
+     return false;
+diff --git a/src/ui/vulkan/vulkan_device.cpp b/src/ui/vulkan/vulkan_device.cpp
+index 323e5b2b..c6fe0232 100644
+--- a/src/ui/vulkan/vulkan_device.cpp
++++ b/src/ui/vulkan/vulkan_device.cpp
+@@ -421,6 +421,8 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+ 
+   bool ext_KHR_portability_subset = false;
+   bool ext_1_2_KHR_driver_properties = false;
++  bool ext_1_2_KHR_create_renderpass2 = false;
++  bool ext_1_2_KHR_depth_stencil_resolve = false;
+   if (get_physical_device_properties2_supported) {
+     // #164. Must be enabled according to the specification if the physical
+     // device is a portability subset one.
+@@ -446,6 +448,9 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+     XE_UI_VULKAN_STRUCT_PROMOTED_EXTENSION(KHR_maintenance4, 1, 3)
+     // #55.
+     XE_UI_VULKAN_STRUCT_PROMOTED_EXTENSION(KHR_dynamic_rendering, 1, 3)
++    // Dynamic rendering before core 1.2 also needs these extension dependencies.
++    XE_UI_VULKAN_LOCAL_PROMOTED_EXTENSION(KHR_create_renderpass2, 1, 2)
++    XE_UI_VULKAN_LOCAL_PROMOTED_EXTENSION(KHR_depth_stencil_resolve, 1, 2)
+   }
+ 
+   if (with_swapchain) {
+@@ -567,6 +572,23 @@ std::unique_ptr<VulkanDevice> VulkanDevice::CreateIfSupported(
+     }
+   }
+ 
++  if (properties.apiVersion < VK_MAKE_API_VERSION(0, 1, 2, 0)) {
++    const auto disable_extension = [&](const char* name) {
++      enabled_extensions.erase(std::remove_if(enabled_extensions.begin(), enabled_extensions.end(),
++          [&](const char* enabled) { return std::strcmp(name, enabled) == 0; }), enabled_extensions.end());
++    };
++    if (!ext_1_2_KHR_create_renderpass2 && ext_1_2_KHR_depth_stencil_resolve) {
++      ext_1_2_KHR_depth_stencil_resolve = false;
++      disable_extension(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME);
++    }
++    if ((!ext_1_2_KHR_create_renderpass2 || !ext_1_2_KHR_depth_stencil_resolve) &&
++        device->extensions_.ext_1_3_KHR_dynamic_rendering) {
++      device->extensions_.ext_1_3_KHR_dynamic_rendering = false;
++      disable_extension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
++      REXLOG_INFO("Vulkan 1.1 dynamic-rendering dependencies unavailable; using render passes");
++    }
++  }
++
+   if (with_swapchain && !device->extensions_.ext_KHR_swapchain) {
+     REXLOG_WARN("Vulkan device '{}' doesn't support swapchains", properties.deviceName);
+     return nullptr;

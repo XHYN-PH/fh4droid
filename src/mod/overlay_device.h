@@ -48,7 +48,7 @@ class OverlayDevice final : public rex::filesystem::Device {
   uint32_t bytes_per_sector() const override { return base_->bytes_per_sector(); }
 
  private:
-  std::unique_ptr<rex::filesystem::HostPathDevice> base_;
+  std::unique_ptr<rex::filesystem::Device> base_;
   std::vector<std::unique_ptr<rex::filesystem::HostPathDevice>> overlays_;
 };
 

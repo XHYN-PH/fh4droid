@@ -70,6 +70,7 @@
 #include "achievements/achievement_progress.h"
 #include "achievements/achievement_strings.h"
 #include "ui/achievement_icons.h"
+#include "stall_dump.h"
 #include "ui/achievements_menu.h"
 #include "ui/photo_export.h"
 #if !defined(__ANDROID__)
@@ -78,6 +79,12 @@
 #include "ui/xam_dialogs.h"
 #include "ui/settings_menu.h"
 #include "ui/touch_pad.h"
+#if defined(__ANDROID__)
+#include "android_bridge.h"
+#include "android_achievement_art.h"
+#include <rex/system/util/xdbf_utils.h>
+#include <rex/kernel/xam/module.h>
+#endif
 #include "ui/music.h"
 
 #include <cstdio>
@@ -145,6 +152,9 @@ REXCVAR_DEFINE_BOOL(pinyon_shift_prepare_all_scales, false, "Pinyon Shift",
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
 REXCVAR_DEFINE_BOOL(pinyon_shift_capture_performance, true, "Pinyon Shift",
                     "Capture lightweight per-frame performance counters to a session CSV");
+REXCVAR_DEFINE_BOOL(fh4droid_fresh_hardware_defaults, false, "Android",
+    "Apply first-run GPU defaults to a configuration created by the Android launcher");
+
 namespace {
 
 // The host UI draws names in the title's capitals.
@@ -981,10 +991,17 @@ bool PinyonShiftApp::SetupPresentation() {
   if (!pinyon_shift::fh1_render_test::Enabled()) {
     pinyon_shift::platform::ShowFatalError(
         "Graphics unavailable",
+#if defined(__ANDROID__)
+        "FH4Droid could not start this graphics driver. Vulkan 1.1 or newer, "
+        "independent blending, vertex/fragment stores and atomics, and usable "
+        "colour/depth formats are required. Try the system driver or share a "
+        "problem report, which lists the missing capabilities.");
+#else
         "Pinyon Shift could not start the graphics device. It needs a GPU whose "
         "driver supports Vulkan 1.3. Install the newest driver from AMD, Intel or "
         "NVIDIA, then retry. Older integrated graphics, such as Intel HD Graphics "
         "before the 6th generation, cannot run the game.");
+#endif
   }
   pinyon_shift::platform::ExitImmediately(1308);
 }
@@ -1057,21 +1074,16 @@ bool PinyonShiftApp::EnsureHostUi() {
       }
     });
     host_ui_->SetOverlaySource([this] {
-      std::vector<pinyon_shift::hostui::HostUi::OverlayDisc> discs;
       auto& pad = pinyon_shift::ui::TouchPad::Get();
+      if(window())pad.UpdateViewport(float(window()->GetActualPhysicalWidth()),float(window()->GetActualPhysicalHeight()));
       if (!window() || !pad.Visible() || (host_ui_ && host_ui_->is_open())) {
-        return discs;
+        return std::vector<pinyon_shift::hostui::HostUi::OverlayDisc>{};
       }
-      for (const auto& shape : pad.Shapes(float(window()->GetActualPhysicalWidth()),
-                                          float(window()->GetActualPhysicalHeight()))) {
-        discs.push_back({shape.x, shape.y, shape.radius, shape.stick ? "" : shape.label,
-                         shape.pressed && !shape.stick});
-        if (shape.stick) {
-          discs.push_back({shape.stick_x, shape.stick_y, shape.radius * 0.45f, "",
-                           shape.pressed});
-        }
-      }
-      return discs;
+      const auto safe=window()->GetSafeAreaInsets();
+      pad.SetSafeArea(float(safe.left),float(safe.top),float(safe.right),float(safe.bottom));
+      return pinyon_shift::ui::TouchOverlayForShapes(
+          pad.Shapes(float(window()->GetActualPhysicalWidth()),
+                     float(window()->GetActualPhysicalHeight())), pad.Opacity());
     });
   }
   // The tracked achievement's chip (AC-4.4), in free roam only.
@@ -1178,11 +1190,13 @@ void PinyonShiftApp::ApplyMapView(bool open) {
   // The HUD scale (#520) is for the gameplay HUD; the map's and the menus'
   // screens are drawn through the same HUD view and keep their size.
   rex::cvar::SetFlagByName("fh1_hud_scale_suspended", open ? "true" : "false");
-  if (!REXCVAR_GET(pinyon_shift_hor_plus)) return;
+  pinyon_shift::ui::TouchPad::Get().SetMenuContext(open);
+  if (!REXCVAR_GET(pinyon_shift_hor_plus)) { PinyonShiftCommitMapView(open); return; }
   // Wider View stretches the widened gameplay frame over the window; the
   // title's 16:9 screens (menus, Autoshow, map) are letterboxed (#363).
   rex::cvar::SetFlagByName("present_letterbox", open ? "true" : "false");
   UpdateHorPlus();
+  PinyonShiftCommitMapView(open);
   pinyon_shift::diagnostics::RecordEvent("display.hor_plus_view", {{"wide", open ? "0" : "1"}});
 }
 
@@ -1207,6 +1221,14 @@ void PinyonShiftApp::OnPostSetup() {
   if (REXCVAR_GET(fh1_frame_inspector) || REXCVAR_GET(fh1_frame_inspector_replay))
     ToggleFrameInspector();
 #endif
+  app_context().AddLifecycleListener([](rex::ui::WindowedAppContext::LifecycleEvent event) {
+    using Event = rex::ui::WindowedAppContext::LifecycleEvent;
+    if (event == Event::kWillEnterBackground || event == Event::kTerminating) {
+      pinyon_shift::stall::SetPaused(true);
+    } else if (event == Event::kDidEnterForeground) {
+      pinyon_shift::stall::SetPaused(false);
+    }
+  });
   // Launcher DLC selection is shared by normal and isolated modded profiles.
   // Saved games still use the active user root chosen in OnConfigurePaths.
   runtime()->kernel_state()->content_manager()->SetMarketplaceRoot(
@@ -1246,7 +1268,10 @@ void PinyonShiftApp::OnPostSetup() {
   // this same gameplay-view switch.
   PinyonShiftSetMapViewCallback([this](bool open) {
     if (window()) {
-      window()->app_context().CallInUIThreadDeferred([this, open] { ApplyMapView(open); });
+      const uint64_t request=++view_request_generation_;
+      window()->app_context().CallInUIThreadDeferred([this,open,request] {
+        if(request==view_request_generation_.load())ApplyMapView(open);
+      });
     }
   });
   rex::ui::RegisterBind("bind_game_menu", pinyon_shift::config::kGameMenuKeys,
@@ -1475,12 +1500,61 @@ void PinyonShiftApp::OnPostSetup() {
              {"device_id", std::to_string(properties.deviceID)},
              {"api_version", std::to_string(properties.apiVersion)},
              {"driver_version", std::to_string(properties.driverVersion)}});
-        if (config_created_) {
+        if (config_created_ || REXCVAR_GET(fh4droid_fresh_hardware_defaults)) {
           ApplyFirstRunHardwareDefaults(*device);
+          rex::cvar::SetFlagByName("fh4droid_fresh_hardware_defaults", "false");
+          if (host_config_ && host_config_->Load()) {
+            host_config_->Set("fh4droid_fresh_hardware_defaults", "false");
+            host_config_->Save();
+          }
         }
       }
     }
   }
+#endif
+#if defined(__ANDROID__)
+  pinyon_shift::ui::TouchPad::Get().LoadLayout(
+      pinyon_shift::diagnostics::StateRoot() / "config/touch-layout.txt");
+  pinyon_shift::android::InstallBridge([this](bool active) {
+    if (android_menu_active_.exchange(active) == active) return;
+    if (active) AcquireGuestInputCapture(); else ReleaseGuestInputCapture();
+    pinyon_shift::ui::TouchPad::Get().SetSuspended(active);
+    rex::kernel::xam::xeXamSetHostUIActive(active);
+  }, [this] {
+    if (window()) window()->app_context().CallInUIThreadDeferred([this] { OpenSettingsMenu(); });
+  }, [this] {
+    auto quote=[](const std::string& value){
+      std::string out="\"";constexpr char hex[]="0123456789abcdef";
+      for(unsigned char c:value){
+        if(c=='"'||c=='\\'){out+='\\';out+=char(c);}
+        else if(c<32){out+="\\u00";out+=hex[c>>4];out+=hex[c&15];}
+        else out+=char(c);
+      }return out+'"';
+    };
+    std::string json="{\"achievements\":[";bool first=true;
+    for(const auto& item:achievements().ListAchievements()){
+      if(!first)json+=',';first=false;const bool unlocked=achievements().IsUnlocked(item.id);
+      json+="{\"id\":"+std::to_string(item.id)+",\"name\":"+quote(item.label)+
+        ",\"description\":"+quote(!unlocked&&!item.unachieved_description.empty()?item.unachieved_description:item.description)+
+        ",\"score\":"+std::to_string(item.gamerscore)+",\"unlocked\":"+(unlocked?"true":"false")+
+        ",\"unlocked_ms\":"+std::to_string(achievements().GetUnlockTime(item.id)>116444736000000000ULL
+          ? (achievements().GetUnlockTime(item.id)-116444736000000000ULL)/10000ULL : 0ULL)+"}";
+      const auto database = runtime() && runtime()->kernel_state()
+          ? runtime()->kernel_state()->title_xdbf() : rex::system::util::XdbfGameData(nullptr, 0);
+      const auto image = database.is_valid() && item.image_id != 0
+          ? database.GetEntry(rex::system::util::XdbfSection::kImage, uint64_t(item.image_id))
+          : rex::system::util::XdbfBlock{nullptr, 0};
+      pinyon_shift::android::CacheAchievementArt(item.id, item.icon_path, game_data_root(),
+          pinyon_shift::diagnostics::StateRoot() / "cache/achievement-icons",
+          image ? std::span<const uint8_t>(image.buffer,image.size) : std::span<const uint8_t>{});
+    }return json+"],\"modded\":"+(pinyon_shift::mod::ModdedProfile()?"true":"false")+"}";
+  }, [this](const std::string& action) {
+    if (!window()) return;
+    window()->app_context().CallInUIThreadDeferred([this, action] {
+      if (action == "achievements") CreateAchievementsOverlay();
+      else if (action == "quit") QuitFromMenu();
+    });
+  });
 #endif
   pinyon_shift::guest_native::RetireGuestCode(runtime() ? runtime()->memory() : nullptr);
   pinyon_shift::diagnostics::RecordEvent(
@@ -1716,6 +1790,11 @@ void PinyonShiftApp::OnPreLaunchModule() {
   pinyon_shift::mod::NotifyModuleLaunched();
   PinyonShiftInstallRallySeriesLoader(runtime()->function_dispatcher());
   PinyonShiftInstallCarChallengeProbe(runtime()->function_dispatcher());
+#if defined(__ANDROID__)
+  pinyon_shift::android::RefreshAchievements();
+  android_achievement_listener_=achievements().RegisterUnlockCallback(
+      [](const rex::system::AchievementEvent&){pinyon_shift::android::RefreshAchievements();});
+#endif
   // The achievements screen's remembered state beside the unlock state, and
   // the tracked achievement's count from the start.
   achievement_ui_state_ = std::make_unique<pinyon_shift::ui::AchievementUiState>(
@@ -1781,6 +1860,9 @@ bool PinyonShiftApp::OnWindowCloseRequested() {
   save_backups_.reset();
   pinyon_shift::platform::RestoreDisplayHdr();
   RecordShutdownOnce();
+#if defined(__ANDROID__)
+  pinyon_shift::android::RecordCleanExit();
+#endif
 #ifdef PINYON_SHIFT_PGO_GENERATE
   // The SDK's hard exit skips the executable's profile atexit handler.
   const int profile_result = __llvm_profile_dump();
@@ -1794,6 +1876,14 @@ void PinyonShiftApp::OnShutdown() {
 #if !defined(__ANDROID__)
   rex::ui::UnregisterBind("bind_frame_inspector");
   frame_inspector_.reset();
+#endif
+#if defined(__ANDROID__)
+  if(android_achievement_listener_){achievements().UnregisterCallback(android_achievement_listener_);android_achievement_listener_=0;}
+  pinyon_shift::android::ClearBridge();
+  if (android_menu_active_.exchange(false)) {
+    ReleaseGuestInputCapture();
+    rex::kernel::xam::xeXamSetHostUIActive(false);
+  }
 #endif
   pinyon_shift::mod::NotifyShutdown();
   rex::ui::UnregisterBind("bind_game_menu");

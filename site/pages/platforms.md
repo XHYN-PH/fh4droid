@@ -136,7 +136,7 @@ so visible fullscreen output and native Space behavior remain unqualified.
 
 ## Android
 
-**Build.** NDK r29, `arm64-v8a`, API 33, `c++_shared`, 16 KB ELF alignment (`-Wl,-z,max-page-size=16384`). The game is `libmain.so`, started by SDL. The Windows launcher builds the APK from the code it already translated and shares it over Wi-Fi.
+**Build.** NDK r29, `arm64-v8a`, API 33, `c++_shared`, 16 KB ELF alignment (`-Wl,-z,max-page-size=16384`). The game is `libmain.so`, started by SDL. Source builds reuse the code translated on the PC; the Android app imports a local ISO or extracted folder.
 
 **Bring-up** was done first on an Android emulator on the M4 Pro. Guest memory needed `memfd` shared memory and a reserve-then-fix layout; APCs use bionic's `sigqueue`; a double `pthread_join` crashed. The page-fault path parsed `/proc/self/maps`, 12,000 lines per fault, which cost the 8 Elite heavily until it was removed.
 

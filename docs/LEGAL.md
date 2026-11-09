@@ -1,5 +1,13 @@
 # Legal and distribution
 
+## FH4Droid release scope
+
+FH4Droid is an Android-only fork. Its `0.6.0-r1` GitHub release provides a prebuilt test APK containing compiled translations of the game executable. Players must supply their own matching game assets. The source tree excludes original executable modules, generated translations, game assets, compiled libraries and private signing keys.
+
+The inherited policy below describes upstream Pinyon Shift, whose releases do not provide linked game binaries. The fork's APK release is separate from upstream. The BSD license applies only to independently authored project code and grants no rights to the original game or third-party components.
+
+## Upstream distribution policy
+
 Pinyon Shift distributes independently authored source, build configuration,
 patches, and its launcher. Releases do not distribute the original game,
 extracted assets, executable modules, generated translations, or a linked game

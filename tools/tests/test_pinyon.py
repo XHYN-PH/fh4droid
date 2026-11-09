@@ -24,6 +24,7 @@ class PinyonLauncherTests(unittest.TestCase):
             self.assertEqual(MODULE.ROOT / "out" / "build" / "linux-arm64-release",
                              MODULE.default_build_directory("Release"))
         with mock.patch.object(MODULE, "WINDOWS", True), \
+                mock.patch.object(MODULE.platform, "system", return_value="Windows"), \
                 mock.patch.object(MODULE.platform, "machine", return_value="AMD64"):
             self.assertEqual(MODULE.ROOT / "out" / "build" / "win-amd64-relwithdebinfo",
                              MODULE.default_build_directory("RelWithDebInfo"))

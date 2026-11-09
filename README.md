@@ -1,205 +1,86 @@
-# Pinyon Shift
-
 <p align="center">
-  <img src=".github/pinyon-shift-banner.png" alt="Pinyon Shift logo" width="800">
+  <img src=".github/fh4droid-logo.png" width="420" alt="FH4Droid logo">
 </p>
 
-<p align="center">
-  <b>The Xbox 360 release of <i>Forza Horizon</i>, recompiled to run natively on Windows, Linux, the Steam Deck and Apple silicon Macs, with an Android alpha.</b><br>
-  Built on your own PC from your own disc, with internal resolutions up to 4K.
-</p>
+<h1 align="center">FH4Droid</h1>
+
+<p align="center">Forza Horizon (2012) for Android.<br>Based on Pinyon Shift and maintained by XHYN-PH.</p>
 
 <p align="center">
-  <a href="https://github.com/arcanite24/pinyon-shift/releases/latest"><b>Download the launcher</b></a>
-  ·
-  <a href="https://arcanite24.github.io/pinyon-shift/">Documentation</a>
-  ·
-  <a href="#play">How to play</a>
-  ·
-  <a href="docs/ROADMAP.md">Roadmap</a>
-  ·
-  <a href="#supporting-the-project">Support development</a>
+  <a href="https://github.com/XHYN-PH/fh4droid/releases">Download APK</a> ·
+  <a href="https://youtube.com/@xhyn_ph">YouTube</a> ·
+  <a href="https://t.me/xhynports">Telegram</a>
 </p>
 
-<p align="center">
-  <a href="https://discord.gg/SFQKFrTvww"><img alt="Join the Discord" src="https://img.shields.io/badge/Discord-join%20the%20server-5865F2?logo=discord&logoColor=white&style=for-the-badge"></a>
-  <a href="https://ko-fi.com/nerijs"><img alt="Support on Ko-fi" src="https://img.shields.io/badge/Ko--fi-support%20the%20project-FF5E5B?logo=kofi&logoColor=white&style=for-the-badge"></a>
-</p>
+**FH4Droid focuses on Android only.** It brings the original Xbox 360 **Forza Horizon (2012)** to compatible phones and handhelds.
 
-<p align="center">
-  <img src=".github/launcher-ready.png" alt="The Pinyon Shift launcher, ready to play: Vulkan at 1x (1280 × 720), with Play and Settings buttons" width="800">
-</p>
+**Testing build: 0.8.2-upstream-test1.** This build has not been tested on a physical Android device. Expect possible crashes, graphics issues and slowdowns.
 
-Pinyon Shift is not an emulator. The game's PowerPC code is translated ahead of
-time into C++ with [ShiftGlue](https://github.com/arcanite24/shiftglue-sdk), our
-fork of ReXGlue, and compiled on your computer. A renderer written for
-*Forza Horizon* runs the game's GPU commands on Vulkan.
+**You must provide your own legally obtained game files.** Use the supported USA Xbox 360 base-game ISO or complete extracted folder. Game files and game-download links are not provided here.
 
-This repository holds the launcher, build tools, host code and configuration.
-It does **not** contain the game, its assets, generated translations or a
-prebuilt executable: you build the game from a disc you own.
+## Features
 
-> **Playable preview.** Expect some rendering bugs and slowdowns. The
-> [0.8.2 release notes](docs/releases/0.8.2.md) list what the latest release
-> contains and its known limitations.
+- Fixed landscape UI, text-only footer links, installed version/build details, right-side settings and an in-game drawer with Resume.
+- Searchable settings, pinned favourites, section resets, undo and active/saved value labels.
+- Graphics presets, screen modes, FSR profiles, custom values and restart labels.
+- 25–100% rendering resolution in one-percent steps; performance depends on the device.
+- Racing icons for all 20 touch controls, explicit **Arrows / Stick** steering, named local layouts, handed templates, per-control fading and floating/fixed/invisible sticks.
+- Controller calibration, optional phone tilt and rumble, achievements and a trainer on a separate profile.
+- Opt-in sustained mode, driver diagnostics, graphics-cache management and labelled performance reports.
+- Save export, import, backups and restoration from your phone.
+- A graphics-driver test before launch, system-driver recovery and shareable problem reports.
+- Direct ISO loading or verified game-folder import with resume and repair.
+- Installs separately from the original Pinyon Shift app.
 
-## Highlights
+## Requirements
 
-- **Native code.** The game's executable is recompiled ahead of time; nothing
-  is interpreted or JIT-compiled while you play.
-- **60 and 120 fps** at the right game speed, instead of the console's 30.
-- **1x to 4x internal resolution**, FSR 1 output scaling, anisotropic
-  filtering, FXAA, ultrawide support, and optional bloom, motion blur and
-  depth of field.
-- **In-game settings (F6)** and a trainer (F10: credits, game speed, time of
-  day, free camera), photo export, save backups and [mods](docs/MODDING.md).
-- **HDR, your music and an immersive camera.** HDR output with calibration,
-  your own music in game or as custom radio stations, and an optional camera
-  that reacts to the car. See [Settings and controls](https://arcanite24.github.io/pinyon-shift/playing/).
-- **Your DLC.** Owned Xbox 360 packages are verified and imported. Car packs
-  work, and Rally and 1000 Club run on the optional title update v4 build.
-- **Linux and Steam Deck.** A native Linux build, no Proton: 60 fps at 1x on
-  the Deck within its 15 W limit, and **Add to Steam** puts it in Game Mode.
-  See [Linux and Steam Deck](docs/LINUX.md).
-- **macOS on Apple silicon.** Vulkan on Metal through MoltenVK, built into
-  the game. See [macOS](docs/MACOS.md).
-- **Android handhelds (alpha).** 60 fps on Snapdragon 8 Gen 2 handhelds. See
-  [Android](#android-developer-alpha).
-- **The Treasure Map included.** This add-on was sold through a service that
-  no longer exists. It is on by default and can be turned off in the launcher.
+| Item | Requirement |
+|---|---|
+| Android | Android 13 (API 33) or newer on a compatible ARM64 phone or handheld |
+| Recommended device | Snapdragon 8 Gen 2 or newer |
+| Graphics | Vulkan 1.1+ with required features; 1.1/1.2 and Mali/Xclipse gameplay support are experimental |
+| Storage | ISO: room for your ISO plus about 150 MB of support files. Folder import: about 8 GB plus the original folder and APK |
+| Game | Forza Horizon (2012), Xbox 360 USA retail version, without Title Update 4 |
 
-## Performance
+Support and performance depend on the phone and graphics driver. Other devices are untested.
 
-On an RTX 4080 the scripted race runs at a median of 119 fps at 1x and 2x
-(with the game's 4x MSAA), and 102 fps at 3x (3840×2160). On the console the
-game runs at 30 fps. The **Low-spec 60** preset holds 60 fps on 4 CPU cores
-in simulated runs and needs about 1.1 GB of graphics memory. Android
-handhelds with a Snapdragon 8 Gen 2 hold about 60 fps with the SMOOTH 60
-preset.
+## Getting started
 
-Methods, the comparison with Xenia, and the full tables are in
-[Performance](docs/PERFORMANCE.md).
+1. Install the APK, then open **FH4Droid → Game files**.
+2. Choose your supported game **ISO**, or choose the **complete extracted folder**.
+3. Wait for the game-file checks and any copying to finish.
+4. Open **Settings** to choose graphics, audio and controls. Restart labels show what applies on the next launch.
+5. Tap **Play**. The app tests the selected graphics driver before starting.
 
-## Play
+Local import uses an ISO or extracted folder already on the device; the app has no PC pairing or Wi-Fi transfer flow. Copy a folder over USB when needed.
 
-1. Download `PinyonShift-Launcher.zip` from the
-   [latest release](https://github.com/arcanite24/pinyon-shift/releases/latest).
-2. Extract it to a folder and run `PinyonShiftLauncher.exe`.
-3. Drop the ISO you dumped from your own disc onto the launcher, or choose it
-   with **Choose ISO**. An unmodified [extracted folder](docs/EXTRACTED_GAME_INPUT.md)
-   also works.
-4. Confirm ownership, then choose **Verify and build**.
-5. Leave the launcher open while it installs the build tools and builds the
-   game. The first build takes 20–60 minutes and needs about 30 GB of free
-   disk space. Nothing needs installing by hand. If Windows must restart,
-   setup continues after you sign in.
-6. Choose **Play**. Press **F6** in game for settings.
+Keep the ISO accessible while playing. ISO mode caches only the menu and audio configuration files; it does not extract the whole game. Use folder mode for mods that add new files.
 
-Your disc image and game files stay on your machine; the launcher only
-downloads build tools and the ShiftGlue source. The launcher is not
-code-signed yet, so Windows may warn about it: download it only from this
-repository's releases.
+While playing, tap **☰** or press Android Back for the in-game menu. Choose **Advanced game settings** for the full game settings and controller mapping. **Controls** on the launcher opens the touch editor.
 
-**On Linux or a Steam Deck**, download
-`PinyonShift-Launcher-linux-x86_64.tar.gz` instead, extract it and run
-`PinyonShiftLauncher`; after the build, **Add to Steam** puts the game in
-Game Mode. The steps are in [Linux and Steam Deck](docs/LINUX.md).
-**On a Mac**, download `PinyonShift-Launcher-macos-arm64.zip`, or on an Intel
-Mac the experimental `PinyonShift-Launcher-macos-x86_64.zip` (0.8.1 and
-later); see [macOS](docs/MACOS.md).
+Use **Saves** to export or restore the standard base-game profile while the game is closed. The trainer uses a separate modded profile; normal save exports do not include it. Use **Settings → Advanced → Record a performance comparison** when reproducing a problem, then **More → Diagnostics / Reports**. Normal play leaves detailed profiling off.
 
-To install on another drive, make a portable install, change the language, or
-read the launcher's settings, see [Installing and setup](docs/INSTALLING.md).
-If something goes wrong, see [Troubleshooting](docs/TROUBLESHOOTING.md).
+The launcher uses the transparent FH4Droid logo, one primary Play action and text footer links. Settings are grouped into Graphics, Controls, Audio, Interface, Gameplay and Advanced. The full-window touch editor has a separate full-window Properties view, a Test mode and explicit Save/Cancel. Modern racing controls use the same antialiased PNG artwork in the editor and native overlay; backing and symbol opacity are independent. Existing custom positions are retained. Choose Modern racing or Full controller explicitly under layout presets.
 
-### Requirements
+The expanded UI, controls and rendering options still need physical-device gameplay testing. First visits to a scene may pause while graphics are prepared. Performance targets are not guaranteed frame rates.
 
-- The USA retail disc, serial `MS-2505`, title ID `4D5309C9`.
-- Windows 10 or 11, x64; x86-64 Linux, including SteamOS on the Steam
-  Deck; or macOS 13.3 or newer on Apple silicon (Intel Macs experimental).
-- A GPU with Vulkan 1.3. NVIDIA is tested; AMD and Intel are not yet
-  qualified.
-- A CPU with 4 cores for Low-spec 60. The Steam Deck holds 60 fps at 1x; other
-  integrated graphics are not measured yet.
+**Title Update 4 is not needed for this release.** Saves already used with Update 4 will not work with this APK. Back up your saves and use a separate test profile. Game files and saves from the original Pinyon Shift app are not transferred automatically.
 
-## Android (developer alpha)
+See the [release notes](docs/releases/fh4droid-0.8.2-upstream-test1.md) for setup and known issues.
 
-The Android build is the same recompiled game, cross-compiled for arm64 on
-your PC from your own disc and installed on your own device. It needs Android
-13 or later and Vulkan 1.3, and is tuned for Snapdragon 8 Gen 2 or newer with
-8 GB of memory.
+## Reporting a problem
 
-1. Once the game plays on the PC, choose **Android** in the launcher, then
-   **Build APK**.
-2. Choose **Share on Wi-Fi** and scan the QR code with the device's camera to
-   install the app.
-3. Open Pinyon Shift on the device and enter the six-digit code the launcher
-   shows. The app copies the game, your DLC and, if you choose, your PC save.
+Include your phone model, Android version, graphics settings and what happened. Add a screenshot or short video for visual problems, and app logs if available. Remove personal information before sharing a report. Do not attach game files or saves.
 
-No USB debugging is needed. The bundled Mesa Turnip driver is selected
-automatically on Adreno 7xx, and the in-game SMOOTH 60 and QUALITY 30 presets
-cover the common setups. USB and command-line installs, drivers and saves are
-covered in [docs/ANDROID.md](docs/ANDROID.md).
+## Credits
 
-## Reporting bugs
+- [arcanite24/Pinyon Shift](https://github.com/arcanite24/pinyon-shift) for the original project and Android port.
+- [arcanite24/ShiftGlue](https://github.com/arcanite24/shiftglue-sdk), ReXGlue and their contributors.
+- StevenMXZ and Mesa contributors for the bundled Turnip graphics driver. See the [driver notice](android/drivers/turnip-gen8-v37/NOTICE.txt).
+- SDL, libadrenotools, FidelityFX and other contributors. See [third-party notices](THIRD_PARTY_NOTICES.md).
+- XHYN-PH for this Android fork and its releases.
+- [XHYN IV](https://github.com/XHYN-PH/XHYN-IV-recomp), [FH2 Recompiled](https://github.com/Gabrick75/fh2-recompiled) and the NFS Android ports for workflow references.
 
-Keep the launcher open while playing. If the game exits unexpectedly, the
-launcher creates a sanitized diagnostic ZIP and opens a prefilled GitHub issue;
-attach the ZIP it selects and the shortest steps that reproduce the problem.
-For other bugs use **Report a problem** in the launcher. Reports never include
-the game, your saves or local paths. Please don't attach game files or
-generated code.
+This unofficial project is not affiliated with Microsoft, Xbox, Turn 10 Studios or Playground Games. Forza Horizon belongs to its respective rights holders. Project code uses the [BSD 3-Clause License](LICENSE); other components retain their own licenses. See [legal notes](docs/LEGAL.md).
 
-## Build from source
-
-From PowerShell in a repository checkout:
-
-```powershell
-.\tools\setup-preview.ps1 -IsoPath C:\path\to\your-disc.iso
-.\tools\launch-preview.ps1
-```
-
-See [Building](docs/BUILDING.md) for details and the `tools/pinyon.py`
-command line.
-
-## Roadmap
-
-In progress: crash, stutter and rendering fixes, faster Android rendering on
-tiled GPUs, and documenting the game's code. Next: AMD and Intel qualification, and draw distance and world
-detail settings. The full list, with what's done, is in the
-[roadmap](docs/ROADMAP.md).
-
-## Project boundaries
-
-Only independently authored project files are licensed under the
-[BSD 3-Clause License](LICENSE). Microsoft, Xbox, Turn 10 Studios, Playground
-Games, *Forza Horizon*, and third-party dependencies remain the property of
-their respective owners. Pinyon Shift is not affiliated with or endorsed by
-them. See [Legal and distribution](docs/LEGAL.md) and
-[Third-party notices](THIRD_PARTY_NOTICES.md).
-
-## Contributing
-
-Start with [CONTRIBUTING.md](CONTRIBUTING.md). Repository checks reject disc
-images, executables, generated translations, extracted assets, build products,
-and other machine-local material.
-
-## Supporting the project
-
-Pinyon Shift is and will remain free. Every release, feature and setting is
-public on the same day for everyone. There are no supporter builds, early
-access, paid features or paid mods, and there never will be.
-
-If you would like to support continued development, you can
-[sponsor arcanite24 on GitHub] or [buy me a coffee on Ko-fi]. Contributions
-pay for development time and test hardware, such as Android devices and
-lower-end GPUs. They do not buy builds, game content, priority support or
-influence over the roadmap. Support is for the work on this project, not for
-*Forza Horizon*, which remains the property of its owners.
-
-Sharing the project, reporting bugs with a diagnostic ZIP and contributing
-code help just as much. Come say hi, ask for help or report bugs on the
-[Discord server](https://discord.gg/SFQKFrTvww).
-
-[sponsor arcanite24 on GitHub]: https://github.com/sponsors/arcanite24
-[buy me a coffee on Ko-fi]: https://ko-fi.com/nerijs
+[Developer documentation](docs/ANDROID.md) · [Original project README](README_UPSTREAM.md) · [XHYN IV](https://github.com/XHYN-PH/XHYN-IV-recomp) · [XHYN V Reborn](https://github.com/XHYN-PH/XHYN-V-reborn)

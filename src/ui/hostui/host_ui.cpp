@@ -1,4 +1,7 @@
 #include "ui/hostui/host_ui.h"
+#include "ui/touch_icons.h"
+#include "ui/touch_artwork.h"
+#include <rex/ui/image_decode.h>
 
 #include <algorithm>
 #include <cmath>
@@ -164,6 +167,19 @@ void HostUi::ShowToast(ToastSpec spec) {
   RequestPaint();
 }
 
+bool HostUi::LoadOverlayAssets() {
+  if (!white_) {
+    const uint8_t white[4] = {255, 255, 255, 255};
+    white_ = drawer_.CreateTexture(1, 1, ImmediateTextureFilter::kNearest, false, white);
+  }
+  if (!touch_artwork_) {
+    int width=0,height=0;
+    auto pixels=rex::ui::DecodeImageRGBA(ui::kTouchArtworkPng,sizeof(ui::kTouchArtworkPng),width,height);
+    if(!pixels.empty())touch_artwork_=drawer_.CreateTexture(width,height,ImmediateTextureFilter::kLinear,false,pixels.data());
+  }
+  return bool(white_) && bool(touch_artwork_);
+}
+
 bool HostUi::LoadAssets() {
   if (assets_loaded_ || assets_failed_) {
     return assets_loaded_;
@@ -204,8 +220,7 @@ bool HostUi::LoadAssets() {
       }
     }
   }
-  const uint8_t white[4] = {255, 255, 255, 255};
-  white_ = drawer_.CreateTexture(1, 1, ImmediateTextureFilter::kNearest, false, white);
+  if (!LoadOverlayAssets()) return false;
   if (auto textures = Fh1Archive::Open(ui_root / "textures" / "Horizon.zip")) {
     selection_mask_ =
         LoadTexture(drawer_, *textures, "DirtMasks/SelectionContainer.xds", TextureMode::kMask);
@@ -878,19 +893,12 @@ void HostUi::DrawRallyPace(rex::ui::UIDrawContext& context) {
 void HostUi::DrawOverlay(rex::ui::UIDrawContext& context) {
   if (!overlay_source_) return;
   const auto discs = overlay_source_();
-  if (discs.empty() || !PrepareCanvas(context)) return;
+  if (discs.empty() || !LoadOverlayAssets() || !PrepareCanvas(context)) return;
   drawer_.Begin(context, float(context.render_target_width()),
                 float(context.render_target_height()));
-  for (const auto& disc : discs) {
-    DrawDisc(disc.x, disc.y, disc.radius, disc.pressed ? Rgba(255, 255, 255, 120)
-                                                       : Rgba(255, 255, 255, 45));
-    if (!disc.label.empty()) {
-      // Labels in title units: the canvas maps them back to these pixels.
-      const float size = std::max(14.0f, disc.radius / canvas_.scale * 0.55f);
-      DrawText(Face::kLabel, size, disc.label, (disc.x - canvas_.x) / canvas_.scale,
-               (disc.y - canvas_.y) / canvas_.scale + size * 0.35f, Rgba(255, 255, 255, 210),
-               0.5f);
-    }
+  for (auto& mesh : ui::BuildTouchOverlay(discs)) {
+    batches_.push_back(Batch{std::move(mesh.vertices),std::move(mesh.indices),
+        mesh.artwork?touch_artwork_.get():white_.get()});
   }
   Flush();
   drawer_.End();
@@ -916,7 +924,7 @@ void HostUi::DrawDisc(float x, float y, float radius, uint32_t color) {
 }
 
 void HostUi::HudChanged() {
-  if (HasHud() && LoadAssets()) {
+  if (HasHud() && LoadOverlayAssets()) {
     EnsureDrawer();
   }
   RequestPaint();
@@ -925,7 +933,7 @@ void HostUi::HudChanged() {
 void HostUi::DrawHud(rex::ui::UIDrawContext& context) {
   if (!hud_source_) return;
   const auto labels = hud_source_();
-  if (labels.empty() || !PrepareCanvas(context)) return;
+  if (labels.empty() || !LoadAssets() || !PrepareCanvas(context)) return;
   drawer_.Begin(context, float(context.render_target_width()),
                 float(context.render_target_height()));
   for (const auto& label : labels) {

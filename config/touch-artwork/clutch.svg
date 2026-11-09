@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <defs>
+    <linearGradient id="clutch-face" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#c9dbe8" stop-opacity=".64"/><stop offset=".6" stop-color="#536d80" stop-opacity=".44"/><stop offset="1" stop-color="#7893a8" stop-opacity=".7"/>
+    </linearGradient>
+    <linearGradient id="clutch-rim" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f2f9ff"/><stop offset=".65" stop-color="#7896ad" stop-opacity=".6"/><stop offset="1" stop-color="#d4e8f5"/>
+    </linearGradient>
+  </defs>
+  <path d="m8.8 3 1.8 3.6h4.8" stroke="#c8dcea" stroke-width=".85"/>
+  <path d="M6.2 7h11.6l1 1.2v10.1l-1.2 1.2H6l-1-1.2V8.2Z" fill="url(#clutch-face)" stroke="url(#clutch-rim)" stroke-width=".65"/>
+  <path d="M8 10.2h8v1.15H8Zm0 3.2h8v1.15H8Zm0 3.2h8v1.15H8Z" fill="#142635" stroke="#d7ebf8" stroke-opacity=".45" stroke-width=".25"/>
+</svg>

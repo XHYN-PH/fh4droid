@@ -52,6 +52,7 @@ DEVICE_FILES = f"/sdcard/Android/data/{PACKAGE}/files"
 AOT_PIPELINES = "4D5309C9.fbo.aot.xpso"
 # The libraries the package carries besides the C++ runtime, in load order.
 NATIVE_LIBRARIES = (
+    "libfh4droid_android.so",
     "librexruntime.so",
     "librexgpu-fh1.so",
     "libpinyon_shift_SpeechFacade_default.so",
@@ -435,8 +436,9 @@ def doctor(args: argparse.Namespace) -> int:
 
 
 def shell_ready() -> Path | None:
-    """The unpacked shell when it was built from the pinned ShiftGlue and
-    this release's version (its manifest carries the version)."""
+    """The unpacked shell when it matches the current app and runtime."""
+    if PACKAGE == "ph.xhyn.fh4droid":
+        return None
     if os.environ.get("PINYON_SHIFT_SOURCE_SDK") == "1":
         return None
     try:
@@ -455,6 +457,8 @@ def shell_ready() -> Path | None:
 def install_shell() -> Path | None:
     """The release's shell (tools/apply-prebuilt-pins.py pins it), unpacked
     into .local/android/shell; None builds everything from source."""
+    if PACKAGE == "ph.xhyn.fh4droid":
+        return None
     if shell_ready():
         return SHELL
     try:
@@ -497,6 +501,7 @@ def _cached(directory: Path, name: str) -> str | None:
 
 
 def build(args: argparse.Namespace) -> int:
+    _release_signing(args)  # Reject incomplete release credentials before compiling.
     tools = Tools()
     shell = None if getattr(args, "debuggable", False) else install_shell()
     missing = tools.missing(shell=shell is not None)
@@ -678,6 +683,42 @@ def build_fidelityfx(tools: Tools, args: argparse.Namespace, environment: dict) 
     run(command, cwd=ROOT, env=environment)
 
 
+def _keystore(tools: Tools) -> Path:
+    """A signing key made on this PC for this player's own installs."""
+    keystore = WORK / "signing" / "pinyon-shift-local.keystore"
+    if not keystore.is_file():
+        keystore.parent.mkdir(parents=True, exist_ok=True)
+        run([tools.keytool, "-genkeypair", "-keystore", keystore, "-storepass", "pinyon-local",
+             "-keypass", "pinyon-local", "-alias", "pinyon-local", "-keyalg", "RSA",
+             "-keysize", "3072", "-validity", "10000", "-dname", "CN=Pinyon Shift local build"],
+            stdout=subprocess.DEVNULL)
+    return keystore
+
+
+def _release_signing(args: argparse.Namespace) -> list[str] | None:
+    """Explicit release signing uses password files, never password arguments."""
+    names = ("keystore", "key_alias", "storepass_file", "keypass_file")
+    values = [getattr(args, name, None) for name in names]
+    if not any(value is not None for value in values):
+        return None
+    if not all(values):
+        raise AndroidError("release signing requires --keystore, --key-alias, "
+                           "--storepass-file and --keypass-file together")
+    keystore, alias, storepass, keypass = values
+    if not all(Path(value).is_file() for value in (keystore, storepass, keypass)):
+        raise AndroidError("the release keystore and both password files must exist")
+    return ["--ks", str(Path(keystore).resolve()), "--ks-key-alias", str(alias),
+            "--ks-pass", "file:" + str(Path(storepass).resolve()),
+            "--key-pass", "file:" + str(Path(keypass).resolve())]
+
+
+def _signing_arguments(parser) -> None:
+    parser.add_argument("--keystore", type=Path, help="existing release signing keystore")
+    parser.add_argument("--key-alias", help="alias of the existing release key")
+    parser.add_argument("--storepass-file", type=Path, help="private file containing the keystore password")
+    parser.add_argument("--keypass-file", type=Path, help="private file containing the key password")
+
+
 def _git(*command: str, cwd: Path = ROOT) -> str:
     """Git's answer, or "unknown" (a launcher install is no Git checkout and
     may have only the pinned MinGit)."""
@@ -711,6 +752,16 @@ def _dirty(status: str) -> str:
     return "unknown" if status == "unknown" else str(bool(status)).lower()
 
 
+def _cpu_baseline() -> str:
+    # Read the actual configured native build, including explicit optimized builds.
+    cache = ROOT / "out" / "build" / CONFIG["configure_preset"] / "CMakeCache.txt"
+    if cache.is_file():
+        match = re.search(r"(?m)^PINYON_SHIFT_ANDROID_MARCH:STRING=([^\r\n]+)$", cache.read_text(encoding="utf-8"))
+        if match:
+            return match.group(1)
+    return CONFIG.get("cpu_baseline", "armv8-a")
+
+
 def _build_manifest(tools: Tools, version_name: str, libraries: list[Path]) -> dict:
     """The provenance the game logs at start and puts in crash reports
     (AP-6.4), as tools/build-preview.ps1 writes it beside the executable."""
@@ -721,7 +772,7 @@ def _build_manifest(tools: Tools, version_name: str, libraries: list[Path]) -> d
         "configuration": "Release",
         "platform": "android-arm64",
         "version": version_name,
-        "cpu_baseline": "armv8.2-a",
+        "cpu_baseline": _cpu_baseline(),
         "ndk": CONFIG["android_sdk"]["ndk"],
         "min_sdk": CONFIG["min_sdk"],
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -729,10 +780,14 @@ def _build_manifest(tools: Tools, version_name: str, libraries: list[Path]) -> d
         "executable_sha256": hashlib.sha256(main.read_bytes()).hexdigest().upper(),
         "generated_locally": True,
         "pinyon_shift_commit": _source_commit(),
-        "pinyon_shift_dirty": _dirty(_git("status", "--porcelain", "--", ".", ":!BUGS.md",
+        "pinyon_shift_dirty": _dirty(_git("status", "--porcelain", "--ignore-submodules=dirty", "--", ".", ":!BUGS.md",
                                           ":!docs")),
         "rexglue_commit": _git("rev-parse", "HEAD", cwd=sdk),
         "rexglue_dirty": _dirty(_git("status", "--porcelain", cwd=sdk)),
+        "android_sdk_patches": {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted((ROOT / "cmake" / "patches").glob("shiftglue-fh4droid-*.patch"))
+        },
     }
 
 
@@ -749,13 +804,32 @@ def bundled_driver_files() -> list[tuple[Path, str]]:
         binary = WORK / "drivers" / name
         notice = ROOT / "android" / "drivers" / name
         found = sorted(binary.glob("*")) if binary.is_dir() else []
-        if not any(path.suffix == ".so" for path in found):
+        if not any(path.is_file() and path.suffix == ".so" for path in found):
             print(f"warning: bundled driver {name} is missing from {binary}; not packaged")
             continue
-        for path in found + sorted(notice.glob("*")):
-            if path.is_file():
-                files.append((path, f"assets/drivers/{name}/{path.name}"))
+        # Recovered packages may already contain the notice. The source notice
+        # takes precedence, and every APK destination must be unique.
+        contents = {path.name: path for path in found + sorted(notice.glob("*"))
+                    if path.is_file()}
+        files.extend((contents[key], f"assets/drivers/{name}/{key}")
+                     for key in sorted(contents))
     return files
+
+
+def validation_library(args: argparse.Namespace) -> Path | None:
+    path = getattr(args, "validation_layer", None)
+    if path is None:
+        return None
+    if not getattr(args, "debuggable", False):
+        raise AndroidError("A validation layer requires --debuggable; omit it for a normal release APK")
+    path = Path(path)
+    if path.name != "libVkLayer_khronos_validation.so" or not path.is_file():
+        raise AndroidError("Choose the arm64 libVkLayer_khronos_validation.so from Khronos")
+    with path.open("rb") as stream:
+        header = stream.read(20)
+    if len(header) < 20 or header[:6] != b"\x7fELF\x02\x01" or int.from_bytes(header[18:20], "little") != 183:
+        raise AndroidError("The validation library must be an ARM64 Android ELF library")
+    return path
 
 
 def _java_parts(tools: Tools, staging: Path, version_name: str, version_code: int,
@@ -781,8 +855,8 @@ def _java_parts(tools: Tools, staging: Path, version_name: str, version_code: in
     sdl_java = rexsdk_dir() / "thirdparty" / "sdl3" / "android-project" / "app" / "src" / "main" \
         / "java"
     sources = sorted(sdl_java.rglob("*.java")) + sorted((ROOT / "android" / "java").rglob("*.java"))
-    run([tools.javac, "-source", "1.8", "-target", "1.8", "-nowarn", "-Xlint:-options",
-         "-bootclasspath", tools.android_jar, "-classpath", tools.android_jar,
+    run([tools.javac, "--release", "8", "-nowarn", "-Xlint:-options",
+         "-classpath", tools.android_jar,
          "-encoding", "UTF-8", "-d", staging / "classes", *sources])
     # One jar of the classes rather than a path per class: d8 is a .bat on
     # Windows, and cmd.exe refuses a command longer than 8191 characters,
@@ -798,6 +872,7 @@ def _java_parts(tools: Tools, staging: Path, version_name: str, version_code: in
 
 
 def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
+    signing = _release_signing(args)
     tools = tools or Tools()
     directory = build_directory(args)
     debuggable = getattr(args, "debuggable", False)
@@ -819,6 +894,9 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
     if fidelityfx.is_file():
         libraries.append(fidelityfx)
     libraries.append(tools.libcxx)
+    validation = validation_library(args)
+    if validation is not None:
+        libraries.append(validation)
 
     staging = WORK / "package"
     if staging.exists():
@@ -841,7 +919,11 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
         run([tools.strip, "--strip-debug", "-o", target, library])
         stripped.append(target)
 
-    manifest = _build_manifest(tools, version_name, libraries)
+    # Reports must identify the bytes shipped in the APK, after stripping.
+    manifest = _build_manifest(tools, version_name, stripped)
+    manifest["validation_layer"] = validation is not None
+    if validation is not None:
+        manifest["validation_layer_sha256"] = hashlib.sha256(validation.read_bytes()).hexdigest()
     (staging / "pinyon_shift_build.json").write_text(json.dumps(manifest, indent=2) + "\n",
                                                      encoding="utf-8")
     # Android 15 devices with 16 KiB pages refuse libraries whose load
@@ -861,20 +943,41 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
                          strict_timestamps=False) as apk:
         apk.write(dex, "classes.dex")
         apk.write(staging / "pinyon_shift_build.json", "assets/pinyon_shift_build.json")
+        if validation is not None:
+            for name in ("LICENSE.txt", "NOTICE.txt"):
+                apk.write(ROOT / "android" / "validation" / name, "assets/validation/" + name)
         for library in stripped:
             apk.write(library, f"lib/{CONFIG['abi']}/{library.name}")
         for path, name in bundled_driver_files():
             apk.write(path, name)
+        for path in sorted((ROOT / "android" / "art").rglob("*")):
+            if path.is_file():
+                apk.write(path, "assets/" + path.relative_to(ROOT / "android" / "art").as_posix())
+        apk.write(ROOT / "config" / "supported-extracted-ms-2505.json",
+                  "assets/supported-game.json")
+        apk.write(ROOT / "config" / "supported-dlc.json", "assets/supported-dlc.json")
+        apk.write(ROOT / "config" / "supported-dumps.json", "assets/supported-dumps.json")
+        for mod in ("festival_pacing", "hidden_cars"):
+            source = ROOT / "mods_src" / "builtin" / mod
+            for path in sorted(source.rglob("*")):
+                if path.is_file():
+                    apk.write(path, "assets/builtin-mods/" + mod + "/" + path.relative_to(source).as_posix())
 
     output = WORK / "pinyon-shift.apk"
-    # Aligned and signed (v2) in tools/apk_sign.py rather than by zipalign,
-    # apksigner and keytool (TP-5): the key an earlier build made with keytool
-    # is carried over, so this build installs over it.
-    signing = WORK / "signing"
-    key, certificate = apk_sign.signing_key(signing, signing / "pinyon-shift-local.keystore")
-    output.write_bytes(apk_sign.sign(unsigned.read_bytes(), key, certificate))
-    # apksigner's v4 signature file from an earlier build; adb would offer it
-    # for an incremental install of this one.
+    if signing is not None:
+        aligned = staging / "aligned.apk"
+        signed = staging / "signed.apk"
+        run([tools.zipalign, "-f", "-P", "16", "4", unsigned, aligned])
+        run([tools.apksigner, "sign", *signing, "--out", signed, aligned])
+        run([tools.apksigner, "verify", "--verbose", signed])
+        run([tools.zipalign, "-c", "-P", "16", "4", signed])
+        signed.replace(output)
+    else:
+        signing_dir = WORK / "signing"
+        key, certificate = apk_sign.signing_key(signing_dir, signing_dir / "pinyon-shift-local.keystore")
+        signed = staging / "signed.apk"
+        signed.write_bytes(apk_sign.sign(unsigned.read_bytes(), key, certificate))
+        signed.replace(output)
     output.with_name(output.name + ".idsig").unlink(missing_ok=True)
     size = output.stat().st_size
     # What the package holds, for the launchers' Android panels (the same
@@ -1241,16 +1344,22 @@ def add_parser(commands) -> None:
     parser.add_argument("--accept-licenses", action="store_true",
                         help="answer yes to the Android SDK licenses sdkmanager shows")
     parser = command("build", build, "cross-compile the game and package the APK")
+    _signing_arguments(parser)
     parser.add_argument("--jobs", type=int)
     parser.add_argument("--title-update-v4", action="store_true",
                         help="the v4 title-update build (tools/build-v4.ps1 generates its code)")
     parser.add_argument("--debuggable", action="store_true",
                         help="let adb attach (thread dumps with debuggerd, run-as)")
+    parser.add_argument("--validation-layer", type=Path,
+                        help="package the ARM64 Khronos validation library in an opt-in debuggable diagnostic APK")
     parser = command("package", package, "package already built libraries into the APK")
+    _signing_arguments(parser)
     parser.add_argument("--title-update-v4", action="store_true",
                         help="package the v4 title-update build")
     parser.add_argument("--debuggable", action="store_true",
                         help="let adb attach (thread dumps with debuggerd, run-as)")
+    parser.add_argument("--validation-layer", type=Path,
+                        help="package the ARM64 Khronos validation library in an opt-in debuggable diagnostic APK")
     parser = command("shell", build_shell,
                      "build the prebuilt APK shell a release attaches (TP-5)")
     parser.add_argument("--output", type=Path, required=True, help="the shell archive to write")

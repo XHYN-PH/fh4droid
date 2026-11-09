@@ -90,6 +90,7 @@ class PinyonShiftApp final : public rex::ReXApp {
   // Under Hor+, present frames without the gameplay view 16:9 letterboxed.
   void ApplyMapView(bool open);
   bool map_view_open_ = false;
+  std::atomic<uint64_t> view_request_generation_{0};
   // LS-1.5: on the launch that created the config, raise LOW-SPEC 60 to
   // PERFORMANCE 120 on a capable machine.
   void ApplyFirstRunHardwareDefaults(const rex::ui::vulkan::VulkanDevice& device);
@@ -108,6 +109,7 @@ class PinyonShiftApp final : public rex::ReXApp {
   bool resize_listener_added_ = false;
 
   std::atomic_bool shutdown_recorded_{false};
+  std::atomic_bool android_menu_active_{false};
   // Created on first use: the presenter and input system it needs exist only
   // after runtime setup.
   std::unique_ptr<pinyon_shift::hostui::HostUi> host_ui_;
@@ -118,6 +120,7 @@ class PinyonShiftApp final : public rex::ReXApp {
   std::unique_ptr<pinyon_shift::ui::AchievementIcons> achievement_icons_;
   std::unique_ptr<pinyon_shift::ui::AchievementUiState> achievement_ui_state_;
   uint64_t achievement_listener_ = 0;
+  uint64_t android_achievement_listener_ = 0;
   std::unique_ptr<pinyon_shift::SaveBackups> save_backups_;
   // enabled_mods as the settings file had it at start (NP-7).
   std::string enabled_mods_;

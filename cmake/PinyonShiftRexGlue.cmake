@@ -161,6 +161,16 @@ if(REXSDK_DIR)
     set(REXGLUE_OUTPUT_DIRECTORY
         "${CMAKE_CURRENT_BINARY_DIR}/rexglue-artifacts"
         CACHE PATH "ReXGlue artifacts for the Pinyon Shift host build" FORCE)
+    # Budget ARM64 devices may lack LSE/RDM. Keep the public build at ARMv8-A;
+    # an explicitly selected ARMv8.2 build must record that stronger baseline.
+    # Apply the same architecture to the SDK and every bundled dependency.
+    if(ANDROID)
+        set(PINYON_SHIFT_ANDROID_MARCH "armv8-a" CACHE STRING
+            "-march for every Android target, the SDK and its libraries included")
+        add_compile_options(-march=${PINYON_SHIFT_ANDROID_MARCH})
+        set(REXGLUE_ARM64_MARCH ${PINYON_SHIFT_ANDROID_MARCH})
+    endif()
+    include("${PROJECT_SOURCE_DIR}/cmake/PinyonShiftAndroidSdkPatch.cmake")
     add_subdirectory("${REXSDK_DIR}" rexglue-sdk EXCLUDE_FROM_ALL)
     # NN-3.6: calls inside the runtime libraries bind locally instead of
     # through the PLT, as libmain's already do. Nothing interposes on their
@@ -194,7 +204,8 @@ if(REXSDK_DIR)
     set(PINYON_SHIFT_REXGLUE_CODEGEN
         "${REXSDK_DIR}/out/${_codegen_os}-${_codegen_arch}/Release/rexglue${CMAKE_HOST_EXECUTABLE_SUFFIX}"
         CACHE FILEPATH "The standalone ReXGlue generator")
-    if(NOT EXISTS "${PINYON_SHIFT_REXGLUE_CODEGEN}" AND NOT PINYON_SHIFT_HOST_TESTS_ONLY)
+    if(NOT EXISTS "${PINYON_SHIFT_REXGLUE_CODEGEN}" AND NOT PINYON_SHIFT_HOST_TESTS_ONLY
+       AND NOT PINYON_SHIFT_FROZEN_CODEGEN)
         message(FATAL_ERROR
             "The standalone ReXGlue generator is missing. Run tools/build-preview.ps1 "
             "so it can build the pinned generator before configuring the consumer.")

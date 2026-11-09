@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetLeft="18%" android:insetRight="18%"
+    android:insetTop="34%" android:insetBottom="34%">
+    <bitmap android:src="@drawable/fh4droid_mark" android:gravity="fill" />
+</inset>

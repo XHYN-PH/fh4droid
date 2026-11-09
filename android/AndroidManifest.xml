@@ -8,10 +8,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     android:installLocation="auto">
 
-    <!-- The renderer is Vulkan only; 1.3-class drivers are the floor. -->
+    <!-- Vulkan-only compatibility preview. Required capabilities are tested before play. -->
     <uses-feature
         android:name="android.hardware.vulkan.version"
-        android:version="0x403000"
+        android:version="0x401000"
         android:required="true" />
 
     <uses-feature
@@ -38,19 +38,8 @@
          title dereferences null on that path. Nothing contacts a server. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <!-- The setup screen copies the game files from the player's PC on the
-         local network (SetupActivity), over plain HTTP to the launcher: the
-         PC has no certificate a phone would trust, and a pairing code guards
-         the transfer. -->
-
-    <!-- When the PC's share offers a newer build of this app, the setup
-         screen hands it to the system installer (PackageInstaller), which
-         asks the player to confirm. Android also asks once to allow this app
-         to install apps. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-
     <application
-        android:label="Pinyon Shift"
+        android:label="FH4Droid"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false"
@@ -60,7 +49,7 @@
         android:appCategory="game"
         android:largeHeap="true"
         android:hardwareAccelerated="true"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:enableOnBackInvokedCallback="false">
 
         <!-- simpleperf from adb on a release build (AP-7.0): profiling only,
@@ -73,20 +62,41 @@
         <meta-data android:name="android.game_mode_config"
             android:resource="@xml/game_mode_config" />
 
-        <!-- The app icon: starts the game, or gets its files from the PC
-             first (ONE_CLICK_SETUP_BACKLOG A-4). -->
-        <activity
-            android:name="studio.deimos.pinyonshift.SetupActivity"
-            android:label="Pinyon Shift"
-            android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+        <provider android:name="studio.deimos.pinyonshift.ReportProvider"
+            android:authorities="ph.xhyn.fh4droid.reports"
+            android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name="studio.deimos.pinyonshift.LauncherActivity"
+            android:label="FH4Droid" android:theme="@style/FH4DroidTheme"
+            android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity>
+        <activity android:name="studio.deimos.pinyonshift.ContentActivity"
+            android:theme="@style/FH4DroidTheme"
+            android:screenOrientation="landscape" android:exported="false" />
+        <activity android:name="studio.deimos.pinyonshift.DriverProbeActivity"
+            android:theme="@style/FH4DroidTheme"
+            android:process=":driver_probe" android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|uiMode" />
+        <activity android:name="studio.deimos.pinyonshift.TouchEditorActivity"
+            android:theme="@style/FH4DroidTheme"
+            android:screenOrientation="landscape" android:exported="false" />
+        <activity
+            android:name="studio.deimos.pinyonshift.SetupActivity"
+            android:label="FH4Droid"
+            android:theme="@style/FH4DroidTheme"
+            android:screenOrientation="landscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode"
+            android:exported="true">
             <intent-filter>
-                <action android:name="studio.deimos.pinyonshift.SETUP" />
+                <action android:name="ph.xhyn.fh4droid.SETUP" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
             <meta-data android:name="android.app.shortcuts"
@@ -95,9 +105,10 @@
 
         <activity
             android:name="studio.deimos.pinyonshift.PinyonShiftActivity"
-            android:label="Pinyon Shift"
-            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
-            android:screenOrientation="sensorLandscape"
+            android:process=":game"
+            android:label="FH4Droid"
+            android:theme="@style/FH4DroidGameTheme"
+            android:screenOrientation="landscape"
             android:resizeableActivity="false"
             android:alwaysRetainTaskState="true"
             android:launchMode="singleInstance"

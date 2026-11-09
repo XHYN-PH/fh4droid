@@ -1,5 +1,7 @@
 # Android port backlog
 
+FH4Droid fork note: the current r7 minimum is Android 12/API 31 and ARMv8-A. Vulkan 1.1/1.2, Mali and Xclipse are experimental capability paths. See the [current review](releases/fh4droid-0.6.8-r7-review.md). The upstream plan and named measurements below are historical, including its API 33 and Vulkan 1.3 targets.
+
 Status: **open; created 2026-09-30** at `dev` checkpoint `542d2ae` (ShiftGlue
 `4de586b`). This is the detailed plan for NP-14 of the
 [native port backlog](NATIVE_PORT_BACKLOG.md#np-14-android), written as a

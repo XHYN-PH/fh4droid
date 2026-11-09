@@ -1,5 +1,15 @@
 # Pinyon Shift on Android
 
+## FH4Droid Android-only fork
+
+FH4Droid focuses on Android only. The `0.8.2-upstream-test1` testing build uses application ID `ph.xhyn.fh4droid`. Install the APK and choose your own supported USA retail ISO or complete extracted game folder; the phone does not compile the game. See the [fork release notes](releases/fh4droid-0.8.2-upstream-test1.md) for requirements and limitations. The upstream integration has not been tested on a physical Android device. The [current Android guide](../site/pages/android.md) describes the launcher, drawer, settings, profiles, controls and reports; the upstream sections below retain their named historical measurements.
+
+The current minimum is Android 13/API 33 with ARMv8-A. Vulkan 1.1/1.2, Mali and Xclipse are experimental capability paths, not qualified gameplay claims. The [70-item review](releases/fh4droid-0.6.8-r7-review.md) lists unresolved bugs and device tests.
+
+The developer build instructions and historical measurements below are inherited from upstream. Current FH4Droid source uses local ISO/folder import; its PC discovery, pairing, Wi-Fi transfer and network app-update client have been removed. Its private-build distribution policy describes upstream Pinyon Shift; this fork's prebuilt APK release is separate and contains compiled game translations. Raw game files, generated source, native build products and signing keys remain excluded from the source repository.
+
+## Upstream Android status
+
 **Status: alpha, for developers.** The game builds for Android, installs and
 plays through the Vulkan renderer. On the reference tablet (nubia NP05J,
 Snapdragon 8 Elite) the race runs at 60 fps at 1x until the device heats up,
@@ -92,88 +102,26 @@ uploaded. The repository refuses Android packages, libraries and signing keys
   free on the install drive. From a terminal, `pinyon.py android doctor
   --install` does the same (`--accept-licenses` answers yes).
 - The device: arm64, Android 13 (API 33) or later, a Vulkan 1.3 driver,
-  about 8 GB free, on the same network as the PC. USB debugging is needed only
+  about 8 GB free for an extracted folder. USB debugging is needed only
   for the adb commands.
 
-The native libraries target ARMv8.2-A. The
-[minimum-requirements audit](android/MINIMUM_REQUIREMENTS.md) traces the CPU,
-Vulkan and Android floors, the work needed to lower them and the hardware
-still needed to qualify broader support. The shipped requirements above
-remain in force.
+## Local installation and game import
 
-## From the PC to the device
+Install the signed FH4Droid APK through Android's installer. Open **Game files**
+and choose your supported USA base-game ISO or complete extracted folder.
+To use an extracted folder from a PC, copy it to the device over USB first,
+then choose the folder containing `default.xex`. The app checks it against the
+supported catalog before replacing an installation. Completed files are kept
+when an import is cancelled; select the same source to resume it.
 
-The launcher's source ZIP includes `config/performance/symbol-order-base.txt`
-and `config/performance/symbol-order-v4.txt`, which the base and v4 Android
-linkers require; the v4 file comes from a v4 probe build (#745). It contains only symbol names ordered
-by our local profiling tool, with no translated instructions or game assets.
-Clustering frequently called functions reduced `libmain.so` PSS from 52 MB to
-34-36 MB on the Odin 2 Portal's boot-to-race route (two runs per build;
-[NN-1.9](NEAR_NATIVE_RESEARCH.md)). If Ninja reports this file missing, update
-the launcher and its installed sources, then retry **Build APK**.
-The same applies if CMake reports `tests/camera_tuning_tests.cpp` missing:
-the source ZIP includes the host test sources checked during configuration.
+The long-press **Game files** shortcut opens the local importer. The launcher,
+importer, touch editor, driver probe and game stay in fixed landscape orientation.
+The left footer contains text links; the right shows the installed version and
+build number. App updates are installed manually through Android.
 
-In the launcher, once the game plays on the PC, choose **Android**:
-
-1. **Build APK** builds `.local/android/pinyon-shift.apk` (20 to 60 minutes
-   the first time), from title update v4 when you play v4 on the PC. The
-   panel shows where the package is, with **Show in folder** and **Save a
-   copy**. A failure is described in `.local/logs/android-error.json`.
-2. **Share on Wi-Fi** shows a QR code and a six-digit pairing code. Scan the
-   code with the device's camera (or open the address under it in the
-   device's browser), download the app and open it; Android asks once to
-   allow the browser to install apps. Windows asks once to allow the launcher
-   on private networks.
-3. The app opens its setup screen while the game files are missing. It finds
-   the PC by a broadcast on the local network (or takes the address the panel
-   shows), asks for the pairing code and lists what the PC offers: the game
-   files (7.2 GB, required), title update v4 (with a v4 package), imported
-   DLC, the Rally overlay, the PC's mods, its custom radio stations, the XE
-   mod and the PC's save. The save is never selected for you; when chosen,
-   the device's own save is first copied to
-   `files/state/backups/before-pc-save-<time>`. An interrupted copy resumes
-   where it stopped. Then **Play**.
-
-The mod rows carry the mods the PC has enabled, as it plays them. Before
-sharing, the launcher rebuilds their generated patches (`zz-db-patches`,
-`zz-archive-patches`) from the PC's game files, as every PC launch does;
-the device's game files come from the same disc, so the patched archives
-match. Because those patches are built for exactly the PC's set, the mods,
-custom radio and XE rows are copied together. On the device each mod
-folder in `files/state/mods` ends up as on the PC: files the PC no longer
-has move to `files/state/backups/before-pc-mods-<time>`, which also keeps
-the device's previous `enabled_mods`. `enabled_mods` is cleared while the
-copy runs (an interrupted copy plays unmodded) and set to the PC's list
-when it completes. Mods that only change how the game looks keep your save;
-XE plays its own new save (`user-xe`), as on the PC. Not shared: native
-mods (their library is a PC binary) and XE with a v4 package (XE is made
-for the base game). If the game has never started on the device, the list
-is applied at the second start, after the game has written its settings.
-
-When the PC shares a newer build of the app than the one installed (a
-higher version, or a later build of the same version), the setup screen
-says so after connecting and offers **Install update**. The app downloads
-the package from the share and hands it to Android's installer, which asks
-to confirm; Android also asks once to allow Pinyon Shift to install apps.
-The app closes while it updates; the save, settings and game files stay.
-A base package is not offered to a device that has title update v4
-installed, since a v4 save cannot be loaded by the base game again.
-
-The launcher serves only while its Android panel is open and sharing, only to
-private network addresses, and only the files it listed. Every request but
-the download page and the package needs the pairing code, which changes each
-time sharing starts; ten wrong codes stop the share. Nothing goes from the
-device to the PC.
-
-To copy more later, such as DLC imported afterwards, changed mods or a
-rebuilt app, long-press the app icon and choose **Get files from PC**. Without a network, copy the extracted game
-folder (`.local\game\base` in the install folder, the one holding
-`default.xex`) to the device over USB and choose it with **Choose folder** on
-the setup screen.
-
-With USB debugging on, **Install over USB** in the panel installs the package
-and copies the game with adb. From a terminal:
+The following commands are for developer builds and USB deployment.
+With USB debugging on, the tools can install the package and copy the game
+with adb. From a terminal:
 
 ```bash
 python tools/pinyon.py android doctor --install
@@ -194,17 +142,16 @@ python tools/pinyon.py android push-data
 `build` cross-compiles the game and packages `.local/android/pinyon-shift.apk`,
 signed with a key made on your PC. `push-data` copies the extracted game
 (7.2 GB, 2,400 files) into the app's folder on the device,
-`Android/data/studio.deimos.pinyonshift/files/game/base`; it resumes where it
+`Android/data/ph.xhyn.fh4droid/files/game/base`; it resumes where it
 stopped if interrupted. Saves, settings, logs and mods live beside it in
 `files/state`, with the same layout as on the PC, so a save copies between
 the two as a folder.
 
-Builds before October 2026 installed as `com.pinyonshift.fh1`, which Android
-treats as another app with its own folder. After installing the current
-package, `python tools/pinyon.py android migrate` copies the earlier
-install's saves, settings and drivers into the new folder (leaving the
-originals) and moves its game files; uninstall the old app once the game
-shows your save.
+FH4Droid installs separately as `ph.xhyn.fh4droid`. Upstream Pinyon Shift
+uses `studio.deimos.pinyonshift` (or `com.pinyonshift.fh1` for older builds).
+This fork does not migrate those installations automatically. Import the
+extracted game folder with **Choose folder**, and back up existing saves
+before copying progress between apps.
 
 DLC and the v4 title update work as on the PC, with the content copied into
 the device's state. Import and enable packages into a state folder on the PC
@@ -223,10 +170,9 @@ python tools/pinyon.py android push-title-update --state-root STATE
 
 A save written by v4 cannot be loaded by the base build afterwards, so keep a
 copy before its first v4 start. Offline 1000 Club needs
-`pinyon_shift_car_challenge_gate_probe` and `xam_report_live_signin` on. When
-the setup screen copies title update v4 from a PC with 1000 Club offline on,
-it writes both to `files/state/config/android-arguments.txt`, whose lines the
-game adds to its arguments at every start.
+`pinyon_shift_car_challenge_gate_probe` and `xam_report_live_signin` on. For a developer v4 build, put both flags in
+`files/state/config/android-arguments.txt`; the game adds that file’s lines
+to its arguments at every start.
 
 Start the game from the launcher icon, or:
 
@@ -241,15 +187,54 @@ crash reports and route output to `.local/android/device-logs/`.
 ## Controls
 
 A controller (built in, Bluetooth or USB) works as on the PC. On a touch
-screen, on-screen controls appear at the first touch: a steering stick
-wherever the left thumb lands, throttle (RT) and brake (LT) under the right
-thumb, A, B, X, Y, the bumpers, Back and Start. They hide 20 seconds after the
-last touch, so a controller player never sees them
-(`pinyon_shift_touch_controls` turns them off).
+screen, the default controls have separate left/right steering arrows,
+accelerator (RT) and brake (LT) pedal pictograms, A, B, X, Y, the bumpers,
+Back and Start, a right look stick, four separate D-pad directions and both
+stick clicks. Both arrows held together give neutral steering. Controls →
+Steering in the touch editor switches between Arrows and the original Stick,
+keeping saved positions for both. Icons use a shared PNG atlas independently of
+game fonts. Driving symbols show handbrake (A), shift up (B), shift down (X),
+rewind (Y), clutch (LB), camera (RB), map (Back) and pause (Start), with small
+button/action captions for menu prompts. These action names assume default game
+bindings. The D-pad remains independent of steering; L3/R3 press the stick
+buttons and the right stick controls the camera. All 20 editable controls,
+including the optional left steering stick, have shared antialiased PNG artwork.
+Held controls stay visible; global and per-control idle timers govern fading after
+release. Controller auto-hide can be changed in the editor
+(`pinyon_shift_touch_controls` turns the overlay off).
 
-Android's Back button or gesture opens SETTINGS, and inside the menus it steps
-back; tap a row to open or change it. SETTINGS also holds the trainer (with
-cheats on), SAVE PHOTO and the achievements, which have keyboard keys on the PC.
+The editor also provides immediate/120 ms/240 ms arrow response, optional sliding
+pedals (half input initially; slide up for more or down for less), high contrast,
+and optional touch vibration. The full-window Properties view groups tools under Control, Layout, Driving and
+Appearance; the page scrolls when needed. Position, size, opacity and response
+values are visible, including effective high-contrast opacity. Position updates
+while dragging. The control selector and position/size sliders support editing
+without drag gestures, with accessible value feedback. These changes have host tests and Android compilation
+checks; on-device gameplay and accessibility validation remain pending.
+
+Problem-report exports use separate completed ZIP files. Repeat export taps are
+blocked while a report is being prepared; a later export does not replace an
+already shared report. Advanced driver environment settings decode quoted TOML
+escapes before preflight, matching the saved string values.
+
+For maintainer releases, the Python Android build/package commands accept
+`--keystore`, `--key-alias`, `--storepass-file` and `--keypass-file` together to
+reuse an existing signing key. Passwords are read by the signer from private
+files. Incomplete release-signing arguments fail before compilation; they do not
+fall back to a new local key. APK packaging verifies signatures and 16 KiB ZIP
+alignment after signing. Before publishing an update, compare its certificate,
+application ID and version code with the previous APK. Keep keys, password files
+and signing backups outside the public source and release assets.
+
+When configuring an existing, reviewed generated-code snapshot, set
+`PINYON_SHIFT_FROZEN_CODEGEN=ON`. This uses the complete saved modules and stamp
+without requiring the standalone generator. It does not regenerate changed game
+inputs or generator settings; use matching source and SDK revisions, and retain
+the normal generator requirement for builds which regenerate code.
+
+Android's Back button or gesture opens the pause drawer, and inside the menus it steps
+back; tap a row to open or change it. The FH4Droid drawer also holds achievements and the separate-profile trainer.
+Android photo capture and minimap repositioning are omitted.
 Clicking both sticks (LS + RS) shows or hides the performance panel, F3 on a
 keyboard; SETTINGS > CONTROLLER > PERFORMANCE PANEL changes the buttons
 (`pad_chord_debug_overlay`).
@@ -344,11 +329,10 @@ and captures stay local; the Astra measurement gate remains open.
 
 | Symptom | Cause |
 | --- | --- |
-| The setup screen does not find the PC | The device and the PC are on different networks, the network blocks broadcasts, or Windows Firewall blocked the launcher: enter the address the launcher shows, and allow the launcher on private networks. |
+| Folder import rejects the source | Choose the complete supported base-game folder containing `default.xex`. Copy it to the device over USB before importing. |
 | The app closes at once | Started from adb without the game files: open it from the app icon, or run `push-data`. If logcat says `Cannot create the state folder`, files were copied into the app's folder by hand: run `push-data` again, which lets the app use them. |
 | `VULKAN_CAPABILITY_REPORT` in the log | The device's features, formats and memory, logged at every start; attach it to reports. |
-| The game closes at start on a Mali GPU (Google Tensor, Exynos, Dimensity) and the log says `doesn't support vertexPipelineStoresAndAtomics` | The GPU cannot write memory from vertex shaders. Experimental: open the setup screen (long-press the icon, **Get files from PC**) and tick **Allow GPUs without vertex shader stores**, which adds `--vulkan_require_vertex_pipeline_stores_and_atomics=false` to `state/config/android-arguments.txt`. Vertex shader memory export is then skipped, logged once per shader as `uses memory export`, so results can differ from other devices. Runs on Mali-G710 (Pixel 7 Pro). |
-| RESOLUTION SCALE offers only 1X | Higher scales need resolve buffers larger than a phone's shared memory holds; `android_allow_resolution_scale` lifts the limit for testing. |
+| Resolution or preset causes artifacts | Restore 100% raster scale and the default preset, restart and export a report. The Android UI offers 25–100%; phone-driver qualification is pending. |
 | `skipped a resolve` in the log | A guest copy the renderer cannot pack yet (one is known, in the title screen's attract sequence); the frame continues without it. |
 | No sound | No output device could be opened; the game runs silently instead of stopping. |
 
@@ -377,7 +361,7 @@ route at frame 1200 and shut down normally. This is a startup check; Rally
 driving and GPU performance on Android remain unqualified. Current artifact
 verification is recorded in ignored `.local/android/latest-apk-verification.json`.
 
-Bloom now defaults to OFF with a live toggle in Graphics settings. It zeros
+In the historical upstream qualification below, bloom defaulted to OFF with a live toggle in Graphics settings. It zeros
 the title's frame-local bloom scale while preserving exposure, tone mapping
 and weather data. A signed/aligned ARM64 build was installed on the Odin 2
 Portal and passed a private-state on/off/restore gameplay run through frame
@@ -402,3 +386,31 @@ receipt. Reusing an existing output directory previously triggered SDL thread
 crashes during static destruction on the Odin. A private rejection check and
 desktop subprocess check preserve that directory and emit the expected failure;
 the updated Odin run produces no corresponding native crash record.
+
+## Current mobile presentation
+
+The launcher shows the existing transparent FH4Droid logo without a backing box.
+Settings use Graphics, Controls, Audio, Interface, Gameplay and Advanced sections;
+Android Back opens Resume, Settings, Controls, More and Quit. The touch editor
+uses the whole window for placement, with a separate full-window Properties
+view and Save, Cancel, Test and Hide tools actions. The active custom layout is
+kept until the player explicitly applies a preset or saves an edited draft.
+
+`config/touch-artwork.json` generates the PNG loaded by Android and embedded
+byte-for-byte in the native overlay. `tools/generate-touch-artwork.py --check`
+validates both consumers without Pillow. Regeneration uses Pillow 11.3.0 and CairoSVG 2.8.2 from `tools/requirements-touch-artwork.txt`. The source SVGs use square 24-unit viewports, with proportions preserved. Lucide/Feather license notices ship in the Android resources and are available through More → About → Control artwork credits. The
+production mesh readback test covers all 20 symbols, captions, classic letters,
+pressed state and stick knobs; its optional PPM output is a software artwork
+proof, not an Android gameplay screenshot. Phone layout and legibility still
+need device testing.
+
+The fractional-resolution band-clear regression and its limits are documented
+in the [Android player guide](../site/pages/android.md#fractional-resolution-lines).
+The fix changes intermediate untiled-band clears only; guest texture layouts
+and 100% resolution remain unchanged.
+
+The current driving artwork uses thin utility symbols and translucent pedal
+faces with bevel highlights and grip grooves. Accelerator, brake and clutch
+use their pedal silhouette directly; the touch targets retain their saved size.
+Pressed modern pedals receive the same warm tint in native rendering and the
+editor. SVG gradients reference only definitions inside the same source file.
