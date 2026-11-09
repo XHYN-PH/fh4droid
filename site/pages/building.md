@@ -83,3 +83,9 @@ The package holds a self-contained launcher and a source archive. It excludes th
 ## Contributing
 
 Read [CONTRIBUTING.md](https://github.com/arcanite24/pinyon-shift/blob/dev/CONTRIBUTING.md) first. Repository checks reject disc images, executables, generated translations, extracted assets and build products. Commit subjects follow Conventional Commits.
+
+## Generated module completeness
+
+Build from the complete manifest, including SpeechFacade and XMediaFacade. A main-only translation cannot launch this game. If fresh main translations are combined with retained compatible facade translations, their module registry and the entrypoint's `register_modules` callback must also be retained. Configuration rejects an incomplete connection and Android packaging checks the actual linked registry and both registration exports.
+
+On a Linux or macOS base build with private translations present, build `pinyon_shift_recompiled_module_tests`. Run it with a game root, a new private test-state directory, the SpeechFacade library and the XMediaFacade library. It uses the actual generated entrypoint metadata and the SDK dispatcher to check both registry paths, module layouts, registration exports, every function mapping and the reported base-game startup targets. It does not launch gameplay or qualify an Android GPU.

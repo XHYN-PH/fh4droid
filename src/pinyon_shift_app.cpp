@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -30,6 +31,10 @@
 #include <rex/logging.h>
 #include <rex/perf/counter.h>
 #include <rex/runtime.h>
+#if defined(__ANDROID__)
+static_assert(offsetof(rex::PPCImageInfo, register_modules) == 32,
+              "Update the Android package module-registry verifier for this SDK");
+#endif
 #include <rex/system/gpu_plugin.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xam/content_manager.h>

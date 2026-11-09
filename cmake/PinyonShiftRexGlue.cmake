@@ -362,6 +362,8 @@ if(NOT EXISTS "${PINYON_SHIFT_GENERATED_DIR}/sources.cmake")
         "tools/setup-preview.ps1 with a supported disc image before configuring.")
 endif()
 include("${PINYON_SHIFT_GENERATED_DIR}/sources.cmake")
+include("${PROJECT_SOURCE_DIR}/cmake/PinyonShiftGeneratedModules.cmake")
+pinyon_shift_verify_generated_modules("${PINYON_SHIFT_GENERATED_ROOT}" "${PINYON_SHIFT_GENERATED_DIR}")
 set(PINYON_SHIFT_GENERATED_SOURCES ${GENERATED_SOURCES})
 # Runtime::Setup registers the entrypoint image through PPCFuncMappings.
 # Only facade DLLs need the separate generated registration entry point.

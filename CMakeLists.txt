@@ -518,3 +518,33 @@ set_target_properties(pinyon_shift_mod_hello_telemetry PROPERTIES
     OUTPUT_NAME hello_telemetry
     PREFIX ""
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mods/hello_telemetry/code")
+
+# This smoke test needs the private generated project and both real facades.
+if(UNIX AND NOT ANDROID AND NOT PINYON_SHIFT_TITLE_UPDATE_V4 AND
+   NOT PINYON_SHIFT_HOST_TESTS_ONLY AND NOT PINYON_SHIFT_HOST_OBJECTS_ONLY)
+    file(READ "${PINYON_SHIFT_GENERATED_DIR}/pinyon_shift_init.cpp" _module_test_init)
+    string(REGEX MATCH "const rex::PPCImageInfo PPCImageConfig = [{][^;]*;"
+        _module_test_image "${_module_test_init}")
+    file(STRINGS "${PINYON_SHIFT_GENERATED_DIR}/pinyon_shift_pch.h" _module_test_macros
+        REGEX "^#define (REX_IMAGE_BASE|REX_IMAGE_SIZE|REX_CODE_BASE|REX_CODE_SIZE|REXCRT_HEAP) ")
+    list(JOIN _module_test_macros "\n" _module_test_layout)
+    set(_module_test_metadata "${CMAKE_CURRENT_BINARY_DIR}/module-test-image.cpp")
+    file(GENERATE OUTPUT "${_module_test_metadata}" CONTENT
+"#include <rex/image_info.h>
+#include <rex/ppc/func.h>
+${_module_test_layout}
+void RegisterRecompiledModules(rex::system::KernelState*);
+const PPCFuncMapping PPCFuncMappings[] = {{0,nullptr}};
+const PPCFoldedRange PPCFoldedRanges[] = {{}};
+const uint64_t PPCFoldedHash=0;
+extern const rex::PPCImageInfo PPCImageConfig;
+${_module_test_image}
+")
+    add_executable(pinyon_shift_recompiled_module_tests EXCLUDE_FROM_ALL
+        tests/modules/recompiled_module_test.cpp "${_module_test_metadata}"
+        "${PINYON_SHIFT_GENERATED_DIR}/module_registry.cpp")
+    target_link_libraries(pinyon_shift_recompiled_module_tests PRIVATE
+        rex::runtime ${CMAKE_DL_LIBS})
+    add_dependencies(pinyon_shift_recompiled_module_tests
+        pinyon_shift_SpeechFacade_default pinyon_shift_XMediaFacade_default)
+endif()

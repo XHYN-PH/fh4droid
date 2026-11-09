@@ -6,7 +6,7 @@ description: FH4Droid launcher, game files, settings, controls and troubleshooti
 ---
 
 
-FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source targets the 0.8.2-upstream-test1 APK, integrating stable Pinyon Shift 0.8.2. An uploaded vivo V2425A report covers one r7 session; the unreleased follow-up below has not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
+FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source targets the 0.8.2-upstream-test2 APK, integrating stable Pinyon Shift 0.8.2. An uploaded vivo V2425A report covers one r7 session; the unreleased follow-up below has not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
 
 ## Current changes and limits
 
@@ -49,6 +49,10 @@ Folder import compares all catalogued paths and sizes, verifies the executables 
 Import/check screens show current-file progress and offer cooperative cancellation between reads. Completed files are kept; choose the same source folder to resume a stopped copy. Successful folder copies clear the previous ISO selection only after the copy finishes. Cancellation may wait for a file-provider read to return. In ISO mode, the existing content check covers the disc image; it does not also check the locally cached support files.
 
 The Android app imports local files. PC discovery, pairing, Wi-Fi copying and network APK updates have been removed. Copy your own extracted folder to the device over USB before selecting it; install app updates through Android’s installer. File-replacing overlays work in ISO mode, but mods which add files to directory enumerations should use the complete extracted folder.
+
+## Startup checks
+
+The first 0.8.2 upstream test APK aborted while loading XMedia, before the title screen. Its refreshed main-only generated tree omitted the callback that registers SpeechFacade and XMediaFacade, even though both libraries were packaged. Test 2 restores that metadata. Configuration now rejects a missing or disconnected module registry, and packaging requires the linked registry and both libraries' registration exports. A host smoke test exercises the generated entrypoint callback and all 50,935 facade mappings with the matching SDK. This covers the reported startup failure; Android gameplay still requires device testing.
 
 ## Mods, DLC and prepared shaders
 

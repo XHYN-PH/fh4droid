@@ -77,6 +77,7 @@ class ReleaseSigningTests(unittest.TestCase):
                  mock.patch.object(pinyon_android,"_git",return_value="test"), \
                  mock.patch.object(pinyon_android,"run",side_effect=run), \
                  mock.patch.object(pinyon_android.subprocess,"run",return_value=SimpleNamespace(stdout="LOAD 0x4000\n",returncode=0)), \
+                 mock.patch.object(pinyon_android.android_module_check,"verify"), \
                  mock.patch("builtins.print"):
                 self.assertEqual(pinyon_android.package(args,tools),0)
                 good=(work/"pinyon-shift.apk").read_bytes();fail_sign=True

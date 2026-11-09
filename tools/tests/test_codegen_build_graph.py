@@ -48,6 +48,18 @@ def emit_snapshot(root):
             '#ifdef _WIN32\n__declspec(dllexport)\n#endif\n'
             "int entry() { return " + " + ".join(values) + "; }\n"
         )
+        if module == "default":
+            sources.append("module_registry.cpp")
+            files["module_registry.cpp"] = (
+                '// speechfacade_default.xex pinyon_shift_SpeechFacade_default\n'
+                '// xmediafacade_default.xex pinyon_shift_XMediaFacade_default\n'
+                'void RegisterRecompiledModules() {}\n'
+            )
+            files["pinyon_shift_init.cpp"] += (
+                'void RegisterRecompiledModules();\n'
+                'struct Image { void (*register_modules)(); };\n'
+                'Image image{.register_modules = RegisterRecompiledModules};\n'
+            )
         files["sources.cmake"] = "set(GENERATED_SOURCES\n" + "".join(
             f'  "${{CMAKE_CURRENT_LIST_DIR}}/{source}"\n' for source in sources
         ) + ")\n"
@@ -87,10 +99,14 @@ class CodegenBuildGraphTests(unittest.TestCase):
                 sdk = root / "sdk"
                 sdk.mkdir()
                 (sdk / "CMakeLists.txt").write_text(
-                    "add_library(rexruntime INTERFACE)\n"
+                    "file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/empty.cpp \"int sdk_stub;\")\n"
+                    "add_library(rexruntime STATIC ${CMAKE_CURRENT_BINARY_DIR}/empty.cpp)\n"
                     "add_library(rex::runtime ALIAS rexruntime)\n"
                     "function(rexglue_configure_module_target target)\nendfunction()\n"
                 )
+                (root / "cmake").mkdir()
+                for helper in ("PinyonShiftAndroidSdkPatch.cmake", "PinyonShiftGeneratedModules.cmake"):
+                    shutil.copyfile(ROOT / "cmake" / helper, root / "cmake" / helper)
                 (root / "config").mkdir()
                 shutil.copyfile(ROOT / "config/release.json", root / "config/release.json")
                 launcher = root / ("codegen.cmd" if os.name == "nt" else "codegen.sh")

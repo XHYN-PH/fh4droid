@@ -36,6 +36,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import android_module_check
 import apk_sign
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -922,6 +923,12 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
         target = staging / "lib" / library.name
         run([tools.strip, "--strip-debug", "-o", target, library])
         stripped.append(target)
+
+    try:
+        android_module_check.verify(stripped, tools.llvm_bin / _exe("llvm-readelf"),
+                                    tools.llvm_bin / _exe("llvm-nm"))
+    except ValueError as error:
+        raise AndroidError(str(error)) from error
 
     # Reports must identify the bytes shipped in the APK, after stripping.
     manifest = _build_manifest(tools, version_name, stripped)

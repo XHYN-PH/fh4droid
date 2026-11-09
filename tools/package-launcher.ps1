@@ -82,7 +82,7 @@ $include = @(
     'config/supported-extracted-ms-2505.json', 'tools/verify-extracted-game.ps1', 'docs/EXTRACTED_GAME_INPUT.md',
     'config/supported-dlc.json', 'tools/manage-fh1-dlc.py', 'tools/manage-dlc.ps1', 'tools/prepare-fh1-rally.py', 'tools/patch-fh1-archive.py',
     'config/rexglue', 'include', 'mods_src', 'src', 'tests/config', 'tests/native_renderer',
-    'tests/save', 'tests/ui', 'tests/dlc', 'tests/mod', 'tests/telemetry',
+    'tests/save', 'tests/ui', 'tests/dlc', 'tests/mod', 'tests/modules', 'tests/telemetry',
     'tests/head_tracking',
     'tests/camera_tuning_tests.cpp',
     'tools/fh1_archive_extract.cpp', 'tools/fh1_texture_import.cpp', 'tools/thread_sampler.cpp', 'tools/vram_balloon.cpp',

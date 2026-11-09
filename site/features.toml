@@ -138,7 +138,7 @@ cells = [
   "yes: launcher ZIP",
   "yes: launcher archive; **Add to Steam** for Game Mode",
   "partly: launcher app; not notarized, so it is approved once in System Settings",
-  "yes: signed APK; local ISO or extracted-folder import",
+  "yes: signed APK; local ISO or extracted-folder import; generated module registry and packaged registration exports checked",
 ]
 
 [[platform]]
