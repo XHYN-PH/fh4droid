@@ -242,8 +242,13 @@ final class SettingsHub {
     FestivalUi.onRefresh(choice, () -> {
       String saved = value(a, o.key, o.initial), live = active(runtime, o.key);
       boolean different = live != null && !SettingValues.same(saved, live);
+      boolean automatic=live!=null&&saved.equals("-1")&&MobileSettings.automaticResource(o.key);
+      if(automatic)different=false;
       choice.setText(MobileSettings.label(o,saved));
+      String unavailable=SettingAvailability.reason(a,o.key);choice.setEnabled(unavailable.isEmpty());
       state.setText(different?(o.restart?"Restart pending · active: ":"Active: ")+MobileSettings.label(o,live):o.restart?"Next launch":"");state.setVisibility(state.getText().length()==0?View.GONE:View.VISIBLE);
+      if(!unavailable.isEmpty()){state.setText(unavailable);state.setVisibility(View.VISIBLE);}
+      else if(automatic){state.setText("Automatic · active: "+MobileSettings.label(o,live));state.setVisibility(View.VISIBLE);}
       choice.setContentDescription(o.title + ": " + MobileSettings.label(o, saved)
           + (different ? ". Active: " + MobileSettings.label(o, live) : ""));
       name.setText((isPinned(a, o.key) ? "• " : "") + o.title);
@@ -556,6 +561,7 @@ final class SettingsHub {
       FestivalUi.action(a, rows, "My graphics profiles", () -> GraphicsProfilePage.show(a,runtime));
       pref(a, rows, "Sustained performance mode", "sustained_mode", false);
       pref(a, rows, "Detailed GPU timings · next launch", "detailed_gpu", false);
+      pref(a, rows, "Extended comparison capture · up to 64 MB · next launch", "extended_capture", false);
       rows.addView(FestivalUi.text(a,
           "Sustained mode lowers the frame target "
               + "under severe heat, then restores it after "

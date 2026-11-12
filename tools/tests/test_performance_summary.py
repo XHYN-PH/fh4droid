@@ -24,6 +24,20 @@ FIELDS = [
 
 
 class PerformanceSummaryTests(unittest.TestCase):
+    def test_resource_gauges_are_not_summed_and_cpu_work_is(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            capture=pathlib.Path(temporary)/"resources.csv"
+            fields=FIELDS+["process_resident_mb","process_cpu_ns","gpu_upload_bytes"]
+            with capture.open("w",encoding="utf-8",newline="") as stream:
+                writer=csv.DictWriter(stream,fieldnames=fields);writer.writeheader()
+                for frame,ram,cpu in [(0,9999,9999),(20000,100,1000000),(20000,200,3000000)]:
+                    writer.writerow(dict.fromkeys(fields,0)|{"frame_time_us":frame,"process_resident_mb":ram,"process_cpu_ns":cpu,"gpu_upload_bytes":16})
+            summary=MODULE.summarize(capture)
+            self.assertEqual(summary["resources"]["gauges"]["process_resident_mb"]["peak"],200)
+            self.assertEqual(summary["resources"]["gauges"]["process_resident_mb"]["mean"],150)
+            self.assertEqual(summary["resources"]["work_totals"]["process_cpu_ns"],4000000)
+            self.assertEqual(summary["resources"]["work_per_frame"]["gpu_upload_bytes"],16)
+            self.assertIn("Resource use",MODULE.markdown(summary))
     def test_emits_native_renderer_gpu_timing_buckets(self):
         with tempfile.TemporaryDirectory() as temporary:
             capture = pathlib.Path(temporary) / "capture.csv"

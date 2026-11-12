@@ -1497,6 +1497,9 @@ void PinyonShiftApp::OnPostSetup() {
             graphics->provider())) {
       if (auto* device = provider->vulkan_device()) {
         const auto& properties = device->properties();
+#if defined(__ANDROID__)
+        pinyon_shift::android::SetCoarseShadingAvailable(properties.pipelineFragmentShadingRate);
+#endif
         pinyon_shift::diagnostics::RecordEvent(
             "graphics.device.selected",
             {{"backend", "vulkan"},
@@ -1858,6 +1861,7 @@ void PinyonShiftApp::OnGuestThreadExit(rex::system::XThread* thread) {
 }
 
 bool PinyonShiftApp::OnWindowCloseRequested() {
+  if(close_started_.exchange(true,std::memory_order_acq_rel))return shutdown_recorded_.load(std::memory_order_acquire);
   // ReXGlue 0.9 deliberately hard-exits after accepting a window-close
   // request, so OnDestroy/OnShutdown are not reached on that path. Record the
   // clean qualification boundary before allowing the SDK to terminate.

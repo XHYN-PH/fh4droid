@@ -342,13 +342,16 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
     const bool core13=std::min(p.apiVersion,app.apiVersion)>=VK_API_VERSION_1_3;
     const bool dependencies=p.apiVersion>=VK_API_VERSION_1_2 || (has(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME)&&has(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME));
     const bool dynamic_supported=!force_legacy && (core13 || (has(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)&&dependencies));
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR shading{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
+    void* optional=has(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME)?&shading:nullptr;
     VkPhysicalDeviceDynamicRenderingFeatures f13{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES};
+    f13.pNext=optional;
     VkPhysicalDeviceVulkan12Features f12{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-    f12.pNext = dynamic_supported ? &f13 : nullptr;
+    f12.pNext = dynamic_supported ? static_cast<void*>(&f13) : optional;
     VkPhysicalDeviceFeatures2 f{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    f.pNext = p.apiVersion>=VK_API_VERSION_1_2 ? static_cast<void*>(&f12) : dynamic_supported ? static_cast<void*>(&f13) : nullptr;
+    f.pNext = p.apiVersion>=VK_API_VERSION_1_2 ? static_cast<void*>(&f12) : dynamic_supported ? static_cast<void*>(&f13) : optional;
     features(device, &f);
     if (p.apiVersion < VK_API_VERSION_1_1 ||
         !f.features.independentBlend || !f.features.fragmentStoresAndAtomics ||
@@ -447,6 +450,8 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
              ",\"api\":" + std::to_string(p.apiVersion) +
              ",\"driver\":" + std::to_string(p.driverVersion) +
              ",\"dynamic_rendering\":" + (dynamic ? "true" : "false") +
+             ",\"coarse_shading_supported\":" + (shading.pipelineFragmentShadingRate ? "true" : "false") +
+             ",\"bc_textures_supported\":" + (f.features.textureCompressionBC ? "true" : "false") +
              ",\"renderer\":" + Quote(dynamic ? "native" : "compatibility") +
              ",\"descriptor_indexing\":" +
              (f12.runtimeDescriptorArray && f12.descriptorBindingPartiallyBound

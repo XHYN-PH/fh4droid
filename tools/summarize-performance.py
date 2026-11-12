@@ -76,6 +76,22 @@ NATIVE_GPU_TIMING_COLUMNS = (
     "native_selection_gpu_timing_samples",
     "native_gpu_timing_drops",
 )
+RESOURCE_GAUGES = (
+    "memory_device_usage_mb", "memory_device_budget_mb", "texture_cache_mb",
+    "process_resident_mb", "fh1_surface_mb", "fh1_surface_count",
+    "audio_frame_latency_us", "buffer_queue_depth",
+)
+WORK_COUNTERS = (
+    "process_cpu_ns", "fh1_title_thread_cpu_time_ns", "fh1_gpu_thread_cpu_time_ns",
+    "gpu_decoder_cpu_ns", "gpu_recorder_cpu_ns", "gpu_submission_busy_ns",
+    "gpu_thread_idle_ns", "gpu_thread_reg_mem_wait_ns", "gpu_thread_fence_wait_ns",
+    "texture_request_cpu_time_ns", "texture_request_timing_samples",
+    "texture_resolve_reload_cpu_time_ns", "texture_resolve_reload_bytes",
+    "gpu_renderings", "gpu_upload_splits_vertex", "gpu_upload_splits_index",
+    "gpu_upload_splits_texture", "gpu_upload_bytes", "xma_frames_decoded",
+    "xma_decoder_opens", "xma_work_event_sets", "host_path_lookup_misses",
+    *(f"thread_cpu_slot{i}_ns" for i in range(8)),
+)
 class CaptureError(ValueError):
     """Raised when a capture cannot produce a trustworthy summary."""
 
@@ -163,6 +179,8 @@ def summarize(path: pathlib.Path) -> dict[str, Any]:
                 + ", ".join(missing_native_gpu_timing)
             )
         frame_times: list[float] = []
+        gauges = {name: [] for name in RESOURCE_GAUGES if name in columns}
+        work = {name: 0.0 for name in WORK_COUNTERS if name in columns}
         totals = {name: 0.0 for name in TOTAL_COLUMNS}
         memexport_totals = {name: 0.0 for name in MEMEXPORT_COLUMNS} if available_memexport else None
         resolve_totals = ({name: 0.0 for name in RESOLVE_READBACK_COLUMNS}
@@ -223,6 +241,10 @@ def summarize(path: pathlib.Path) -> dict[str, Any]:
             if frame_time == 0:
                 continue
             frame_times.append(frame_time)
+            for name, samples in gauges.items():
+                samples.append(finite_number(row[name], column=name, row_number=row_number))
+            for name in work:
+                work[name] += finite_number(row[name], column=name, row_number=row_number)
             for name, value in row_totals.items():
                 totals[name] += value
             for name, value in row_memexport.items():
@@ -277,6 +299,15 @@ def summarize(path: pathlib.Path) -> dict[str, Any]:
             },
         },
     }
+    if gauges or work:
+        result["resources"] = {
+            "gauges": {name: {"mean": round(sum(values)/len(values), 3),
+                               "p95": round(percentile(values, .95), 3),
+                               "peak": max(values)} for name, values in gauges.items()},
+            "work_totals": {name: int(value) if value.is_integer() else value for name, value in work.items()},
+            "work_per_frame": {name: round(value/len(frame_times), 3) for name, value in work.items()},
+            "note": "CPU counters measure work, not GPU time; zero GPU timing samples mean unavailable. Memory gauges repeat the latest sample. Thread slots use the capture's perf_thread_cpu prefixes.",
+        }
     if memexport_totals is not None:
         result["memexport_counters"] = {
             name: int(value) if value.is_integer() else value for name, value in memexport_totals.items()
@@ -455,6 +486,11 @@ def markdown(summary: dict[str, Any]) -> str:
             f"- Native selection: {means['native_selection'] if means['native_selection'] is not None else 'n/a'} us",
             f"- Dropped samples: {timing['counters']['native_gpu_timing_drops']}",
         ])
+    if "resources" in summary:
+        lines.extend(["", "## Resource use", "", "| Gauge | Mean | P95 | Peak |", "| --- | ---: | ---: | ---: |"])
+        for name, values in summary["resources"]["gauges"].items():
+            lines.append(f"| {name} | {values['mean']:.3f} | {values['p95']:.3f} | {values['peak']:.3f} |")
+        lines.extend(["", summary["resources"]["note"]])
     return "\n".join(lines) + "\n"
 
 

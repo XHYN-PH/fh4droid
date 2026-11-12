@@ -28,6 +28,8 @@ final class MobileSettings {
           "Cockpit and hood cameras only. Requires the built-in immersive camera mod.", "0", ".5", "1", "1.5"),
       o("Gameplay", "pinyon_shift_camera_head", "Camera head motion", "1", false,
           "Cockpit and hood cameras only. Requires the built-in immersive camera mod.", "0", ".5", "1", "1.5"),
+      o("Performance", "vulkan_texture_memory_prealloc_mb", "Texture pool reserve", "-1", true,
+          "Automatic reserves 64 MB on low-RAM or up to 4 GB devices, 128 MB up to 6 GB, and 256 MB otherwise. Textures can grow beyond this reserve. Lower values reduce initial allocation, not the guest address space.", "-1", "0", "64", "128", "256", "512"),
       o("Graphics", "vulkan_texture_max_size", "Texture size", "0", true,
           "Smaller textures use less graphics memory. Original preserves the "
               + "game's detail.",
@@ -58,7 +60,7 @@ final class MobileSettings {
               + "targets need a faster device.",
           "30", "40", "60", "120"),
       o("Performance", "vulkan_pipeline_creation_threads", "Shader workers", "-1", true,
-          "Automatic uses up to two workers on Android to leave CPU time for "
+          "Automatic uses one worker on low-memory or four-core devices, up to two otherwise, to leave CPU time for "
               + "the game. More workers can finish preparation sooner but compete "
               + "with gameplay.",
           "-1", "1", "2", "4"),
@@ -67,6 +69,8 @@ final class MobileSettings {
           "Off completes cached pipeline preparation before play. On reaches "
               + "the title sooner but may cause early stutters.",
           "false", "true"),
+      o("Performance", "vulkan_aot_prewarm_threads", "Background preparation workers", "-1", true,
+          "Automatic uses one worker on low-memory or four-core devices, two otherwise. Prepared free-roam pipelines run below normal priority, leaving title and audio work ahead of speculative preparation.", "-1", "1", "2", "4"),
       o("Performance", "host_present_fps_limit", "Additional display limit", "0", false,
           "Automatic follows game frames. An additional cap can reduce display "
               + "work; keep it at or above the game frame limit.",
@@ -200,7 +204,7 @@ final class MobileSettings {
     if (option.key.equals("host_present_fps_limit") && str.equals("0")) {
       return "Automatic";
     }
-    if (option.key.equals("vulkan_pipeline_creation_threads") && str.equals("-1")) {
+    if (automaticResource(option.key) && str.equals("-1")) {
       return "Automatic";
     }
     if (option.key.equals("vulkan_texture_max_size") && str.equals("0")) {
@@ -236,6 +240,7 @@ final class MobileSettings {
       return str;
     return str + "%";
   }
+  static boolean automaticResource(String key){return key.equals("vulkan_pipeline_creation_threads")||key.equals("vulkan_aot_prewarm_threads")||key.equals("vulkan_texture_memory_prealloc_mb");}
 
   static String summary(Activity activity) throws NumberFormatException {
     int i;

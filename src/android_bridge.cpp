@@ -7,6 +7,7 @@
 #include <rex/ui/vulkan/android_gpu_driver.h>
 
 #include <filesystem>
+#include <atomic>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -18,8 +19,10 @@
 #include "ui/touch_pad.h"
 extern "C" __attribute__((used, visibility("default")))
 const char fh4droid_native_bridge_abi[] = "fh4droid-native-bridge:r7-budget-controls-v1";
+extern "C" void rex_android_preparation_progress(uint64_t* values);
 namespace {
 std::mutex bridge_mutex;
+std::atomic<int> coarse_shading_available{-1};
 std::function<void(bool)> menu_handler;
 std::function<void()> settings_handler;
 std::function<std::string()> achievements_handler;
@@ -33,6 +36,7 @@ std::string Read(JNIEnv *env, jstring value) {
 }
 }  // namespace
 namespace pinyon_shift::android {
+void SetCoarseShadingAvailable(bool available){coarse_shading_available.store(available?1:0,std::memory_order_release);}
 void RecordCleanExit(){rex::ui::vulkan::CallAndroidActivityMethod("recordCleanExit");}
 void InstallBridge(std::function<void(bool)> menu,
                    std::function<void()> settings,
@@ -81,6 +85,7 @@ void RefreshAchievements() {
   std::filesystem::rename(temporary, path, ec);
 }
 void ClearBridge() {
+  coarse_shading_available.store(-1,std::memory_order_release);
   pinyon_shift::ui::TouchPad::Get().Rumble(0, 0);
   pinyon_shift::ui::TouchPad::Get().SetRumbleCallback({});
   std::lock_guard lock(bridge_mutex);
@@ -193,15 +198,27 @@ Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeFrameCount(JNIEnv *,
                                                                     jclass) {
   return jlong(rex::perf::SourceFrameCount());
 }
+extern "C" JNIEXPORT jint JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeCoarseShadingSupport(JNIEnv*,jclass){return coarse_shading_available.load(std::memory_order_acquire);}
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativePreparation(JNIEnv* env,jclass) {
+  uint64_t progress[4]{};rex_android_preparation_progress(progress);
+  jlong values[4];for(size_t i=0;i<4;i++)values[i]=jlong(progress[i]);
+  auto out=env->NewLongArray(4);if(out)env->SetLongArrayRegion(out,0,4,values);return out;
+}
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativePerformance(JNIEnv *env,jclass) {
   const jlong values[] = {
       rex::perf::GetSnapshotCounter(rex::perf::CounterId::kFrameTimeUs),
       jlong(rex::perf::ProcessResidentBytes()/1048576),
       rex::perf::GetSnapshotCounter(rex::perf::CounterId::kMemoryDeviceUsageMb),
-      rex::perf::GetSnapshotCounter(rex::perf::CounterId::kMemoryDeviceBudgetMb)};
-  auto out=env->NewLongArray(4);
-  if(out)env->SetLongArrayRegion(out,0,4,values);
+      rex::perf::GetSnapshotCounter(rex::perf::CounterId::kMemoryDeviceBudgetMb),
+      rex::perf::GetSnapshotCounter(rex::perf::CounterId::kProcessCpuNs),
+      rex::perf::GetSnapshotCounter(rex::perf::CounterId::kGuestFrameGpuTimeNs),
+      rex::perf::GetSnapshotCounter(rex::perf::CounterId::kGuestFrameGpuTimingSamples),
+      rex::perf::GetSnapshotCounter(rex::perf::CounterId::kTextureCacheMb)};
+  auto out=env->NewLongArray(8);
+  if(out)env->SetLongArrayRegion(out,0,8,values);
   return out;
 }
 extern "C" JNIEXPORT jboolean JNICALL

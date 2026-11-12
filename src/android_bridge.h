@@ -8,4 +8,5 @@ void InstallBridge(std::function<void(bool)> menu,std::function<void()> settings
 void RefreshAchievements();
 void ClearBridge();
 void RecordCleanExit();
+void SetCoarseShadingAvailable(bool available);
 }
