@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "version": "0.8.2-polish-test3",
-  "android_version_code": 803,
+  "version": "0.8.2-racing-ui-test4",
+  "android_version_code": 804,
   "channel": "preview",
   "repository": "https://github.com/XHYN-PH/fh4droid"
 }

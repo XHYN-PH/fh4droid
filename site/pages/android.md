@@ -6,7 +6,7 @@ description: FH4Droid launcher, game files, settings, controls and troubleshooti
 ---
 
 
-FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source targets the 0.8.2-polish-test3 preview APK, integrating stable Pinyon Shift 0.8.2. An uploaded vivo V2425A report covers one r7 session; the unreleased follow-up below has not been gameplay-tested on a physical device. The race-grid launcher described below is implemented in source for the next APK; the existing 0.8.2-polish-test3 package retains its earlier launcher. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
+FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source targets the 0.8.2-racing-ui-test4 preview APK, integrating stable Pinyon Shift 0.8.2. An uploaded vivo V2425A report covers one r7 session; the unreleased follow-up below has not been gameplay-tested on a physical device. This test build includes the approved race-grid launcher; 0.8.2-polish-test3 retains its earlier launcher. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
 
 ## Current changes and limits
 
