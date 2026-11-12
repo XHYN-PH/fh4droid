@@ -370,7 +370,10 @@ def release_version() -> tuple[str, int]:
     release = json.loads((ROOT / "config" / "release.json").read_text(encoding="utf-8"))
     name = str(release["version"])
     major, minor, patch = (int(part) for part in name.split("-")[0].split(".")[:3])
-    return name, major * 10000 + minor * 100 + patch
+    code=release.get("android_version_code",major * 10000 + minor * 100 + patch)
+    if type(code) is not int or code<=0 or code>2100000000:
+        raise AndroidError("android_version_code must be a positive Android version code")
+    return name, code
 
 
 # doctor's exit status when the missing packages can be installed without

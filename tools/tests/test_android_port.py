@@ -136,7 +136,17 @@ class AndroidPortTest(unittest.TestCase):
         name, code = pinyon_android.release_version()
         self.assertEqual(name, release["version"])
         major, minor, patch = (int(part) for part in name.split("-")[0].split(".")[:3])
-        self.assertEqual(code, major * 10000 + minor * 100 + patch)
+        self.assertEqual(code, release.get("android_version_code",major * 10000 + minor * 100 + patch))
+
+    def test_android_version_override_is_validated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);(root/"config").mkdir();file=root/"config/release.json"
+            with mock.patch.object(pinyon_android,"ROOT",root):
+                for code in (True,0,-1,2100000001,"803"):
+                    file.write_text(json.dumps({"version":"0.8.2-test3","android_version_code":code}))
+                    with self.assertRaises(pinyon_android.AndroidError):pinyon_android.release_version()
+                file.write_text(json.dumps({"version":"0.8.2-test3","android_version_code":803}))
+                self.assertEqual(pinyon_android.release_version(),("0.8.2-test3",803))
 
     def test_android_presets_target_the_pinned_platform(self):
         presets = json.loads((ROOT / "CMakePresets.json").read_text(encoding="utf-8"))

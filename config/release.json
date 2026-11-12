@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
-  "version": "0.8.2-upstream-test2",
+  "version": "0.8.2-polish-test3",
+  "android_version_code": 803,
   "channel": "preview",
   "repository": "https://github.com/XHYN-PH/fh4droid"
 }

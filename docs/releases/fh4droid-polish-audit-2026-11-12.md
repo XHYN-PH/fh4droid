@@ -27,6 +27,8 @@ retain the internal built-in marker.
 
 ## Main-source and Android choices
 
+This table records the original audit. Its choice numbers are superseded by the [36-item performance-first follow-up](fh4droid-performance-polish-2026-11-12.md), which records subsequent implementation and remaining device checks.
+
 These are stable choice numbers for the next work. Reported symptoms are not
 asserted to persist in test 2 without a current reproduction. Optimization
 candidates have no measured performance gain yet.

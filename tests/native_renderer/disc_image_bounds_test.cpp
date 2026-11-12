@@ -6,6 +6,8 @@
 #include <iostream>
 #include <vector>
 #include <chrono>
+#include <random>
+#include <algorithm>
 namespace {
 void Put32(std::vector<unsigned char>& bytes,size_t at,uint32_t n) {
   for(unsigned i=0;i<4;++i)bytes[at+i]=static_cast<unsigned char>(n>>(i*8));
@@ -33,6 +35,20 @@ int main(int argc,char** argv) {
   bad=good;Put32(bad,40*2048+4,40);Put32(bad,40*2048+8,2048);bad[40*2048+12]=16;assert(!Open(file,bad));
   bad=good;Put32(bad,32*2048+24,0xffffffff);assert(!Open(file,bad));
   bad.resize(32*2048+20);assert(!Open(file,bad));
+  if(argc==3&&std::string(argv[1])=="--fuzz"){
+    const int iterations=std::clamp(std::stoi(argv[2]),1,10000);
+    std::mt19937 random(0x46483444);
+    for(int i=0;i<iterations;i++){
+      bad=good;
+      for(int field=0;field<8;field++){
+        size_t offset=field<4?32*2048+20+random()%8:40*2048+random()%32;
+        bad[offset]=static_cast<unsigned char>(random());
+      }
+      if(i%3==0)bad.resize(random()%bad.size());
+      (void)Open(file,bad);
+    }
+    std::cout<<"PASS: "<<iterations<<" malformed disc parser corpus cases\n";
+  }
   std::filesystem::remove(file);
   std::cout<<"PASS: native disc reader accepts valid images and rejects bounds/cycles\n";
 }

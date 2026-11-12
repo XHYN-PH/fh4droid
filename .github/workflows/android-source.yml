@@ -1,0 +1,38 @@
+name: Android source checks
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android-host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare the pinned Android platform
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Apply reviewed Android SDK changes
+        run: |
+          for patch in "$GITHUB_WORKSPACE"/cmake/patches/shiftglue-fh4droid-*.patch; do
+            git -C thirdparty/shiftglue-sdk apply "$patch"
+          done
+          python tools/check-android-sdk-patches.py
+      - name: Compile Android UI and exercise recovery and settings writers
+        run: python tools/test-android-mobile.py
+      - name: Check Python tooling and shared artwork
+        run: |
+          python -m unittest discover -s tools/tests
+          python tools/generate-touch-icons.py --check
+          python tools/generate-touch-artwork.py --check
+      # APK generation/signing stays on a private build host. Never upload
+      # translated game code, original executables or signing backups here.

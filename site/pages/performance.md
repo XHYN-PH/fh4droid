@@ -108,3 +108,10 @@ Free roam and races at 1x with the in-game presets.
 The Astra throttles after about three minutes: 37 to 39 fps at 40 to 44 °C skin temperature, 26 to 28 above 44.5 °C. These are rough single-device measurements.
 
 Methods, logs and the full tables are in [docs/PERFORMANCE.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/PERFORMANCE.md) and the records in [benchmarks/](https://github.com/arcanite24/pinyon-shift/tree/dev/benchmarks).
+
+
+## Android comparison tooling
+
+`tools/android-performance-suite.py` prepares controlled experiment overlays for copied test state. It covers texture size/reserve, shader concurrency, effects, scale/upscalers, forced BC decoding and pacing. The comparator requires device, driver, build, route, seed digest, cache state and thermal provenance; missing or confounded results are unqualified. These are measurement tools, not new phone FPS results.
+
+The per-frame summary distinguishes memory gauges (mean/P95/peak) from CPU/upload work totals. Diagnostic Android launches request thread CPU attribution for Guest, GPU, Vulkan, XMA decoder and Audio prefixes; GPU timestamp profiling remains opt-in. See [Android resource policy](android.md#android-resource-policy) for the current defaults and their qualification limits.

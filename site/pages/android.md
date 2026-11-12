@@ -6,7 +6,7 @@ description: FH4Droid launcher, game files, settings, controls and troubleshooti
 ---
 
 
-FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source targets the 0.8.2-upstream-test2 APK, integrating stable Pinyon Shift 0.8.2. An uploaded vivo V2425A report covers one r7 session; the unreleased follow-up below has not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
+FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source targets the 0.8.2-polish-test3 preview APK, integrating stable Pinyon Shift 0.8.2. An uploaded vivo V2425A report covers one r7 session; the unreleased follow-up below has not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
 
 ## Current changes and limits
 
@@ -52,7 +52,7 @@ The Android app imports local files. PC discovery, pairing, Wi-Fi copying and ne
 
 ## Source polish follow-up
 
-The user confirmed that upstream test 2 starts and drives. The 12 November source follow-up fixes stale native configuration after a failed reload, commits hardware defaults with their completion marker, preserves interrupted-session reporting on forced closes, and improves damaged-mod recovery. Ordinary mod imports strip the internal built-in marker; installed built-ins open their details, and the content manager uses the shared controller navigation. These changes are source-only until the next APK is built. See the [full source and Android audit](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-polish-audit-2026-11-12.md) for evidence, tests and 24 remaining choices.
+The user confirmed that upstream test 2 starts and drives. The 12 November source follow-up fixes stale native configuration after a failed reload, commits hardware defaults with their completion marker, preserves interrupted-session reporting on forced closes, and improves damaged-mod recovery. Ordinary mod imports strip the internal built-in marker; installed built-ins open their details, and the content manager uses the shared controller navigation. These changes are source-only until the next APK is built. See the [full source and Android audit](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-polish-audit-2026-11-12.md) for the original findings. The [performance and recovery follow-up](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-performance-polish-2026-11-12.md) retains all 36 performance-first choices, implemented changes and remaining device qualification.
 
 ## Startup checks
 
@@ -64,7 +64,9 @@ Open More → Mods, DLC and shaders while the game is closed. Import one mod ZIP
 
 The DLC tab accepts original Marketplace packages, folders and ZIPs nested at most three levels. It checks the supported catalog, raw package hash, extracted payload and licence header. Imports start disabled. Unsupported inputs are reported individually; completed imports survive cancellation. Enable dependencies first. UDLC links explain the compatible inputs; no content is downloaded automatically. Rally requires a verified prepared adapter folder from the matching upstream PC tools before it can be enabled. This APK targets the supported USA base game, without title update v4.
 
-The Shaders tab imports a compatible prepared `.xpso` pipeline list from the player's files. Preparation can run before play or during the title screen. Import checks structure and version; the renderer validates shader hashes. It cannot eliminate all shader-compilation pauses.
+Content discovery runs on a worker and preserves the open detail page, scroll and focus after changes. Invalid options do not hide mod recovery. Durable publication journals recover interrupted mod/DLC/Rally changes before import or Play. Space checks cover expansion/staging, and unknown-size copies check free space while reading. Picker names remain readable in import results.
+
+The Shaders tab imports a compatible prepared `.xpso` pipeline list from the player's files. Preparation can run before play or during the title screen. Import checks structure and version; the renderer validates shader hashes. It cannot eliminate all shader-compilation pauses. A small in-game status shows actual cached-pipeline preparation counts; reports retain failures/cancellation. Automatic shader concurrency uses one worker on low-memory/four-core devices and up to two otherwise. Background preparation retains its lower priority.
 
 The game menu opens upstream's achievement screen with categories, counted progress, nearest unlocks, tracking and notifications. The launcher keeps its offline summary. Live chase-camera controls and the 80–200% global FOV setting are in Settings. Graceful Quit to launcher requests the upstream shutdown path. None of these features supplies Xbox LIVE service access.
 
@@ -99,6 +101,16 @@ Phone tilt is independent of the Arrows / Stick layout choice. If tilt is enable
 Achievements shows current progress with cached artwork. The trainer operates on a separate modded profile; enabling it requires a restart. Opt-in sustained mode requests supported Android performance mode and temporarily caps a severe thermal state at 30 FPS, or keeps a lower selected limit. It restores the saved target after a minute at light-or-lower severity without rewriting the preset. Adreno experiments are gated to matching hardware and provide a reset; they can reduce stability.
 
 Android Back opens a five-action pause drawer: Resume, Settings, Controls, More and Quit. Settings use six categories: Graphics, Controls, Audio, Interface, Gameplay and Advanced. Controls separates touch, phone and physical-controller options. Search/favourites and section Reset/Undo are secondary tools. Advanced → Original game settings opens the original host menu for controller mapping and other existing features. Android photo capture and minimap repositioning are omitted.
+
+## Android resource policy
+
+Automatic texture reserve is 64 MiB on low-RAM/up-to-4-GiB devices, 128 MiB up to 6 GiB, and 256 MiB otherwise. Explicit choices are retained. It is an initial reserve, not a hard memory limit or a smaller guest address space. The optional Budget preview selects 512-pixel textures; 256 remains an explicit choice. Balanced preserves original textures. These alternatives need phone quality/performance comparisons.
+
+Advanced → Extended comparison capture raises the diagnostic CSV bound from 16 to 64 MiB for long tests. Report exports keep a bounded tail and identify truncation; ordinary launches keep detailed CSV/GPU profiling off.
+
+Surface refresh hints follow the lower active game/presentation cap. Real memory pressure still trims reloadable graphics resources; merely hiding the window no longer forces a purge. Normal Android diagnostics sample every five seconds; explicit comparisons use one-second Android samples plus the per-frame CSV. Automatic resource settings show their effective value without falsely calling it a pending restart.
+
+The selected-driver probe exposes BC and fragment-shading-rate availability. Coarse shading and prepared immersive-camera controls explain unavailable dependencies. Quit displays the backup/closing state and rejects repeated requests; only native completion marks a clean exit. Reports include the last host action and content transaction phase.
 
 ## Saves
 
