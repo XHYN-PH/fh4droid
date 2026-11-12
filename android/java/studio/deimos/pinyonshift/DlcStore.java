@@ -38,8 +38,11 @@ final class DlcStore {
         }return out;
     }
     static String importFiles(Context c,List<File> sources)throws Exception{
+        return importFiles(c,sources,Collections.emptyMap());
+    }
+    static String importFiles(Context c,List<File> sources,Map<File,String> displayNames)throws Exception{
         return ContentFiles.locked(c,()->{int[] found={0};List<String> skipped=new ArrayList<>();long[] budget={ContentFiles.MAX_BYTES,ContentFiles.MAX_FILES};File stage=ContentFiles.temporary(c,"dlc-");
-            try{for(File source:sources){if(source.isDirectory())for(File file:ContentFiles.files(source))scanSafely(c,file,file.getName(),stage,0,found,budget,skipped);else scanSafely(c,source,source.getName(),stage,0,found,budget,skipped);}
+            try{for(File source:sources){if(source.isDirectory())for(File file:ContentFiles.files(source))scanSafely(c,file,file.getName(),stage,0,found,budget,skipped);else scanSafely(c,source,displayNames.getOrDefault(source,source.getName()),stage,0,found,budget,skipped);}
                 String report=found[0]+" verified DLC package(s) imported or already installed.";if(!skipped.isEmpty())report+="\n\nSkipped inputs:\n"+String.join("\n",skipped);if(found[0]==0&&skipped.isEmpty())report="No supported Marketplace package was found. Choose original packages or ZIPs containing them.";return report;
             }finally{ContentFiles.delete(stage);}});
     }
@@ -57,6 +60,7 @@ final class DlcStore {
                     FileOperation.check();ZipEntry entry=entries.nextElement();if(++count>ContentFiles.MAX_FILES||--budget[1]<0)throw new IOException("Too many DLC archive entries.");if(entry.isDirectory())continue;
                     if(entry.getSize()>budget[0])throw new IOException("DLC archives exceed the size limit.");
                     File file=new File(stage,UUID.randomUUID()+".input");
+                    ContentFiles.requireSpace(stage,Math.max(0,entry.getSize()));
                     try{try(InputStream in=zip.getInputStream(entry);OutputStream out=new FileOutputStream(file)){budget[0]-=ContentFiles.copy(in,out,budget[0]);}scanSafely(c,file,entry.getName(),stage,depth+1,found,budget,skipped);}
                     finally{Files.deleteIfExists(file.toPath());}
                 }
@@ -80,6 +84,7 @@ final class DlcStore {
             if(!known){variants.put(sha);previous.put("variants",variants);long mask=variantMask(item,previous);byte[] merged=Arrays.copyOf(Files.readAllBytes(header(c,id).toPath()),332);for(int i=0;i<4;i++)merged[328+i]=(byte)(mask>>>(8*i));previous.put("license_mask",Long.toHexString(mask).toUpperCase(Locale.ROOT));previous.put("header_sha256",ContentFiles.hex(MessageDigest.getInstance("SHA-256").digest(merged)));metadata(c,id,merged,previous,()->null);}
             found[0]++;return;
         }
+        ContentFiles.requireSpace(stage,item.getLong("expanded_size"));
         File extracted=new File(stage,"extracted-"+UUID.randomUUID());ContentNative.extractDlc(source,extracted,id);FileOperation.check();
         File payload=new File(extracted,TITLE+"/00000002/"+id),savedHeader=new File(extracted,TITLE+"/Headers/00000002/"+id+".header");
         String digest=payloadDigest(payload,item);if(!digest.equals(item.getString("payload_sha256")))throw new IOException("Extracted DLC content failed verification.");
@@ -88,9 +93,8 @@ final class DlcStore {
         metadata(c,id,header,record,()->{ContentFiles.publish(payload,content(c,id,false));return null;});ContentFiles.delete(extracted);found[0]++;
     }
     private static void metadata(Context c,String id,byte[] header,JSONObject record,ContentFiles.Work<Void> publish)throws Exception{
-        File headerFile=header(c,id),recordFile=record(c,id);byte[] oldHeader=headerFile.isFile()?Files.readAllBytes(headerFile.toPath()):null,oldRecord=recordFile.isFile()?Files.readAllBytes(recordFile.toPath()):null;
-        try{ContentFiles.atomic(headerFile,header);ContentFiles.atomic(recordFile,record.toString().getBytes(StandardCharsets.UTF_8));publish.run();}
-        catch(Exception error){try{if(oldHeader==null)Files.deleteIfExists(headerFile.toPath());else ContentFiles.atomic(headerFile,oldHeader);if(oldRecord==null)Files.deleteIfExists(recordFile.toPath());else ContentFiles.atomic(recordFile,oldRecord);}catch(IOException restore){error.addSuppressed(restore);}throw error;}
+        ContentTransaction.run(state(c),()->{File headerFile=header(c,id),recordFile=record(c,id);ContentTransaction transaction=ContentTransaction.current();transaction.watch(headerFile);transaction.watch(recordFile);
+            ContentFiles.atomic(headerFile,header);ContentFiles.atomic(recordFile,record.toString().getBytes(StandardCharsets.UTF_8));publish.run();return null;});
     }
     static String payloadDigest(File root,JSONObject expected)throws Exception{
         List<File> files=ContentFiles.files(root);if(files.size()!=expected.getInt("file_count"))throw new IOException("DLC file count differs from the catalog.");
@@ -121,8 +125,8 @@ final class DlcStore {
             JSONArray requires=item.optJSONArray("requires");if(enabled&&requires!=null)for(int i=0;i<requires.length();i++)if(!content(c,requires.getString(i),true).isDirectory())throw new IOException("Enable "+packageInfo(c,requires.getString(i)).getString("display_name")+" first.");
             if(!enabled)for(JSONObject dependent:list(c)){JSONArray needed=dependent.optJSONArray("requires");if(!dependent.optBoolean("enabled")||needed==null)continue;for(int i=0;i<needed.length();i++)if(id.equals(needed.getString(i)))throw new IOException("Disable "+dependent.getString("display_name")+" first.");}
             if(enabled&&id.equals(RALLY)){if(!new File(state(c),"cache/rally_adapter/preparation.json").isFile())throw new IOException("Import the prepared Rally adapter folder before enabling Rally.");RallyPreparation.verifyInstalled(c);}
-            File source=content(c,id,!enabled),target=content(c,id,enabled);if(target.exists())return null;Files.createDirectories(target.getParentFile().toPath());Files.move(source.toPath(),target.toPath(),StandardCopyOption.ATOMIC_MOVE);
-            try{if(id.equals(RALLY))ModStore.refreshDatabaseLocked(c);}catch(Exception error){try{Files.move(target.toPath(),source.toPath(),StandardCopyOption.ATOMIC_MOVE);}catch(IOException restore){error.addSuppressed(restore);}throw error;}return null;});
+            File source=content(c,id,!enabled),target=content(c,id,enabled);if(target.exists())return null;
+            ContentTransaction.run(state(c),()->{ContentTransaction.current().move(source,target);if(id.equals(RALLY))ModStore.refreshDatabaseLocked(c);return null;});return null;});
     }
     private DlcStore(){}
 }

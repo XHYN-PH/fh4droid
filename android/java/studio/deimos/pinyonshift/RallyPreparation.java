@@ -12,13 +12,10 @@ final class RallyPreparation {
     static void importFolder(Context c,File source)throws Exception{
         ContentFiles.locked(c,()->{
             File root=validate(c,source,false),stage=ContentFiles.temporary(c,"rally-");
-            File target=new File(DlcStore.state(c),"cache/rally_adapter"),backup=new File(target.getParentFile(),"rally-rollback-"+UUID.randomUUID());boolean previous=target.exists(),installed=false;
+            File target=new File(DlcStore.state(c),"cache/rally_adapter");
             try{
                 File adapter=new File(stage,"adapter");ContentFiles.copyTree(root,adapter);
-                if(previous)Files.move(target.toPath(),backup.toPath(),StandardCopyOption.ATOMIC_MOVE);
-                try{Files.move(adapter.toPath(),target.toPath(),StandardCopyOption.ATOMIC_MOVE);installed=true;if(DlcStore.content(c,DlcStore.RALLY,true).isDirectory())ModStore.refreshDatabaseLocked(c);}
-                catch(Exception error){try{if(installed)ContentFiles.delete(target);if(previous)Files.move(backup.toPath(),target.toPath(),StandardCopyOption.ATOMIC_MOVE);}catch(IOException restore){error.addSuppressed(restore);}throw error;}
-                if(previous)try{ContentFiles.delete(backup);}catch(IOException cleanup){android.util.Log.w("FH4Droid","Previous Rally cache retained",cleanup);}
+                ContentTransaction.run(DlcStore.state(c),()->{ContentTransaction.current().replace(adapter,target);if(DlcStore.content(c,DlcStore.RALLY,true).isDirectory())ModStore.refreshDatabaseLocked(c);return null;});
             }finally{ContentFiles.delete(stage);}return null;
         });
     }

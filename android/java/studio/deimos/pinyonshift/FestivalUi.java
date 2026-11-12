@@ -24,6 +24,7 @@ final class FestivalUi {
   static final int GLASS = 0xd9101116, GLASS_SELECTED = 0xe61d0c17, GLASS_FOCUS = 0xf0301424,
                    STROKE = 0x2effffff;
   static final int FULL_PAGE = 0x7f0a7f04;
+  static final int FOCUS_KEY = 0x7f0a7f05;
   private static final int SCROLL_STATE = 0x7f0a7f01;
   private static final int REFRESH = 0x7f0a7f02;
   private static final int PAGE_SCROLL = 0x7f0a7f03;
@@ -31,6 +32,7 @@ final class FestivalUi {
     int y;
     boolean restoring;
     View focus;
+    String focusKey;
   }
   interface PanelHost {
     void showPanel(String title, View body);
@@ -719,8 +721,8 @@ final class FestivalUi {
     scroll.post(() -> {
       if (body.getTag(PAGE_SCROLL) != scroll)
         return;
-      if (state.focus != null && state.focus.isAttachedToWindow())
-        state.focus.requestFocus();
+      View focus=state.focus!=null&&state.focus.isAttachedToWindow()?state.focus:findFocusKey(body,state.focusKey);
+      if(focus!=null)focus.requestFocus();
       scroll.scrollTo(0, state.y);
       state.restoring = false;
     });
@@ -753,6 +755,7 @@ final class FestivalUi {
     if (body.getParent() instanceof ScrollView && !state.restoring) {
       state.y = ((ScrollView) body.getParent()).getScrollY();
       state.focus = body.findFocus();
+      if(state.focus!=null)state.focusKey=focusKey(state.focus);
       state.restoring = true;
     }
   }
@@ -762,6 +765,14 @@ final class FestivalUi {
       ViewGroup group = (ViewGroup) view;
       for (int i = 0; i < group.getChildCount(); i++) rememberTree(group.getChildAt(i));
     }
+  }
+  static void transferPageState(View previous,View replacement){
+    remember(previous);if(previous.getTag(SCROLL_STATE) instanceof PageState)replacement.setTag(SCROLL_STATE,previous.getTag(SCROLL_STATE));
+  }
+  private static String focusKey(View view){if(view.getTag(FOCUS_KEY) instanceof String)return (String)view.getTag(FOCUS_KEY);CharSequence label=view.getContentDescription();if(label==null&&view instanceof TextView)label=((TextView)view).getText();return label==null?null:label.toString();}
+  private static View findFocusKey(View view,String key){
+    if(key==null)return null;if(view.isFocusable()&&key.equals(focusKey(view)))return view;
+    if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++){View found=findFocusKey(group.getChildAt(i),key);if(found!=null)return found;}}return null;
   }
   private static void motion(View v, boolean horizontal) {
     v.animate().cancel();

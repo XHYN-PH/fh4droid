@@ -17,12 +17,33 @@ final class ContentFiles {
     static final long MAX_BYTES=8L*1024*1024*1024;
     static final int MAX_FILES=100000;
     interface Work<T>{T run()throws Exception;}
+    static void recoverForLaunch(Context c)throws Exception{
+        File state=new File(MobileConfig.base(c),"state");Files.createDirectories(state.toPath());
+        try(RandomAccessFile file=new RandomAccessFile(new File(state,"android-content.lock"),"rw");
+            FileChannel channel=file.getChannel();FileLock lock=channel.tryLock()){
+            if(lock==null)throw new IOException("A content operation is running. Wait for it to finish before playing.");
+            ContentTransaction.recover(state);
+        }catch(OverlappingFileLockException error){throw new IOException("A content operation is running.",error);}
+    }
+    static long treeBytes(File root)throws IOException{
+        long total=0;for(File file:files(root)){if(file.length()>MAX_BYTES-total)throw new IOException("Content exceeds the size limit.");total+=file.length();}return total;
+    }
+    static long requiredSpace(long bytes)throws IOException{
+        if(bytes<0||bytes>MAX_BYTES)throw new IOException("Content size is invalid.");
+        return bytes+64L*1024*1024; // Keep room for journal/config writes.
+    }
+    static void requireSpace(File destination,long bytes)throws IOException{
+        File volume=destination.getAbsoluteFile();while(!volume.exists()&&volume.getParentFile()!=null)volume=volume.getParentFile();
+        long required=requiredSpace(bytes),available=volume.getUsableSpace();
+        if(available<required)throw new IOException("Not enough free storage. Need about "+((required+1048575)/1048576)+" MB free for staging; "+available/1048576+" MB is available.");
+    }
     static <T>T locked(Context c,Work<T> work)throws Exception{
         File state=new File(MobileConfig.base(c),"state");Files.createDirectories(state.toPath());
         try(RandomAccessFile file=new RandomAccessFile(new File(state,"android-content.lock"),"rw");
             FileChannel channel=file.getChannel();FileLock lock=channel.tryLock()){
             if(lock==null)throw new IOException("Another content operation is running.");
             if(GameFiles.running(c))throw new IOException("Quit the game before changing mods or DLC.");
+            ContentTransaction.recover(state);
             return work.run();
         }catch(OverlappingFileLockException error){throw new IOException("Another content operation is running.",error);}
     }
@@ -46,9 +67,20 @@ final class ContentFiles {
         for(int n;(n=input.read(bytes))!=-1;){FileOperation.check();if(n==0)continue;total+=n;if(total>limit)throw new IOException("Content exceeds the size limit.");output.write(bytes,0,n);}
         return total;
     }
+    static long copyToFile(InputStream input,File target,long limit)throws IOException{
+        requireSpace(target,0);Files.createDirectories(target.getParentFile().toPath());
+        long total=0,nextCheck=0;byte[] bytes=new byte[128*1024];
+        try(OutputStream output=new FileOutputStream(target)){
+            for(int n;(n=input.read(bytes))!=-1;){FileOperation.check();if(n==0)continue;if(n>limit-total)throw new IOException("Content exceeds the size limit.");
+                if(total>=nextCheck){requireSpace(target,4L*1024*1024);nextCheck=total+4L*1024*1024;}output.write(bytes,0,n);total+=n;}
+        }return total;
+    }
     static void unzip(File archive,File root)throws IOException{
         Set<String> seen=new HashSet<>();long remaining=MAX_BYTES;int count=0;
         try(ZipFile zip=new ZipFile(archive)){
+            long expanded=0;Enumeration<? extends ZipEntry> sizes=zip.entries();
+            while(sizes.hasMoreElements()){ZipEntry entry=sizes.nextElement();if(!entry.isDirectory()){if(entry.getSize()<0||entry.getSize()>MAX_BYTES-expanded)throw new IOException("Archive expanded size is invalid.");expanded+=entry.getSize();}}
+            requireSpace(root,expanded);
             Enumeration<? extends ZipEntry> entries=zip.entries();
             while(entries.hasMoreElements()){
                 FileOperation.check();ZipEntry entry=entries.nextElement();String name=safePath(entry.getName());
@@ -76,8 +108,8 @@ final class ContentFiles {
                 if(name.indexOf('/')>=0||!names.add(name.toLowerCase(Locale.ROOT))||--budget[1]<0)throw new IOException("Invalid or duplicate folder entry.");
                 File target=new File(root,name);
                 if(DocumentsContract.Document.MIME_TYPE_DIR.equals(cursor.getString(2))){Files.createDirectories(target.toPath());copyDocument(c,tree,childId,target,depth+1,budget,visited);}
-                else{Files.createDirectories(target.getParentFile().toPath());try(InputStream in=c.getContentResolver().openInputStream(DocumentsContract.buildDocumentUriUsingTree(tree,childId));OutputStream out=new FileOutputStream(target)){
-                    if(in==null)throw new IOException("File is unavailable.");budget[0]-=copy(in,out,budget[0]);}FileOperation.progress(name,MAX_BYTES-budget[0],0);}
+                else{try(InputStream in=c.getContentResolver().openInputStream(DocumentsContract.buildDocumentUriUsingTree(tree,childId))){
+                    if(in==null)throw new IOException("File is unavailable.");budget[0]-=copyToFile(in,target,budget[0]);}FileOperation.progress(name,MAX_BYTES-budget[0],0);}
             }
         }
     }
@@ -100,6 +132,7 @@ final class ContentFiles {
         if(Files.isSymbolicLink(current.toPath()))throw new IOException("Content path contains a symbolic link.");return current.isFile()?current:null;
     }
     static void copyTree(File source,File destination)throws IOException{
+        requireSpace(destination,treeBytes(source));
         Files.createDirectories(destination.toPath());long remaining=MAX_BYTES;
         for(File file:files(source)){
             String relative=source.toPath().relativize(file.toPath()).toString();File target=new File(destination,relative);Files.createDirectories(target.getParentFile().toPath());
@@ -107,13 +140,8 @@ final class ContentFiles {
         }
     }
     static void publish(File source,File destination)throws IOException{
-        Files.createDirectories(destination.getParentFile().toPath());
-        if(Files.isSymbolicLink(destination.toPath()))throw new IOException("Content destination is invalid.");
-        File backup=new File(destination.getParentFile(),"."+destination.getName()+"-rollback-"+UUID.randomUUID());boolean moved=destination.exists();
-        if(moved)Files.move(destination.toPath(),backup.toPath(),StandardCopyOption.ATOMIC_MOVE);
-        try{Files.move(source.toPath(),destination.toPath(),StandardCopyOption.ATOMIC_MOVE);}
-        catch(IOException error){if(moved)try{Files.move(backup.toPath(),destination.toPath(),StandardCopyOption.ATOMIC_MOVE);}catch(IOException restore){error.addSuppressed(restore);}throw error;}
-        if(moved)try{delete(backup);}catch(IOException cleanup){android.util.Log.w("FH4Droid","Previous content retained after a successful update",cleanup);}
+        try{ContentTransaction.run(destination.getParentFile(),()->{ContentTransaction.current().replace(source,destination);return null;});}
+        catch(IOException error){throw error;}catch(Exception error){throw new IOException("Content publication failed.",error);}
     }
     static void atomic(File target,byte[] bytes)throws IOException{
         Files.createDirectories(target.getParentFile().toPath());Path stage=Files.createTempFile(target.getParentFile().toPath(),"content-",".part");

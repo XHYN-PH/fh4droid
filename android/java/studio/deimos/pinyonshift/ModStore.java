@@ -41,7 +41,7 @@ final class ModStore {
             List<File> manifests=new ArrayList<>();for(File file:ContentFiles.files(source))if(file.getName().equals("mod.toml"))manifests.add(file);
             if(manifests.size()!=1)throw new IOException("Choose one mod containing a single mod.toml manifest.");
             JSONObject data=ContentNative.manifest(manifests.get(0));String id=name(data.optString("name"));if(new File(root(c),id).exists())throw new IOException("This mod is already installed. Disable and remove it before importing a replacement.");File stage=ContentFiles.temporary(c,"mod-");
-            try{File content=new File(stage,id);copyImportedDirectory(manifests.get(0).getParentFile(),content,builtin);manifest(content);validateNativeFiles(content);ContentFiles.publish(content,new File(root(c),id));}
+            try{File content=new File(stage,id);copyImportedDirectory(manifests.get(0).getParentFile(),content,builtin);manifest(content);validateNativeFiles(content);ContentTransaction.run(state(c),()->{ContentFiles.publish(content,new File(root(c),id));return null;});}
             finally{ContentFiles.delete(stage);}return null;
         });
     }
@@ -139,6 +139,7 @@ final class ModStore {
                 if(database==null)database=baseDatabase(c,stage);
                 if(!database.isFile()||Files.isSymbolicLink(database.toPath()))throw new IOException("The game database is unavailable. Import the game files again.");
                 File payload=new File(stage,GENERATED),copy=new File(payload,"game/media/db/gamedb.slt");Files.createDirectories(copy.getParentFile().toPath());
+                ContentFiles.requireSpace(stage,Math.min(ContentFiles.MAX_BYTES,database.length()*2));
                 try(InputStream in=new FileInputStream(database);OutputStream out=new FileOutputStream(copy)){ContentFiles.copy(in,out,512L*1024*1024);}
                 SQLiteDatabase sql=SQLiteDatabase.openDatabase(copy.getPath(),null,SQLiteDatabase.OPEN_READWRITE|SQLiteDatabase.NO_LOCALIZED_COLLATORS);
                 try{sql.beginTransaction();for(int i=0;i<scripts.size();i++){FileOperation.check();String text=ModSql.substitute(ContentFiles.text(scripts.get(i),1024*1024),choices.get(i));for(String statement:ModSql.statements(text))sql.execSQL(statement);}sql.setTransactionSuccessful();}
@@ -164,20 +165,13 @@ final class ModStore {
             options==null?null:options.toString().getBytes(StandardCharsets.UTF_8),prepared,generated);
     }
     static void commitFiles(File config,File optionFile,File mods,List<String> on,byte[] options,File prepared,File generated)throws IOException{
-        byte[] oldConfig=config.isFile()?Files.readAllBytes(config.toPath()):null,oldOptions=optionFile.isFile()?Files.readAllBytes(optionFile.toPath()):null;
-        Files.createDirectories(mods.toPath());File backup=new File(mods,".database-rollback-"+UUID.randomUUID());boolean previous=generated.exists(),installed=false;
-        if(previous)Files.move(generated.toPath(),backup.toPath(),StandardCopyOption.ATOMIC_MOVE);
-        try{
-            if(prepared!=null){Files.move(prepared.toPath(),generated.toPath(),StandardCopyOption.ATOMIC_MOVE);installed=true;}
+        try{ContentTransaction.run(ContentTransaction.commonRoot(config,mods),()->{
+            ContentTransaction transaction=ContentTransaction.current();transaction.watchSetting(config,"enabled_mods");if(options!=null)transaction.watch(optionFile);
+            transaction.replace(prepared,generated);
             MobileConfig.putFile(config,Collections.singletonMap("enabled_mods",MobileConfig.quote(String.join(",",on))));
             if(options!=null)ContentFiles.atomic(optionFile,options);
-        }catch(IOException|RuntimeException error){
-            try{if(installed)ContentFiles.delete(generated);if(previous)Files.move(backup.toPath(),generated.toPath(),StandardCopyOption.ATOMIC_MOVE);
-                if(oldConfig==null)Files.deleteIfExists(config.toPath());else ContentFiles.atomic(config,oldConfig);
-                if(options!=null){if(oldOptions==null)Files.deleteIfExists(optionFile.toPath());else ContentFiles.atomic(optionFile,oldOptions);}
-            }catch(IOException restore){error.addSuppressed(restore);}throw error;
-        }
-        if(previous)try{ContentFiles.delete(backup);}catch(IOException cleanup){android.util.Log.w("FH4Droid","Old generated database retained after a successful update",cleanup);}
+            return null;
+        });}catch(IOException error){throw error;}catch(Exception error){throw new IOException("Could not commit mod changes.",error);}
     }
     private ModStore(){}
 }

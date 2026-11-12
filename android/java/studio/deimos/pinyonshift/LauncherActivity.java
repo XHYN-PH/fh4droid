@@ -180,7 +180,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         if(busy)return;if(!GameFiles.ready(this)){files();return;}
         if(GameFiles.running(this)){startGame(logging);return;}
         getSharedPreferences("mobile",0).edit().putBoolean("next_debug",logging).apply();
-        work("Checking the game executables…",()->GameFiles.verify(this),()->probe(MobileConfig.get(this,"android_gpu_driver","auto"),true));
+        work("Checking the game executables…",()->{ContentFiles.recoverForLaunch(this);GameFiles.verify(this);},()->probe(MobileConfig.get(this,"android_gpu_driver","auto"),true));
     }
     private void startGame(boolean logging){
         Intent i=new Intent(this,PinyonShiftActivity.class);i.putExtra("debug_report",logging);
