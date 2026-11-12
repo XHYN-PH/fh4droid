@@ -29,6 +29,7 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
     @Override public void replacePanel(String title,View body){if(!pages.isEmpty())pages.removeLast();showPanel(title,body);}
     @Override public void backPanel(){if(busy){Toast.makeText(this,"Cancel the current operation first.",Toast.LENGTH_SHORT).show();return;}if(pages.size()>1){pages.removeLast();render();}else finish();}
     @Override public void onBackPressed(){backPanel();}
+    @Override public boolean dispatchKeyEvent(KeyEvent event){if(ControllerPrompts.handle(this,getWindow(),event.getKeyCode(),event,this::onBackPressed))return true;return super.dispatchKeyEvent(event);}
     private void render(){Page page=pages.peekLast();if(page==null)return;host.removeAllViews();host.addView(FestivalUi.panel(this,page.title,page.body,this::backPanel),new FrameLayout.LayoutParams(-1,-1));}
     private void refresh(){
         if(isFinishing()||isDestroyed())return;pages.clear();LinearLayout body=FestivalUi.column(this);LinearLayout tabs=new LinearLayout(this);body.addView(tabs);
@@ -41,13 +42,23 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
     private void mods(LinearLayout body)throws Exception{
         body.addView(FestivalUi.text(this,"Changes apply at the next launch. Earlier mods win conflicts. Database mods use a separate modded profile.",13,FestivalUi.MUTED));
         FestivalUi.tileRow(this,body,FestivalUi.tile(this,"file","Import ZIP","One mod package",()->pick(MOD_ZIP,false,false)),FestivalUi.tile(this,"folder","Import folder","Choose a mod folder",()->pick(MOD_FOLDER,true,false)));
-        FestivalUi.action(this,body,"Install Festival pacing",()->perform("Installing Festival pacing…",()->{ModStore.installBuiltin(this,"festival_pacing");return "Installed. Enable it below and choose Prices / Rewards.";}));
-        FestivalUi.action(this,body,"Install Hidden cars",()->perform("Installing Hidden cars…",()->{ModStore.installBuiltin(this,"hidden_cars");return "Installed. Enable it below to use the modded profile.";}));
+        builtin(body,"festival_pacing","Festival pacing");
+        builtin(body,"hidden_cars","Hidden cars");
+        if(!ModStore.enabled(this).isEmpty())FestivalUi.action(this,body,"Disable all optional mods",this::disableMods);
         for(JSONObject item:ModStore.list(this)){
             String id=item.getString("name"),title=item.optString("title",id);boolean on=item.optBoolean("enabled");String problem=item.optString("problem","");
             FestivalUi.listRow(this,body,"layers",title,(on?"Enabled · priority "+(item.optInt("order")+1):"Disabled")+(problem.isEmpty()?"":" · "+problem),()->modDetails(id));
         }
         body.addView(FestivalUi.text(this,"Game-file overlays, database scripts and Android ARM64 plugins are supported. Mods that rebuild archive members need preparation with the PC mod tools before import.",12,FestivalUi.MUTED));
+    }
+    private void builtin(LinearLayout body,String id,String title){
+        boolean installed=new File(ModStore.root(this),id).isDirectory();
+        FestivalUi.action(this,body,installed?title+" · details":"Install "+title,()->{
+            if(installed)modDetails(id);else perform("Installing "+title+"…",()->{ModStore.installBuiltin(this,id);return "Installed. Open its details to enable it.";});
+        });
+    }
+    private void disableMods(){
+        new AlertDialog.Builder(this).setTitle("Disable optional mods?").setMessage("Return to the normal profile next launch. Installed mods, their options and both save profiles are kept.").setNegativeButton("Cancel",null).setPositiveButton("Disable",(d,w)->perform("Disabling mods…",()->{ModStore.disableAll(this);return "Optional mods disabled for the next launch.";})).show();
     }
     private void modDetails(String id){
         try{JSONObject item=ModStore.manifest(new File(ModStore.root(this),id));LinearLayout body=FestivalUi.column(this);body.addView(FestivalUi.text(this,item.optString("description",""),14,FestivalUi.TEXT));boolean on=ModStore.enabled(this).contains(id);
@@ -60,7 +71,12 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
                 final int checked=selected;FestivalUi.listRow(this,body,"sliders",option.optString("title",key),current,()->FestivalUi.choose(this,option.optString("title",key),labels,checked,index->perform("Applying mod option…",()->{ModStore.setOption(this,id,key,values[index]);return "Option saved; the game database was rebuilt if needed.";})));
             }
             FestivalUi.action(this,body,"Remove mod",()->new AlertDialog.Builder(this).setTitle("Remove "+item.optString("title",id)+"?").setMessage("Disable it first. Your saved game is kept.").setNegativeButton("Cancel",null).setPositiveButton("Remove",(d,w)->perform("Removing mod…",()->{ModStore.remove(this,id);return "Mod removed.";})).show());showPanel(item.optString("title",id),body);
-        }catch(Exception error){error(error.getMessage());}
+        }catch(Exception error){
+            LinearLayout recovery=FestivalUi.column(this);recovery.addView(FestivalUi.text(this,"This mod could not be read: "+error.getMessage(),14,FestivalUi.TEXT));
+            if(ModStore.enabled(this).contains(id))FestivalUi.action(this,recovery,"Disable all optional mods",this::disableMods);
+            FestivalUi.action(this,recovery,"Remove disabled mod",()->new AlertDialog.Builder(this).setTitle("Remove "+id+"?").setMessage("Your saves are kept. Enabled mods must be disabled first.").setNegativeButton("Cancel",null).setPositiveButton("Remove",(d,w)->perform("Removing mod…",()->{ModStore.remove(this,id);return "Mod removed.";})).show());
+            showPanel("Mod recovery",recovery);
+        }
     }
     private void dlc(LinearLayout body)throws Exception{
         body.addView(FestivalUi.text(this,"Import your original Marketplace packages, ZIPs containing packages, or a folder. Nested ZIPs are supported up to three levels. Imports start disabled.",13,FestivalUi.MUTED));

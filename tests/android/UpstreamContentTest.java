@@ -37,6 +37,36 @@ public final class UpstreamContentTest {
             check(new File(current,"new.txt").isFile()&&!new File(current,"keep.txt").exists(),"successful publication did not replace content");
             File game=new File(root,"case-game");write(new File(game,"Media/DB/GameDB.slt"),"db");check(ContentFiles.treeFile(game,"media/db/gamedb.slt").isFile(),"game overlays were matched case-sensitively");
 
+            // Exercise the real mod file transaction, including a failure after
+            // the new database and settings have already been written.
+            File mods=new File(root,"mods"),generated=new File(mods,ModStore.GENERATED);
+            File config=new File(root,"state/config/settings.toml"),options=new File(root,"state/config/mod_options.json");
+            String original="enabled_mods = \"previous\"\nvsync = true\n";
+            write(config,original);write(options,"saved-options");write(new File(generated,"game/media/db/gamedb.slt"),"old-database");
+            File replacement=new File(root,"replacement");write(new File(replacement,"game/media/db/gamedb.slt"),"new-database");
+            File blocked=new File(root,"blocked");write(blocked,"not-a-directory");
+            rejected(()->ModStore.commitFiles(config,new File(blocked,"options.json"),mods,Collections.singletonList("new_mod"),new byte[]{1},replacement,generated),"partial mod update was accepted");
+            check(ContentFiles.text(config,4096).equals(original),"failed mod update changed settings");
+            check(ContentFiles.text(new File(generated,"game/media/db/gamedb.slt"),4096).equals("old-database"),"failed mod update lost the old database");
+            File broken=new File(mods,"broken_mod");write(new File(broken,"mod.toml"),"invalid manifest");
+            rejected(()->ModStore.removeDirectory(mods,"broken_mod",Collections.singletonList("broken_mod")),"enabled damaged mod was removed");
+            check(broken.isDirectory(),"blocked removal damaged an installed mod");
+            ModStore.commitFiles(config,options,mods,Collections.emptyList(),null,null,generated);
+            check(MobileConfig.readFile(config).get("enabled_mods").isEmpty(),"disable-all did not clear the enabled list");
+            check(!generated.exists()&&broken.isDirectory(),"disable-all removed installed mods or retained generated overrides");
+            check(ContentFiles.text(options,4096).equals("saved-options"),"disable-all changed saved mod options");
+            ModStore.removeDirectory(mods,"broken_mod",Collections.emptyList());
+            check(!broken.exists(),"damaged disabled mod could not be removed");
+            rejected(()->ModStore.removeDirectory(mods,"../outside",Collections.emptyList()),"mod removal accepted a traversal path");
+
+            File spoofed=new File(root,"spoofed-mod");write(new File(spoofed,".pinyon-builtin"),"claimed builtin");write(new File(spoofed,"mod.toml"),"always_enabled = true");
+            File userCopy=new File(root,"user-import");ModStore.copyImportedDirectory(spoofed,userCopy,false);
+            check(!new File(userCopy,".pinyon-builtin").exists(),"ordinary import retained the internal builtin marker");
+            check(new File(spoofed,".pinyon-builtin").isFile(),"import changed its source folder");
+            check(new File(userCopy,"mod.toml").isFile(),"stripping metadata removed normal mod files");
+            File builtinCopy=new File(root,"builtin-import");ModStore.copyImportedDirectory(spoofed,builtinCopy,true);
+            check(new File(builtinCopy,".pinyon-builtin").isFile(),"trusted builtin install lost its marker");
+
             File payload=new File(root,"payload");write(new File(payload,"Alpha/z.bin"),"ABC");write(new File(payload,"Alpha.txt"),"road");write(new File(payload,"\u00dc.txt"),"driver");
             // Independently generated with Python PureWindowsPath ordering and
             // json.dumps(sort_keys=True, separators=(',', ':')).

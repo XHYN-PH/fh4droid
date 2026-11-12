@@ -35,14 +35,19 @@ final class ModStore {
         }
         if(!data.has("title"))data.put("title",dir.getName());return data;
     }
-    static void importDirectory(Context c,File source)throws Exception{
+    static void importDirectory(Context c,File source)throws Exception{importDirectory(c,source,false);}
+    private static void importDirectory(Context c,File source,boolean builtin)throws Exception{
         ContentFiles.locked(c,()->{
             List<File> manifests=new ArrayList<>();for(File file:ContentFiles.files(source))if(file.getName().equals("mod.toml"))manifests.add(file);
             if(manifests.size()!=1)throw new IOException("Choose one mod containing a single mod.toml manifest.");
             JSONObject data=ContentNative.manifest(manifests.get(0));String id=name(data.optString("name"));if(new File(root(c),id).exists())throw new IOException("This mod is already installed. Disable and remove it before importing a replacement.");File stage=ContentFiles.temporary(c,"mod-");
-            try{File content=new File(stage,id);ContentFiles.copyTree(manifests.get(0).getParentFile(),content);manifest(content);validateNativeFiles(content);ContentFiles.publish(content,new File(root(c),id));}
+            try{File content=new File(stage,id);copyImportedDirectory(manifests.get(0).getParentFile(),content,builtin);manifest(content);validateNativeFiles(content);ContentFiles.publish(content,new File(root(c),id));}
             finally{ContentFiles.delete(stage);}return null;
         });
+    }
+    static void copyImportedDirectory(File source,File destination,boolean builtin)throws IOException{
+        ContentFiles.copyTree(source,destination);
+        if(!builtin)ContentFiles.delete(new File(destination,".pinyon-builtin"));
     }
     static void importZip(Context c,File archive)throws Exception{
         File stage=ContentFiles.temporary(c,"mod-zip-");try{ContentFiles.unzip(archive,stage);importDirectory(c,stage);}finally{ContentFiles.delete(stage);}
@@ -56,22 +61,33 @@ final class ModStore {
     }
     static void installBuiltin(Context c,String id)throws Exception{
         if(!id.equals("festival_pacing")&&!id.equals("hidden_cars"))throw new IOException("Unknown built-in mod.");
-        File stage=ContentFiles.temporary(c,"builtin-");try{copyAssetTree(c,"builtin-mods/"+id,new File(stage,id));ContentFiles.atomic(new File(stage,id+"/.pinyon-builtin"),new byte[0]);importDirectory(c,stage);}finally{ContentFiles.delete(stage);}
+        File stage=ContentFiles.temporary(c,"builtin-");try{copyAssetTree(c,"builtin-mods/"+id,new File(stage,id));ContentFiles.atomic(new File(stage,id+"/.pinyon-builtin"),new byte[0]);importDirectory(c,stage,true);}finally{ContentFiles.delete(stage);}
     }
     private static void copyAssetTree(Context c,String asset,File destination)throws IOException{
         String[] entries=c.getAssets().list(asset);if(entries!=null&&entries.length>0){Files.createDirectories(destination.toPath());for(String child:entries)copyAssetTree(c,asset+"/"+child,new File(destination,child));}
         else{Files.createDirectories(destination.getParentFile().toPath());try(InputStream in=c.getAssets().open(asset);OutputStream out=new FileOutputStream(destination)){ContentFiles.copy(in,out,1024*1024);}}
     }
     static void setEnabled(Context c,String id,boolean value)throws Exception{
-        ContentFiles.locked(c,()->{name(id);JSONObject data=manifest(new File(root(c),id));List<String> on=enabled(c);on.remove(GENERATED);
-            if(value){validateSupported(c,id,data);if(!on.contains(id))on.add(id);}else on.remove(id);
+        ContentFiles.locked(c,()->{name(id);List<String> on=enabled(c);on.remove(GENERATED);
+            if(value){JSONObject data=manifest(new File(root(c),id));validateSupported(c,id,data);if(!on.contains(id))on.add(id);}else on.remove(id);
             validateDependencies(c,on);rebuild(c,on,null);return null;});
     }
     static void move(Context c,String id,int direction)throws Exception{
         ContentFiles.locked(c,()->{name(id);List<String> on=enabled(c);on.remove(GENERATED);int index=on.indexOf(id),next=index+direction;if(index<0||next<0||next>=on.size())return null;Collections.swap(on,index,next);rebuild(c,on,null);return null;});
     }
+    static void disableAll(Context c)throws Exception{
+        ContentFiles.locked(c,()->{commit(c,new ArrayList<>(),null,null,new File(root(c),GENERATED));return null;});
+    }
     static void remove(Context c,String id)throws Exception{
-        ContentFiles.locked(c,()->{name(id);JSONObject item=manifest(new File(root(c),id));if(item.optBoolean("always_enabled")&&new File(root(c),id+"/.pinyon-builtin").isFile())throw new IOException("This built-in mod must remain installed.");List<String> on=enabled(c);on.remove(GENERATED);if(on.contains(id))throw new IOException("Disable the mod before removing it.");ContentFiles.delete(new File(root(c),id));return null;});
+        ContentFiles.locked(c,()->{removeDirectory(root(c),id,enabled(c));return null;});
+    }
+    static void removeDirectory(File mods,String id,List<String> enabled)throws Exception{
+        name(id);File dir=new File(mods,id);
+        if(enabled.contains(id))throw new IOException("Disable the mod before removing it.");
+        // Damaged user manifests must not prevent recovery. Only trusted
+        // built-ins need their always-enabled protection checked here.
+        if(new File(dir,".pinyon-builtin").isFile()&&manifest(dir).optBoolean("always_enabled"))throw new IOException("This built-in mod must remain installed.");
+        ContentFiles.delete(dir);
     }
     private static void validateSupported(Context c,String id,JSONObject data)throws Exception{
         File dir=new File(root(c),id);
@@ -144,14 +160,17 @@ final class ModStore {
         return cached;
     }
     private static void commit(Context c,List<String> on,JSONObject options,File prepared,File generated)throws IOException{
-        File config=MobileConfig.file(c),optionFile=new File(state(c),"config/mod_options.json");
+        commitFiles(MobileConfig.file(c),new File(state(c),"config/mod_options.json"),root(c),on,
+            options==null?null:options.toString().getBytes(StandardCharsets.UTF_8),prepared,generated);
+    }
+    static void commitFiles(File config,File optionFile,File mods,List<String> on,byte[] options,File prepared,File generated)throws IOException{
         byte[] oldConfig=config.isFile()?Files.readAllBytes(config.toPath()):null,oldOptions=optionFile.isFile()?Files.readAllBytes(optionFile.toPath()):null;
-        Files.createDirectories(root(c).toPath());File backup=new File(root(c),".database-rollback-"+UUID.randomUUID());boolean previous=generated.exists(),installed=false;
+        Files.createDirectories(mods.toPath());File backup=new File(mods,".database-rollback-"+UUID.randomUUID());boolean previous=generated.exists(),installed=false;
         if(previous)Files.move(generated.toPath(),backup.toPath(),StandardCopyOption.ATOMIC_MOVE);
         try{
             if(prepared!=null){Files.move(prepared.toPath(),generated.toPath(),StandardCopyOption.ATOMIC_MOVE);installed=true;}
-            MobileConfig.put(c,"enabled_mods",MobileConfig.quote(String.join(",",on)));
-            if(options!=null)ContentFiles.atomic(optionFile,options.toString().getBytes(StandardCharsets.UTF_8));
+            MobileConfig.putFile(config,Collections.singletonMap("enabled_mods",MobileConfig.quote(String.join(",",on))));
+            if(options!=null)ContentFiles.atomic(optionFile,options);
         }catch(IOException|RuntimeException error){
             try{if(installed)ContentFiles.delete(generated);if(previous)Files.move(backup.toPath(),generated.toPath(),StandardCopyOption.ATOMIC_MOVE);
                 if(oldConfig==null)Files.deleteIfExists(config.toPath());else ContentFiles.atomic(config,oldConfig);
