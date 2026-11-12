@@ -444,7 +444,9 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     @Override protected void onDestroy(){
         gameResumed=false;captureReportState();if(driveAssist!=null)driveAssist.pause();uiHandler.removeCallbacksAndMessages(null);stopPhoneRumble();telemetry.shutdown();
         if(inputManager!=null)inputManager.unregisterInputDeviceListener(controllers);if(gameMenu!=null)gameMenu.dismiss();
-        if(isFinishing())recordCleanExit();super.onDestroy();
+        // Only native shutdown, after finishing save backups, qualifies a
+        // clean exit. Activity destruction can also follow a forced close.
+        super.onDestroy();
         if(gameIso!=null)try{gameIso.close();}catch(IOException ignored){}
         android.os.Process.killProcess(android.os.Process.myPid());
     }
