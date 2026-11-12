@@ -6,7 +6,7 @@ description: FH4Droid launcher, game files, settings, controls and troubleshooti
 ---
 
 
-FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source targets the 0.8.2-polish-test3 preview APK, integrating stable Pinyon Shift 0.8.2. An uploaded vivo V2425A report covers one r7 session; the unreleased follow-up below has not been gameplay-tested on a physical device. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
+FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source targets the 0.8.2-polish-test3 preview APK, integrating stable Pinyon Shift 0.8.2. An uploaded vivo V2425A report covers one r7 session; the unreleased follow-up below has not been gameplay-tested on a physical device. The race-grid launcher described below is implemented in source for the next APK; the existing 0.8.2-polish-test3 package retains its earlier launcher. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
 
 ## Current changes and limits
 
@@ -28,11 +28,13 @@ Reports refresh live state every five seconds and on pause/view changes, priorit
 
 The app uses fixed landscape orientation for the launcher, local import, touch editor, driver probe and game. SDL window requests retain the landscape lock.
 
-The launcher puts Play and the main actions at the lower left, with a settings summary. Launcher pages fill the window with a branded header and Back action. On wide screens ordinary card pages use the left part of the screen; settings keep their full-width layout, horizontal categories and side details panel. Tapping a setting label displays its purpose and saved or running value. The background blurs while a launcher page is open, and supported devices can blur behind dialogs. In-game pages use a right-side drawer with a Resume action. Back returns through the page stack and restores scroll and focus. Menu scale is adjustable from 70% to 105%; optional transitions honour Android's animator setting.
+The launcher uses a horizontal racing card row: Play, Settings, Controls, Game files and More. The supplied transparent logo and road background stay in place. Play uses an ivory card; the focused action has a pink outline. On smaller landscape screens the row scrolls to keep the selected card visible. Local profile is in the header. More opens a six-card management grid for Mods & DLC, Graphics drivers, Save backups, Achievements, Problem reports and About. Cheats remain available in the Mods tab of Mods & DLC.
 
-The main menu displays the supplied transparent FH4Droid logo with a text wordmark and one primary Play action. Settings and Controls sit beneath it; Game files, Drivers, Saves and More are four icon shortcuts. The Android UI patch test build uses magenta primary buttons and shared outlined cards for these menus.
+Settings, controls, files and profile open matching category pages. Detailed settings, imports, backups and driver choices use the same dark surfaces, thin icons and pink focus feedback. Back returns through open tools to their category and restores scroll and focus. The footer retains plain YouTube, Telegram and GitHub links, controller hints and the installed package version/build. Large text uses a two-column management grid and a two-line footer on compact screens.
 
-The launcher footer uses text-only YouTube, Telegram and GitHub links on the left. The right footer reads the installed Android package version and build number and shows game-file readiness. Secondary shortcuts use the same lightweight text treatment; focus feedback and generous touch targets remain available.
+Focus settles over 160 ms; page navigation slides and fades over 220 ms, with reverse movement when returning from a tool. Scrolling follows controller focus. Motion stops when settled and honours both the app Animations preference and Android's animator setting. UI scale remains adjustable from 70% to 105%. In-game pages keep their right-side drawer and Resume action; the shared card palette also applies there.
+
+The race-grid home and management page are rendered by the same Android view code used for their approved previews. Native-render tests compare their pixels at the reference viewport, density, font size and fixture state. These cloud checks do not qualify a physical controller, phone GPU or installed APK; the package must be compared at matching display settings when one is built.
 
 Settings has categories, search and pinned favourites. Rows distinguish active runtime values from saved next-launch changes. Section resets require confirmation, and Undo restores the last section change. Presets write as one atomic transaction; failed writes leave the displayed value unchanged. Advanced quoted settings decode TOML escapes before preflight.
 
@@ -100,7 +102,7 @@ Phone tilt is independent of the Arrows / Stick layout choice. If tilt is enable
 
 Achievements shows current progress with cached artwork. The trainer operates on a separate modded profile; enabling it requires a restart. Opt-in sustained mode requests supported Android performance mode and temporarily caps a severe thermal state at 30 FPS, or keeps a lower selected limit. It restores the saved target after a minute at light-or-lower severity without rewriting the preset. Adreno experiments are gated to matching hardware and provide a reset; they can reduce stability.
 
-Android Back opens a five-action pause drawer: Resume, Settings, Controls, More and Quit. Settings use six categories: Graphics, Controls, Audio, Interface, Gameplay and Advanced. Controls separates touch, phone and physical-controller options. Search/favourites and section Reset/Undo are secondary tools. Advanced → Original game settings opens the original host menu for controller mapping and other existing features. Android photo capture and minimap repositioning are omitted.
+Android Back opens a five-action pause drawer: Resume, Settings, Controls, More and Quit. Settings use six categories: Graphics, Audio, Controls, Interface, Gameplay and Advanced. Controls separates touch, phone and physical-controller options. Search/favourites and section Reset/Undo are secondary tools. Advanced → Original game settings opens the original host menu for controller mapping and other existing features. Android photo capture and minimap repositioning are omitted.
 
 ## Android resource policy
 

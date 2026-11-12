@@ -29,6 +29,8 @@ jobs:
           python tools/check-android-sdk-patches.py
       - name: Compile Android UI and exercise recovery and settings writers
         run: python tools/test-android-mobile.py
+      - name: Render launcher and exercise controller navigation
+        run: mvn -B -f tests/android/ui/pom.xml test
       - name: Check Python tooling and shared artwork
         run: |
           python -m unittest discover -s tools/tests

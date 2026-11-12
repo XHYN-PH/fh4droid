@@ -299,7 +299,7 @@ cells = ["yes", "yes", "yes", "partly: save backups; Android photo capture omitt
 [[platform]]
 feature = "Android launcher and touch editor"
 link = "android.md#launcher"
-cells = ["n/a", "n/a", "n/a", "partly: branded launcher pages, icon cards and radio choices, organized settings, full-window editor; 20 proportion-preserving SVG icons in a shared PNG atlas, code badges, arrows/stick, explicit presets, remapping, undo/redo, separate arrow rates and per-control fading; device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: racing card launcher, management grid, controller focus with short optional transitions, organized settings, full-window editor; 20 proportion-preserving SVG icons in a shared PNG atlas, code badges, arrows/stick, explicit presets, remapping, undo/redo, separate arrow rates and per-control fading; device testing pending"]
 
 [[platform]]
 feature = "Direct ISO loading"

@@ -37,10 +37,11 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
     @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus)FestivalUi.immersive(this);}
     @Override public void showPanel(String title,View body){pages.addLast(new Page(title,body));ActionBreadcrumbs.record(this,"Content: "+title,"view");render();}
     @Override public void replacePanel(String title,View body){if(!pages.isEmpty())pages.removeLast();showPanel(title,body);}
-    @Override public void backPanel(){if(busy){Toast.makeText(this,"Cancel the current operation first.",Toast.LENGTH_SHORT).show();return;}if(pages.size()>1){pages.removeLast();selectedMod="";selectedDlc="";render();}else finish();}
+    @Override public void backPanel(){if(busy){Toast.makeText(this,"Cancel the current operation first.",Toast.LENGTH_SHORT).show();return;}if(pages.size()>1){pages.removeLast();selectedMod="";selectedDlc="";render(true);}else finish();}
     @Override public void onBackPressed(){backPanel();}
     @Override public boolean dispatchKeyEvent(KeyEvent event){if(ControllerPrompts.handle(this,getWindow(),event.getKeyCode(),event,this::onBackPressed))return true;return super.dispatchKeyEvent(event);}
-    private void render(){Page page=pages.peekLast();if(page==null)return;FestivalUi.rememberTree(host);host.removeAllViews();host.addView(FestivalUi.panel(this,page.title,page.body,this::backPanel),new FrameLayout.LayoutParams(-1,-1));}
+    private void render(){render(false);}
+    private void render(boolean reverse){Page page=pages.peekLast();if(page==null)return;FestivalUi.rememberTree(host);host.removeAllViews();View panel=FestivalUi.panel(this,page.title,page.body,this::backPanel);host.addView(panel,new FrameLayout.LayoutParams(-1,-1));MenuMotion.page(panel,reverse);}
     private void refresh(){
         if(isFinishing()||isDestroyed())return;loading=true;final int generation=++scanGeneration;
         if(pages.isEmpty()){LinearLayout wait=FestivalUi.column(this);wait.addView(FestivalUi.text(this,"Loading installed content…",16,FestivalUi.TEXT));showPanel("Mods and DLC",wait);}
@@ -63,6 +64,7 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
     private static JSONObject find(List<JSONObject> items,String key,String id){for(JSONObject item:items)if(id.equals(item.optString(key)))return item;return null;}
     private boolean available(){if(busy||loading)return false;if(GameFiles.running(this)){error("Quit the game before changing content.");return false;}return true;}
     private void mods(LinearLayout body)throws Exception{
+        FestivalUi.listRow(this,body,"wrench","Cheats · separate profile","Trainer options keep standard progress separate.",()->TrainerPage.show(this,null));
         body.addView(FestivalUi.text(this,"Changes apply at the next launch. Earlier mods win conflicts. Database mods use a separate modded profile.",13,FestivalUi.MUTED));
         if(optionsProblem!=null&&!optionsProblem.isEmpty())body.addView(FestivalUi.text(this,"Saved mod options could not be read. Disable optional mods for recovery: "+optionsProblem,14,FestivalUi.ORANGE));
         FestivalUi.tileRow(this,body,FestivalUi.tile(this,"file","Import ZIP","One mod package",()->pick(MOD_ZIP,false,false)),FestivalUi.tile(this,"folder","Import folder","Choose a mod folder",()->pick(MOD_FOLDER,true,false)));

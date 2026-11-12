@@ -390,7 +390,15 @@ the updated Odin run produces no corresponding native crash record.
 ## Current mobile presentation
 
 The launcher shows the existing transparent FH4Droid logo without a backing box.
-Settings use Graphics, Controls, Audio, Interface, Gameplay and Advanced sections;
+The race-grid launcher uses the approved B home layout with a horizontal Play,
+Settings, Controls, Game files and More row. More groups content, drivers, saves,
+achievements, reports and About into a six-card management grid. The existing
+road background and transparent logo remain. Profile is available in the header;
+Cheats is in the Mods tab. Focus settles over 160 ms and pages slide/fade over
+220 ms, with reduced motion respected. Native rendering and navigation checks
+are documented in [tests/android/ui](../tests/android/ui/README.md).
+
+Settings use Graphics, Audio, Controls, Interface, Gameplay and Advanced sections;
 Android Back opens Resume, Settings, Controls, More and Quit. The touch editor
 uses the whole window for placement, with a separate full-window Properties
 view and Save, Cancel, Test and Hide tools actions. The active custom layout is

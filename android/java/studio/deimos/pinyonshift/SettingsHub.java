@@ -15,7 +15,7 @@ import java.util.*;
  */
 final class SettingsHub {
   static final String[] PAGES = {
-      "Graphics", "Controls", "Audio", "Interface", "Gameplay", "Advanced"};
+      "Graphics", "Audio", "Controls", "Interface", "Gameplay", "Advanced"};
   private static final Set<String> ADVANCED =
       new HashSet<>(Arrays.asList("swap_post_effect_scene_only", "texture_mip_lod_bias",
           "fh1_untile_predicated_tiling", "vulkan_pipeline_creation_threads",
@@ -67,7 +67,7 @@ final class SettingsHub {
     LinearLayout content=new LinearLayout(a);root.addView(content,new LinearLayout.LayoutParams(-1,0,1));
     FrameLayout pane=new FrameLayout(a);content.addView(pane,new LinearLayout.LayoutParams(0,-1,1));
     boolean wide=a.getResources().getConfiguration().screenWidthDp>=780&&a.getResources().getConfiguration().fontScale<1.3f;
-    LinearLayout details=FestivalUi.column(a);int inset=FestivalUi.dp(a,16);details.setPadding(inset,inset,inset,inset);details.setBackground(FestivalUi.surface(a,0xd91a171e,12));
+    LinearLayout details=FestivalUi.column(a);int inset=FestivalUi.dp(a,16);details.setPadding(inset,inset,inset,inset);details.setBackground(FestivalUi.surface(a,0xe8171d27,12));
     TextView detailTitle=FestivalUi.text(a,"SETTING DETAILS",17,FestivalUi.TEXT);detailTitle.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);details.addView(detailTitle);
     TextView detailHelp=FestivalUi.text(a,"Select a setting to see what it does and when it applies.",14,FestivalUi.MUTED);detailHelp.setPadding(0,inset,0,inset);details.addView(detailHelp);
     TextView detailValue=FestivalUi.text(a,"",13,FestivalUi.TEXT);details.addView(detailValue);
@@ -95,11 +95,12 @@ final class SettingsHub {
       if(view.getParent() instanceof ViewGroup)((ViewGroup)view.getParent()).removeView(view);pane.addView(view,new FrameLayout.LayoutParams(-1,-1));
       detailTitle.setText("SETTING DETAILS");detailHelp.setText("Select a setting to see what it does and when it applies.");detailValue.setText("");
       if(section.equals("Graphics"))resolutionDetails.run();
-      for(Map.Entry<String,Button> entry:buttons.entrySet()){boolean selected=entry.getKey().equals(section)||entry.getKey().equals("Controls")&&Arrays.asList("Touch","Phone","Controller").contains(section);entry.getValue().setTextColor(selected?FestivalUi.TEXT:FestivalUi.MUTED);entry.getValue().setSelected(selected);}
-      FestivalUi.refreshTree(view);
+      for(Map.Entry<String,Button> entry:buttons.entrySet()){boolean selected=entry.getKey().equals(section)||entry.getKey().equals("search")&&section.equals("All settings")||entry.getKey().equals("Controls")&&Arrays.asList("Touch","Phone","Controller").contains(section);entry.getValue().setTextColor(selected?FestivalUi.TEXT:FestivalUi.MUTED);entry.getValue().setSelected(selected);}
+      FestivalUi.refreshTree(view);FestivalUi.slideIn(view);
+      root.setTag(FestivalUi.DEFAULT_FOCUS,buttons.get(Arrays.asList("Touch","Phone","Controller").contains(section)?"Controls":section.equals("All settings")?"search":section));
     };
-    for(String section:PAGES){Button button=FestivalUi.button(a,section,false);menu.addView(button,new LinearLayout.LayoutParams(-2,-2));button.setOnClickListener(v->select.accept(section));buttons.put(section,button);}
-    Button search=FestivalUi.button(a,"Search / favourites",false);menu.addView(search);search.setOnClickListener(v->select.accept("All settings"));select.accept(first);return root;
+    for(String section:PAGES){Button button=FestivalUi.button(a,section,false);LinearLayout.LayoutParams tab=new LinearLayout.LayoutParams(-2,-2);tab.rightMargin=FestivalUi.dp(a,8);menu.addView(button,tab);button.setOnClickListener(v->select.accept(section));buttons.put(section,button);}
+    Button search=FestivalUi.button(a,"Search / favourites",false);menu.addView(search);buttons.put("search",search);search.setOnClickListener(v->select.accept("All settings"));select.accept(first);return root;
   }
   private static void resetSection(Activity a,String page,MobileSettings.Runtime runtime,Runnable refresh){
     new AlertDialog.Builder(a).setTitle("Reset "+page+"?").setMessage("Restore game settings in this section. Phone options, layouts, drivers and saves are kept.").setNegativeButton("Cancel",null).setPositiveButton("Reset",(d,w)->{
@@ -230,7 +231,7 @@ final class SettingsHub {
       java.util.function.Consumer<MobileSettings.Option> inspect) {
     if(!o.string&&o.values.length==2&&Arrays.asList(o.values).contains("true")&&Arrays.asList(o.values).contains("false")){booleanRow(a,rows,o,runtime,inspect);return;}
     LinearLayout row = new LinearLayout(a);
-    row.setBackground(FestivalUi.surface(a,0xd91a171e,12));
+    row.setBackground(FestivalUi.surface(a,0xe8171d27,12));
     row.setGravity(Gravity.CENTER_VERTICAL);
     TextView name = FestivalUi.text(a, o.title, 14, FestivalUi.TEXT);
     name.setPadding(
@@ -253,6 +254,7 @@ final class SettingsHub {
           + (different ? ". Active: " + MobileSettings.label(o, live) : ""));
       name.setText((isPinned(a, o.key) ? "• " : "") + o.title);
     });
+    choice.setOnFocusChangeListener((v,focused)->{if(focused&&inspect!=null)inspect.accept(o);});
     choice.setOnLongClickListener(v -> {
       boolean pin = !isPinned(a, o.key);
       a.getSharedPreferences("setting_pins", 0).edit().putBoolean(o.key, pin).apply();
@@ -290,9 +292,10 @@ final class SettingsHub {
     LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2);params.topMargin=FestivalUi.dp(a,6);rows.addView(row,params);
   }
   private static void booleanRow(Activity a,LinearLayout rows,MobileSettings.Option o,MobileSettings.Runtime runtime,java.util.function.Consumer<MobileSettings.Option> inspect){
-    LinearLayout row=new LinearLayout(a);row.setBackground(FestivalUi.surface(a,0xd91a171e,12));row.setGravity(Gravity.CENTER_VERTICAL);LinearLayout labels=FestivalUi.column(a);labels.setPadding(FestivalUi.dp(a,8),FestivalUi.dp(a,8),FestivalUi.dp(a,8),FestivalUi.dp(a,8));
+    LinearLayout row=new LinearLayout(a);row.setBackground(FestivalUi.surface(a,0xe8171d27,12));row.setGravity(Gravity.CENTER_VERTICAL);LinearLayout labels=FestivalUi.column(a);labels.setPadding(FestivalUi.dp(a,8),FestivalUi.dp(a,8),FestivalUi.dp(a,8),FestivalUi.dp(a,8));
     TextView title=FestivalUi.text(a,o.title,14,FestivalUi.TEXT),state=FestivalUi.text(a,"",13,FestivalUi.MUTED);labels.addView(title);labels.addView(state);row.addView(labels,new LinearLayout.LayoutParams(0,-2,1));title.setOnClickListener(v->{if(inspect!=null)inspect.accept(o);else FestivalUi.explain(a,o.title,o.help);});
-    Switch toggle=new Switch(a);toggle.setMinHeight(FestivalUi.dp(a,48));toggle.setContentDescription(o.title);toggle.setThumbTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[0]},new int[]{FestivalUi.RED,FestivalUi.MUTED}));row.addView(toggle);LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2);params.topMargin=FestivalUi.dp(a,6);rows.addView(row,params);boolean inverse=o.key.startsWith("disable_")||o.key.equals("hud_hidden");
+    Switch toggle=new Switch(a);FestivalUi.controlFocus(a,toggle);toggle.setMinHeight(FestivalUi.dp(a,48));toggle.setContentDescription(o.title);toggle.setThumbTintList(new android.content.res.ColorStateList(new int[][]{new int[]{android.R.attr.state_checked},new int[0]},new int[]{FestivalUi.RED,FestivalUi.MUTED}));row.addView(toggle);LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2);params.topMargin=FestivalUi.dp(a,6);rows.addView(row,params);boolean inverse=o.key.startsWith("disable_")||o.key.equals("hud_hidden");
+    toggle.setOnFocusChangeListener((v,focused)->{if(focused&&inspect!=null)inspect.accept(o);});
     CompoundButton.OnCheckedChangeListener listener=(v,on)->{apply(a,runtime,Collections.singletonMap(o.key,Boolean.toString(on!=inverse)),o.restart);FestivalUi.refreshTree(row);if(inspect!=null)inspect.accept(o);};
     FestivalUi.onRefresh(toggle,()->{String saved=value(a,o.key,o.initial),live=active(runtime,o.key);toggle.setOnCheckedChangeListener(null);toggle.setChecked(Boolean.parseBoolean(saved)!=inverse);toggle.setOnCheckedChangeListener(listener);boolean pending=live!=null&&!SettingValues.same(saved,live);state.setText(pending?(o.restart?"Restart pending · active: ":"Active: ")+MobileSettings.label(o,live):o.restart?"Next launch":"");state.setVisibility(state.getText().length()==0?View.GONE:View.VISIBLE);});
   }

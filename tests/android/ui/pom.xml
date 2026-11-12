@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>studio.deimos</groupId><artifactId>android-launcher-tests</artifactId><version>1.0</version>
+  <properties>
+    <maven.compiler.release>8</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <source.root>${project.basedir}/../../..</source.root>
+    <sdl.source>${source.root}/thirdparty/shiftglue-sdk/thirdparty/sdl3/android-project/app/src/main/java</sdl.source>
+  </properties>
+  <repositories><repository><id>google</id><url>https://dl.google.com/dl/android/maven2/</url></repository></repositories>
+  <dependencies>
+    <dependency><groupId>org.robolectric</groupId><artifactId>android-all</artifactId><version>13-robolectric-9030017</version><scope>provided</scope></dependency>
+    <dependency><groupId>org.robolectric</groupId><artifactId>robolectric</artifactId><version>4.14.1</version><scope>test</scope></dependency>
+    <dependency><groupId>junit</groupId><artifactId>junit</artifactId><version>4.13.2</version><scope>test</scope></dependency>
+  </dependencies>
+  <build>
+    <directory>${source.root}/.local/android/launcher-ui-tests</directory>
+    <sourceDirectory>${source.root}/android/java</sourceDirectory>
+    <testSourceDirectory>${project.basedir}</testSourceDirectory>
+    <plugins>
+      <plugin><groupId>org.codehaus.mojo</groupId><artifactId>build-helper-maven-plugin</artifactId><version>3.6.1</version>
+        <executions><execution><id>sdl-java</id><phase>generate-sources</phase><goals><goal>add-source</goal></goals><configuration><sources><source>${sdl.source}</source></sources></configuration></execution></executions>
+      </plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version></plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-dependency-plugin</artifactId><version>3.8.1</version>
+        <executions><execution><id>android-test-aars</id><phase>generate-test-resources</phase><goals><goal>copy-dependencies</goal></goals><configuration><includeTypes>aar</includeTypes><outputDirectory>${project.build.directory}/aars</outputDirectory></configuration></execution></executions>
+      </plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-antrun-plugin</artifactId><version>3.1.0</version>
+        <executions><execution><id>unpack-android-test-runtime</id><phase>process-test-resources</phase><goals><goal>run</goal></goals><configuration><target>
+          <unzip src="${project.build.directory}/aars/monitor-1.7.2.aar" dest="${project.build.directory}/monitor"/>
+          <unzip src="${project.build.directory}/aars/espresso-idling-resource-3.6.1.aar" dest="${project.build.directory}/espresso"/>
+        </target></configuration></execution></executions>
+      </plugin>
+      <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.5.2</version>
+        <configuration>
+          <argLine>-Djava.awt.headless=true</argLine><useSystemClassLoader>false</useSystemClassLoader>
+          <workingDirectory>${project.build.directory}</workingDirectory>
+          <systemPropertyVariables><launcher.source.root>${source.root}</launcher.source.root></systemPropertyVariables>
+          <additionalClasspathElements>
+            <additionalClasspathElement>${project.build.directory}/monitor/classes.jar</additionalClasspathElement>
+            <additionalClasspathElement>${project.build.directory}/espresso/classes.jar</additionalClasspathElement>
+          </additionalClasspathElements>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
