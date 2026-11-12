@@ -192,6 +192,9 @@ HostConfig::HostConfig(std::filesystem::path path) : path_(std::move(path)) {}
 bool HostConfig::Load() {
   auto text = ReadFile(path_);
   if (!text) {
+    loaded_ = false;
+    dirty_ = false;
+    text_.clear();
     return false;
   }
   text_ = std::move(*text);

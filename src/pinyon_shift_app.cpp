@@ -1507,11 +1507,6 @@ void PinyonShiftApp::OnPostSetup() {
              {"driver_version", std::to_string(properties.driverVersion)}});
         if (config_created_ || REXCVAR_GET(fh4droid_fresh_hardware_defaults)) {
           ApplyFirstRunHardwareDefaults(*device);
-          rex::cvar::SetFlagByName("fh4droid_fresh_hardware_defaults", "false");
-          if (host_config_ && host_config_->Load()) {
-            host_config_->Set("fh4droid_fresh_hardware_defaults", "false");
-            host_config_->Save();
-          }
         }
       }
     }
@@ -1609,16 +1604,26 @@ void PinyonShiftApp::ApplyFirstRunHardwareDefaults(const rex::ui::vulkan::Vulkan
          "\"1024/32/4x/d1+0/32/4x/c3=2x2,0/16/1x/d1+720/16/1x/c0=2x2\""});
     settings.push_back({"fh1_coarse_shading_alpha_test", "true"});
   }
-  if (!settings.empty() && host_config_ && host_config_->Load()) {
+  if (host_config_ && host_config_->Load()) {
     for (const auto& [name, literal] : settings) {
       host_config_->Set(name, literal);
+    }
+    // Persist the defaults and their completion marker together. A failed
+    // write keeps the marker pending so the next launch can retry.
+    host_config_->Set("fh4droid_fresh_hardware_defaults", "false");
+    if (!host_config_->Save()) {
+      REXLOG_ERROR("Settings: could not write {}", rex::path_to_utf8(host_config_->path()));
+      return;
+    }
+    for (const auto& [name, literal] : settings) {
       std::string value = literal;
       std::erase(value, '"');
       rex::cvar::SetFlagByName(name, value);
     }
-    if (!host_config_->Save()) {
-      REXLOG_ERROR("Settings: could not write {}", rex::path_to_utf8(host_config_->path()));
-    }
+    rex::cvar::SetFlagByName("fh4droid_fresh_hardware_defaults", "false");
+  } else {
+    REXLOG_ERROR("Settings: could not load first-run hardware defaults");
+    return;
   }
   pinyon_shift::diagnostics::RecordEvent(
       "config.first_run.preset",

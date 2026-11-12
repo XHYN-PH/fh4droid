@@ -48,7 +48,7 @@ class HostConfig {
   void Set(std::string_view name, std::string_view literal);
   bool dirty() const { return dirty_; }
   // Writes pending changes; true when there was nothing to write. Refuses
-  // when the file was never loaded, so a partial file never replaces it.
+  // when the last load failed, so stale data never replaces the file.
   bool Save();
 
  private:

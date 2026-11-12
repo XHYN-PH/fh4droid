@@ -84,6 +84,32 @@ void TestStore() {
   }
   CHECK(backups == 1);
   CHECK(!std::filesystem::exists(path.string() + ".tmp"));
+  config.Set("fh4droid_fresh_hardware_defaults", "true");
+  CHECK(config.Save());
+  const auto before_defaults = ReadFile(path);
+  config.Set("fh1_coarse_shading", Quote("coarse"));
+  config.Set("fh4droid_fresh_hardware_defaults", "false");
+  const auto blocked = std::filesystem::path(path.string() + ".tmp");
+  std::filesystem::create_directories(blocked);
+  CHECK(WriteAtomically(blocked / "keep", "block the pending write"));
+  CHECK(!config.Save() && config.dirty());
+  CHECK(ReadFile(path) == before_defaults);
+  std::filesystem::remove_all(blocked);
+  CHECK(config.Save());
+  CHECK(GetValue(*ReadFile(path), "fh4droid_fresh_hardware_defaults") == "false");
+  CHECK(GetValue(*ReadFile(path), "fh1_coarse_shading") == "coarse");
+  // A failed reload revokes the previous successful load. Edits made after
+  // storage disappears must not recreate the file from an obsolete snapshot.
+  config.Set("vsync", "false");
+  std::filesystem::remove(path);
+  CHECK(!config.Load());
+  CHECK(!config.Get("vsync") && !config.dirty());
+  config.Set("vsync", "true");
+  CHECK(!config.Save() && !std::filesystem::exists(path));
+  CHECK(WriteAtomically(path, "vsync = false\n"));
+  CHECK(config.Load() && config.Get("vsync") == "false");
+  config.Set("vsync", "true");
+  CHECK(config.Save());
   std::filesystem::remove_all(directory);
 }
 
