@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -54,6 +55,7 @@ class HostConfig {
  private:
   std::filesystem::path path_;
   std::string text_;
+  std::map<std::string, std::string> pending_;
   bool loaded_ = false;
   bool dirty_ = false;
   bool backed_up_ = false;

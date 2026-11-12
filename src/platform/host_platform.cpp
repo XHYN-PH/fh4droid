@@ -1,7 +1,10 @@
 #include "platform/host_platform.h"
 
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
+#include <cerrno>
+#include <mutex>
 #include <system_error>
 #include <vector>
 
@@ -9,6 +12,7 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+
 #include <Windows.h>
 #elif defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -19,7 +23,87 @@
 #include <unistd.h>
 #endif
 
+#if !defined(_WIN32)
+#include <fcntl.h>
+#endif
+
 namespace pinyon_shift::platform {
+
+bool WithFileLock(const std::filesystem::path& path, const std::function<bool()>& work) {
+  // POSIX record locks are process-owned, so also serialize native threads.
+  static std::mutex mutex;
+  std::lock_guard guard(mutex);
+  std::error_code error;
+  const auto directory=path.parent_path().empty()?std::filesystem::path("."):path.parent_path();
+  std::filesystem::create_directories(directory, error);
+  if (error) return false;
+#if defined(_WIN32)
+  HANDLE file = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return false;
+  OVERLAPPED offset{};
+  bool locked = LockFileEx(file, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &offset);
+  bool result;
+  try {result = locked && work();}catch(...){CloseHandle(file);throw;}
+  if (locked) UnlockFileEx(file, 0, MAXDWORD, MAXDWORD, &offset);
+  CloseHandle(file);
+#else
+  int file = open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
+  if (file < 0) return false;
+  struct flock lock{};
+  lock.l_type = F_WRLCK;
+  lock.l_whence = SEEK_SET;
+  int status;
+  do { status = fcntl(file, F_SETLKW, &lock); } while (status < 0 && errno == EINTR);
+  bool result;
+  try {result = status == 0 && work();}catch(...){close(file);throw;}
+  close(file);
+#endif
+  return result;
+}
+
+bool WriteFileAtomically(const std::filesystem::path& destination, std::string_view bytes) {
+  std::error_code error;
+  const auto directory=destination.parent_path().empty()?std::filesystem::path("."):destination.parent_path();
+  std::filesystem::create_directories(directory, error);
+  if (error) return false;
+#if defined(_WIN32)
+  wchar_t name[MAX_PATH];
+  if (!GetTempFileNameW(directory.c_str(), L"cfg", 0, name)) return false;
+  const std::filesystem::path temporary(name);
+  HANDLE file = CreateFileW(name, GENERIC_WRITE, 0, nullptr, TRUNCATE_EXISTING,
+      FILE_ATTRIBUTE_NORMAL, nullptr);
+  bool ok = file != INVALID_HANDLE_VALUE;
+  size_t offset = 0;
+  while (ok && offset < bytes.size()) {
+    DWORD written = 0;
+    const DWORD count = DWORD(std::min<size_t>(bytes.size() - offset, MAXDWORD));
+    ok = WriteFile(file, bytes.data() + offset, count, &written, nullptr) && written > 0;
+    offset += written;
+  }
+  if (ok) ok = FlushFileBuffers(file);
+  if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+#else
+  std::string pattern = destination.string() + ".tmp-XXXXXX";
+  std::vector<char> name(pattern.begin(), pattern.end());
+  name.push_back(0);
+  int file = mkstemp(name.data());
+  if (file < 0) return false;
+  const std::filesystem::path temporary(name.data());
+  bool ok = true;
+  size_t offset = 0;
+  while (offset < bytes.size()) {
+    const auto count = write(file, bytes.data() + offset, bytes.size() - offset);
+    if (count < 0 && errno == EINTR) continue;
+    if (count <= 0) { ok = false; break; }
+    offset += size_t(count);
+  }
+  if (ok) ok = fsync(file) == 0;
+  if (close(file) != 0) ok = false;
+#endif
+  if (!ok) { std::filesystem::remove(temporary, error); return false; }
+  return ReplaceFileAtomically(temporary, destination);
+}
 
 bool ReplaceFileAtomically(const std::filesystem::path& temporary,
                            const std::filesystem::path& destination) {

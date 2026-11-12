@@ -127,6 +127,7 @@ std::optional<std::string> ReadFile(const std::filesystem::path& path) {
   }
   std::ostringstream contents;
   contents << input.rdbuf();
+  if (input.bad()) return std::nullopt;
   std::string text = contents.str();
   // Match the TOML loader and Windows text readers: a UTF-8 BOM is an
   // encoding marker, not part of the first setting's name.
@@ -143,18 +144,7 @@ bool WriteAtomically(const std::filesystem::path& path, std::string_view text) {
     body.pop_back();
   }
   body += newline;
-  std::error_code error;
-  std::filesystem::create_directories(path.parent_path(), error);
-  std::filesystem::path temporary = path;
-  temporary += ".tmp";
-  {
-    std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-    if (!output || !output.write(body.data(), std::streamsize(body.size())) || !output.flush()) {
-      std::filesystem::remove(temporary, error);
-      return false;
-    }
-  }
-  return platform::ReplaceFileAtomically(temporary, path);
+  return platform::WriteFileAtomically(path, body);
 }
 
 std::optional<std::filesystem::path> Backup(const std::filesystem::path& path) {
@@ -190,6 +180,7 @@ std::optional<std::filesystem::path> Backup(const std::filesystem::path& path) {
 HostConfig::HostConfig(std::filesystem::path path) : path_(std::move(path)) {}
 
 bool HostConfig::Load() {
+  pending_.clear();
   auto text = ReadFile(path_);
   if (!text) {
     loaded_ = false;
@@ -206,6 +197,7 @@ bool HostConfig::Load() {
 void HostConfig::Set(std::string_view name, std::string_view literal) {
   std::string updated = SetValue(text_, name, literal);
   if (updated != text_) {
+    pending_[std::string(name)] = std::string(literal);
     text_ = std::move(updated);
     dirty_ = true;
   }
@@ -218,15 +210,19 @@ bool HostConfig::Save() {
   if (!loaded_) {
     return false;
   }
-  if (!backed_up_) {
-    Backup(path_);
-    backed_up_ = true;
-  }
-  if (!WriteAtomically(path_, text_)) {
-    return false;
-  }
-  dirty_ = false;
-  return true;
+  auto lock_path=path_;lock_path+=".lock";
+  return platform::WithFileLock(lock_path, [this] {
+    auto latest = ReadFile(path_);
+    if (!latest) return false;
+    // Merge only this editor's changes into the latest atomic snapshot.
+    for (const auto& [name, literal] : pending_) *latest = SetValue(*latest, name, literal);
+    if (!backed_up_) { Backup(path_); backed_up_ = true; }
+    if (!WriteAtomically(path_, *latest)) return false;
+    text_ = std::move(*latest);
+    pending_.clear();
+    dirty_ = false;
+    return true;
+  });
 }
 
 }  // namespace pinyon_shift::config
