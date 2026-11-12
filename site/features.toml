@@ -314,4 +314,4 @@ cells = ["n/a", "n/a", "n/a", "partly: scoped normal/modded archives, reversible
 [[platform]]
 feature = "Android mod and pipeline management"
 link = "android.md#mods-dlc-and-prepared-shaders"
-cells = ["n/a", "n/a", "n/a", "partly: mod ZIP/folder import, order and options, Festival pacing, prepared Rally and pipeline-list import; native plugins and archive-member patches need PC preparation; phone qualification pending"]
+cells = ["n/a", "n/a", "n/a", "partly: mod ZIP/folder import, order and options, Festival pacing, prepared Rally and pipeline-list import; source follow-up adds damaged-mod recovery and normal-import marker stripping; native plugins and archive-member patches need PC preparation; further phone qualification pending"]

@@ -50,6 +50,10 @@ Import/check screens show current-file progress and offer cooperative cancellati
 
 The Android app imports local files. PC discovery, pairing, Wi-Fi copying and network APK updates have been removed. Copy your own extracted folder to the device over USB before selecting it; install app updates through Android’s installer. File-replacing overlays work in ISO mode, but mods which add files to directory enumerations should use the complete extracted folder.
 
+## Source polish follow-up
+
+The user confirmed that upstream test 2 starts and drives. The 12 November source follow-up fixes stale native configuration after a failed reload, commits hardware defaults with their completion marker, preserves interrupted-session reporting on forced closes, and improves damaged-mod recovery. Ordinary mod imports strip the internal built-in marker; installed built-ins open their details, and the content manager uses the shared controller navigation. These changes are source-only until the next APK is built. See the [full source and Android audit](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fh4droid-polish-audit-2026-11-12.md) for evidence, tests and 24 remaining choices.
+
 ## Startup checks
 
 The first 0.8.2 upstream test APK aborted while loading XMedia, before the title screen. Its refreshed main-only generated tree omitted the callback that registers SpeechFacade and XMediaFacade, even though both libraries were packaged. Test 2 restores that metadata. Configuration now rejects a missing or disconnected module registry, and packaging requires the linked registry and both libraries' registration exports. A host smoke test exercises the generated entrypoint callback and all 50,935 facade mappings with the matching SDK. This covers the reported startup failure; Android gameplay still requires device testing.
