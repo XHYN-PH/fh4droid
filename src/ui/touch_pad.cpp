@@ -282,9 +282,9 @@ TouchPad::Control TouchPad::Hit(float x, float y, float width, float height) con
   float best_distance = 0.0f;
   const auto& controls = controls_.empty() ? Controls() : controls_;
   for (size_t i = 0; i < controls.size(); ++i) {
-    if ((!hidden_.empty() && hidden_[i] && !(menu_context_&&MenuControl(controls[i].control)&&controls[i].control!=Control::kRightStick&&controls[i].control!=Control::kLeftStickClick&&controls[i].control!=Control::kRightStickClick)) || !Enabled(controls[i].control)) continue;
+    if ((!hidden_.empty() && hidden_[i] && !(menu_context_&&MenuControl(controls[i].control)&&controls[i].control!=Control::kLeftStickClick&&controls[i].control!=Control::kRightStickClick)) || !Enabled(controls[i].control)) continue;
     const Layout& control = controls[i];
-    if((control.control==Control::kStick && left_mode_==2)||(control.control==Control::kRightStick && right_mode_==2))continue;
+    if(!menu_context_&&((control.control==Control::kStick && left_mode_==2)||(control.control==Control::kRightStick && right_mode_==2)))continue;
     float control_x, control_y;
     Place(control, width, height, control_x, control_y);
     const float dx = x - control_x;
@@ -328,7 +328,7 @@ bool TouchPad::Enabled(Control control) const {
 }
 bool TouchPad::MenuControl(Control control) {
   return control!=Control::kNone && control!=Control::kThrottle && control!=Control::kBrake &&
-      control!=Control::kSteerLeft && control!=Control::kSteerRight && control!=Control::kStick;
+      control!=Control::kSteerLeft && control!=Control::kSteerRight;
 }
 
 bool TouchPad::IsDpad(Control control) {
@@ -540,7 +540,7 @@ rex::input::X_INPUT_GAMEPAD TouchPad::State() const {
   if ((buttons & vertical) == vertical) buttons &= ~vertical;
   if ((buttons & horizontal) == horizontal) buttons &= ~horizontal;
   pad.buttons = buttons;
-  if (arrow_steering_) {
+  if (arrow_steering_ && !menu_context_) {
     float target = float(int(right) - int(left)) * steering_lock_;
     if(left&&right)steering_value_=0;
     // Finish centring before starting the opposite turn, so a fast return
@@ -570,8 +570,8 @@ std::vector<TouchPad::Shape> TouchPad::Shapes(float width, float height) const {
   std::lock_guard lock(mutex_);
   const auto& controls = controls_.empty() ? Controls() : controls_;
   for (size_t i = 0; i < controls.size(); ++i) {
-    if ((!hidden_.empty() && hidden_[i] && !(menu_context_&&MenuControl(controls[i].control)&&controls[i].control!=Control::kRightStick&&controls[i].control!=Control::kLeftStickClick&&controls[i].control!=Control::kRightStickClick)) || !Enabled(controls[i].control)) continue;
-    if((controls[i].control==Control::kStick&&left_mode_==2)||(controls[i].control==Control::kRightStick&&right_mode_==2))continue;
+    if ((!hidden_.empty() && hidden_[i] && !(menu_context_&&MenuControl(controls[i].control)&&controls[i].control!=Control::kLeftStickClick&&controls[i].control!=Control::kRightStickClick)) || !Enabled(controls[i].control)) continue;
+    if(!menu_context_&&((controls[i].control==Control::kStick&&left_mode_==2)||(controls[i].control==Control::kRightStick&&right_mode_==2)))continue;
     const Layout& control = controls[i];
     Shape shape;
     Place(control, width, height, shape.x, shape.y);

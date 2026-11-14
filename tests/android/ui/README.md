@@ -25,7 +25,7 @@ scale and the ready/local-profile fixture state:
 
 | Screen | SHA-256 of ARGB pixels |
 | --- | --- |
-| B home | `9cc20da1ae83a8c112cc5ba40e4274ebcd8cdc1dfea0c70e1526925bed7db9d9` |
+| B home | `4286376af7d26f01699391bd112bbf7de3ab6e76ed754374257009cce9ccfbc7` |
 | Management | `0873a07ec285d44bd4158f00ec6ec1e23e240c4ef10c398214e0009f8e58e928` |
 
 These checks always run in CI. Optional `-Dlauncher.preview.baseline=/path/B.png`
@@ -39,3 +39,8 @@ restored focus/scroll and configuration changes, native slider keys, compact and
 large-text clipping, motion settling and reduced motion, and held-stick repeat
 with neutral/lost-focus cancellation. These are simulated input events. They do
 not establish physical controller compatibility or installed-APK rendering.
+
+Test 5 uses the approved dashboard revision with the two-by-two action grid.
+UiPolishTest renders the actual SettingsHub and GameMenuView, verifies the details
+panel stays on the right, persists a controller resolution change, checks a first
+touch activates exactly once and verifies the UI preference handoff.

@@ -51,30 +51,30 @@ final class AchievementsPage {
       search.setTextColor(FestivalUi.TEXT);
       search.setHintTextColor(FestivalUi.MUTED);
       search.setSingleLine(true);
-      body.addView(search);
-      Spinner filter = new Spinner(a);
-      filter.setAdapter(new ArrayAdapter<String>(a, android.R.layout.simple_spinner_dropdown_item,
-          new String[] {"All achievements", "Unlocked", "Locked"}));
-      body.addView(filter);
-      LinearLayout rows = FestivalUi.column(a);
-      body.addView(rows);
+      LinearLayout toolbar=new LinearLayout(a);toolbar.setGravity(android.view.Gravity.CENTER_VERTICAL);body.addView(toolbar);
+      int[] mode={0},page={0};Runnable[] update={null};
+      for(int i=0;i<3;i++){final int selected=i;Button filter=FestivalUi.button(a,new String[]{"All","Unlocked","Locked"}[i],false);filter.setTextSize(12);toolbar.addView(filter);filter.setOnClickListener(v->{mode[0]=selected;page[0]=0;update[0].run();});}
+      search.setTextSize(12);toolbar.addView(search,new LinearLayout.LayoutParams(0,-2,1));
+      LinearLayout paging=new LinearLayout(a);paging.setGravity(android.view.Gravity.RIGHT|android.view.Gravity.CENTER_VERTICAL);body.addView(paging);
+      Button previous=FestivalUi.button(a,"Previous",false),next=FestivalUi.button(a,"Next",false);paging.addView(previous);TextView count=FestivalUi.text(a,"",12,FestivalUi.TEXT);paging.addView(count);paging.addView(next);
+      previous.setOnClickListener(v->{page[0]=Math.max(0,page[0]-1);update[0].run();});next.setOnClickListener(v->{page[0]++;update[0].run();});
+      LinearLayout rows=FestivalUi.column(a);body.addView(rows);
       Map<Integer, Bitmap> icons = new HashMap<>();
       Runnable refresh = () -> {
         rows.removeAllViews();
         String query = search.getText().toString().toLowerCase(Locale.ROOT);
-        int mode = filter.getSelectedItemPosition();
-        for (int i = 0; i < entries.length(); i++) {
-          JSONObject e = entries.optJSONObject(i);
+        List<JSONObject> matched=new ArrayList<>();for(int i=0;i<entries.length();i++){JSONObject item=entries.optJSONObject(i);if(item==null)continue;boolean done=item.optBoolean("unlocked");if((mode[0]==1&&!done)||(mode[0]==2&&done)||!item.optString("name","").toLowerCase(Locale.ROOT).contains(query))continue;matched.add(item);}
+        int pages=Math.max(1,(matched.size()+5)/6);page[0]=Math.min(page[0],pages-1);count.setText("  "+(page[0]+1)+" / "+pages+"  ");previous.setEnabled(page[0]>0);next.setEnabled(page[0]+1<pages);LinearLayout pair=null;
+        for (int i = page[0]*6; i < Math.min(matched.size(),page[0]*6+6); i++) {
+          JSONObject e = matched.get(i);
           if (e == null)
             continue;
           boolean done = e.optBoolean("unlocked");
           String name = e.optString("name", "Achievement");
-          if ((mode == 1 && !done) || (mode == 2 && done)
-              || !name.toLowerCase(Locale.ROOT).contains(query))
-            continue;
+
           LinearLayout row = new LinearLayout(a);
           row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-          row.setPadding(0, FestivalUi.dp(a, 6), 0, FestivalUi.dp(a, 6));
+          row.setPadding(FestivalUi.dp(a,10),FestivalUi.dp(a,8),FestivalUi.dp(a,10),FestivalUi.dp(a,8));row.setFocusable(true);row.setClickable(true);FestivalUi.glassBackground(a,row,false,10);
           int id = e.optInt("id", -1);
           File icon =
               new File(MobileConfig.base(a), "state/cache/achievement-icons/" + id + ".png");
@@ -119,23 +119,18 @@ final class AchievementsPage {
                   + (done ? "Unlocked" + (date.isEmpty() ? "" : " · " + date) : "Locked"),
               12, FestivalUi.MUTED));
           row.setOnClickListener(v -> FestivalUi.explain(a, name, e.optString("description", "")));
-          rows.addView(row);
+          if(i%2==0){pair=new LinearLayout(a);LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-1,-2);pp.topMargin=FestivalUi.dp(a,6);rows.addView(pair,pp);}LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(0,-1,1);if(i%2==1)rp.leftMargin=FestivalUi.dp(a,8);pair.addView(row,rp);
         }
       };
+      update[0]=refresh;
       search.addTextChangedListener(new TextWatcher() {
         public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
         public void onTextChanged(CharSequence s, int start, int before, int count) {
-          refresh.run();
+          page[0]=0;refresh.run();
         }
         public void afterTextChanged(Editable e) {}
       });
-      filter.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
-        public void onItemSelected(
-            android.widget.AdapterView<?> parent, android.view.View v, int p, long id) {
-          refresh.run();
-        }
-        public void onNothingSelected(android.widget.AdapterView<?> p) {}
-      });
+
       refresh.run();
     } catch (Exception e) {
       body.addView(FestivalUi.text(

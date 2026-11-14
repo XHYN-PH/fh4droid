@@ -11,6 +11,9 @@ final class SaveArchive {
     private static final long LIMIT=512L*1024*1024;
     private static final int FILES=8192, DEPTH=64;
     private static final String V1="FH4Droid base-game saves v1\n", V2="FH4Droid base-game saves v2\n";
+    // Installed Marketplace payloads are content, never save progress.
+    private static final String[] CONTENT={"4D5309C9/00000002","4D5309C9/Disabled/00000002","4D5309C9/Headers/00000002"};
+    private static boolean contentPath(String relative){for(String path:CONTENT)if(relative.equalsIgnoreCase(path)||relative.toLowerCase(Locale.ROOT).startsWith(path.toLowerCase(Locale.ROOT)+"/"))return true;return false;}
     static final String NORMAL="user", MODDED="user-modded", BOTH="both";
     private static List<String> scopes(String scope)throws IOException{
         if(NORMAL.equals(scope)||MODDED.equals(scope))return Collections.singletonList(scope);
@@ -42,6 +45,8 @@ final class SaveArchive {
         File[] files=dir.listFiles();if(files==null)throw new IOException("Cannot read save folder.");
         Arrays.sort(files,Comparator.comparing(File::getName));
         for(File file:files){
+            String relative=root.toPath().relativize(file.toPath()).toString().replace(File.separatorChar,'/');
+            if(contentPath(relative))continue;
             if(++budget[0]>FILES)throw new IOException("Too many save entries.");
             if(Files.isSymbolicLink(file.toPath()))throw new IOException("Save links are not supported.");
             if(file.isDirectory()){write(root,file,prefix,zip,budget,depth+1);continue;}
@@ -109,13 +114,19 @@ final class SaveArchive {
         if(Files.isSymbolicLink(state.toPath())||Files.isSymbolicLink(stage.toPath()))throw new IOException("Linked save roots are not supported.");
         for(String root:roots)if(!rootName(root)||Files.isSymbolicLink(new File(state,root).toPath())||Files.isSymbolicLink(new File(stage,root).toPath()))throw new IOException("Invalid or linked profile folder.");
         for(String root:roots)for(File folder:new File[]{new File(state,root),new File(stage,root)})if(folder.exists()&&!folder.isDirectory())throw new IOException("A profile path is not a folder.");
-        File backup=newBackup(state),payload=new File(backup,"payload");List<String> moved=new ArrayList<>(),installed=new ArrayList<>();
+        // A save import cannot replace installed packages, even from an old export.
+        for(String root:roots)for(String path:CONTENT)if(Files.exists(new File(stage,root+"/"+path).toPath(),LinkOption.NOFOLLOW_LINKS))throw new IOException("This backup contains installed DLC. Export saves using the current app first.");
+        List<String> retained=new ArrayList<>();
+        for(String root:roots)for(String path:CONTENT){File live=new File(state,root+"/"+path);if(Files.exists(live.toPath(),LinkOption.NOFOLLOW_LINKS)){if(Files.isSymbolicLink(live.toPath())||!live.isDirectory())throw new IOException("Invalid installed content folder.");for(File f=live;f!=null&&f.toPath().startsWith(state.toPath());f=f.getParentFile())if(Files.isSymbolicLink(f.toPath()))throw new IOException("Linked installed content is not supported.");File parent=new File(stage,root+"/"+path).getParentFile();for(File f=parent;f!=null&&f.toPath().startsWith(stage.toPath());f=f.getParentFile())if(Files.exists(f.toPath(),LinkOption.NOFOLLOW_LINKS)&&(Files.isSymbolicLink(f.toPath())||!f.isDirectory()))throw new IOException("Invalid save content parent.");retained.add(root+"/"+path);}}
+        File backup=newBackup(state),payload=new File(backup,"payload");List<String> moved=new ArrayList<>(),installed=new ArrayList<>(),preserved=new ArrayList<>();
         try{
             Files.write(new File(backup,"roots.txt").toPath(),String.join("\n",roots).getBytes(StandardCharsets.UTF_8));
             for(String root:roots){File live=new File(state,root);if(live.exists()){move(live,new File(payload,root));moved.add(root);}}
             for(String root:roots){File incoming=new File(stage,root);if(incoming.exists()){move(incoming,new File(state,root));installed.add(root);}}
+            for(String path:retained){move(new File(payload,path),new File(state,path));preserved.add(path);}
         }catch(IOException error){
-            boolean rolledBack=true;Collections.reverse(installed);Collections.reverse(moved);
+            boolean rolledBack=true;Collections.reverse(installed);Collections.reverse(moved);Collections.reverse(preserved);
+            for(String path:preserved)try{move(new File(state,path),new File(payload,path));}catch(IOException rollback){error.addSuppressed(rollback);rolledBack=false;}
             for(String root:installed)try{move(new File(state,root),new File(stage,root));}catch(IOException rollback){error.addSuppressed(rollback);rolledBack=false;}
             for(String root:moved)try{move(new File(payload,root),new File(state,root));}catch(IOException rollback){error.addSuppressed(rollback);rolledBack=false;}
             if(rolledBack)delete(backup);else throw new IOException("Save rollback needs recovery from "+backup.getName()+". Existing backups were retained.",error);

@@ -11,7 +11,7 @@ import org.json.*;
 final class UiPreferences {
   private static final Set<String> BOOLEANS =
       new HashSet<>(Arrays.asList("animations", "show_fps", "show_frame_time", "show_memory_heat", "match_refresh", "phone_rumble",
-          "phone_tilt", "press_names", "sustained_mode", "advanced_settings", "detailed_gpu", "extended_capture"));
+          "phone_tilt", "tilt_invert", "press_names", "sustained_mode", "advanced_settings", "detailed_gpu", "extended_capture"));
   static Map<String, Object> sanitized(Map<String, ?> values) {
     Map<String, Object> result = new LinkedHashMap<>();
     for (Map.Entry<String, ?> entry : values.entrySet()) {
@@ -85,7 +85,9 @@ final class UiPreferences {
       SharedPreferences.Editor editor = c.getSharedPreferences("mobile", 0).edit();
       for (Map.Entry<String, Object> entry : sanitized(values).entrySet()) {
         Object value = entry.getValue();
-        if (value instanceof Boolean)
+        if (value instanceof String)
+          editor.putString(entry.getKey(), (String) value);
+        else if (value instanceof Boolean)
           editor.putBoolean(entry.getKey(), (Boolean) value);
         else if (value instanceof Float)
           editor.putFloat(entry.getKey(), (Float) value);

@@ -13,25 +13,27 @@ import java.util.*;
 final class ProfilePage {
     static void show(Activity a,Runnable choosePicture,Runnable saves){
         LinearLayout body=FestivalUi.column(a);Map<String,String> settings=MobileConfig.read(a);
-        body.addView(FestivalUi.text(a,settings.getOrDefault("user_name","User")+" · Offline profile",18,FestivalUi.TEXT));
-        body.addView(FestivalUi.text(a,"Next launch: "+LocalProfile.configuredProfile(settings)+"\n"+LocalProfile.backupStatus(settings),13,FestivalUi.MUTED));
-        body.addView(FestivalUi.text(a,"Your local name, picture and achievements do not connect to Xbox LIVE. Online Rivals, storefront and multiplayer require services this app does not provide. Changing your name or picture keeps your existing save identity.",13,FestivalUi.MUTED));
-        FestivalUi.action(a,body,"Edit gamertag · next launch",()->{
-            EditText input=new EditText(a);input.setSingleLine(true);input.setText(settings.getOrDefault("user_name","User"));
+        TextView identity=FestivalUi.text(a,"",18,FestivalUi.TEXT);body.addView(identity);FestivalUi.onRefresh(identity,()->identity.setText(MobileConfig.get(a,"user_name","User")+" · Offline profile"));
+        body.addView(FestivalUi.text(a,"Next launch: "+LocalProfile.configuredProfile(settings)+" · "+LocalProfile.backupStatus(settings),13,FestivalUi.MUTED));
+        LinearLayout actions=FestivalUi.column(a);
+        FestivalUi.action(a,actions,"Edit gamertag · next launch",()->{
+            EditText input=new EditText(a);input.setSingleLine(true);input.setText(MobileConfig.get(a,"user_name","User"));
             input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(15)});
             AlertDialog dialog=new AlertDialog.Builder(a).setTitle("Local gamertag").setView(input).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
             dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
-                try{String name=LocalProfile.gamertag(input.getText().toString());MobileConfig.put(a,"user_name",MobileConfig.quote(name));dialog.dismiss();Toast.makeText(a,"Gamertag saved for the next launch",Toast.LENGTH_SHORT).show();}
+                try{String name=LocalProfile.gamertag(input.getText().toString());MobileConfig.put(a,"user_name",MobileConfig.quote(name));dialog.dismiss();FestivalUi.refreshTree(body);Toast.makeText(a,"Gamertag saved for the next launch",Toast.LENGTH_SHORT).show();}
                 catch(IllegalArgumentException|IOException error){input.setError(error.getMessage());}
             }));dialog.show();
         });
-        if(choosePicture!=null)FestivalUi.action(a,body,"Choose gamer picture · next launch",choosePicture);
-        FestivalUi.action(a,body,"Local achievements",()->AchievementsPage.show(a,null));
-        if(saves!=null)FestivalUi.action(a,body,"Save backups",saves);
-        FestivalUi.action(a,body,"Automatic save backups",()->FestivalUi.choose(a,"Automatic save backups · next launch",new String[]{"On","Off"},"false".equals(MobileConfig.get(a,"pinyon_shift_save_backups","true"))?1:0,index->{
+        if(choosePicture!=null)FestivalUi.action(a,actions,"Choose gamer picture · next launch",choosePicture);
+        FestivalUi.action(a,actions,"Local achievements",()->AchievementsPage.show(a,null));
+        if(saves!=null)FestivalUi.action(a,actions,"Save backups",saves);
+        FestivalUi.action(a,actions,"Automatic save backups",()->FestivalUi.choose(a,"Automatic save backups · next launch",new String[]{"On","Off"},"false".equals(MobileConfig.get(a,"pinyon_shift_save_backups","true"))?1:0,index->{
             try{MobileConfig.put(a,"pinyon_shift_save_backups",Boolean.toString(index==0));Toast.makeText(a,"Backup preference saved for the next launch",Toast.LENGTH_SHORT).show();}
             catch(IOException error){SettingsHub.error(a,error);}
         }));
+        FestivalUi.action(a,actions,"About local profiles",()->FestivalUi.explain(a,"Offline profile","Your local name, picture and achievements stay on this device. Xbox LIVE, Rivals, storefront and online multiplayer are unavailable. Changing your name or picture preserves your save identity."));
+        while(actions.getChildCount()>0){LinearLayout pair=new LinearLayout(a);LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,-2);rp.topMargin=FestivalUi.dp(a,8);body.addView(pair,rp);for(int i=0;i<2&&actions.getChildCount()>0;i++){android.view.View button=actions.getChildAt(0);actions.removeViewAt(0);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,FestivalUi.dp(a,48),1);if(i>0)bp.leftMargin=FestivalUi.dp(a,8);pair.addView(button,bp);}}
         FestivalUi.present(a,"Profile",body);
     }
     static void importPicture(Activity a,Uri uri)throws Exception{

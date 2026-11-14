@@ -193,6 +193,7 @@ final class MobileSettings {
 
   static String label(Option option, String str) {
     str = SettingValues.plain(str);
+    if(option.key.equals("pinyon_shift_fh1_render_fps_limit"))return str+" FPS";
     if (option.key.equals("fh1_coarse_shading")) return str.isEmpty() ? "Full" : "Coarse";
     if (str.equals("true") || str.equals("false")) {
       boolean zEquals = str.equals("true");

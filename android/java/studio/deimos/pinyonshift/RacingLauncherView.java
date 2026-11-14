@@ -294,8 +294,8 @@ public final class RacingLauncherView extends FrameLayout {
     scroll.addView(body);
     slot.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
     if (externalBody != null) {
-      title(body, externalTitle, "", compact ? 25 : 30);
-      gap(body, compact ? 10 : 16);
+      LinearLayout headingRow=row();TextView heading=text(externalTitle,compact?23:25,WHITE,true);heading.setTypeface(Typeface.create("sans-serif-condensed",Typeface.BOLD));headingRow.addView(heading,new LinearLayout.LayoutParams(0,-2,1));Object header=externalBody.getTag(FestivalUi.HEADER_ACTIONS);if(header instanceof View){View actions=(View)header;if(actions.getParent() instanceof ViewGroup)((ViewGroup)actions.getParent()).removeView(actions);headingRow.addView(actions,new LinearLayout.LayoutParams(-2,-2));}body.addView(headingRow,lp(-1,-2));
+      gap(body,compact?8:12);
       if (externalBody.getParent() instanceof ViewGroup)
         ((ViewGroup) externalBody.getParent()).removeView(externalBody);
       boolean full = Boolean.TRUE.equals(externalBody.getTag(FestivalUi.FULL_PAGE));
@@ -464,71 +464,27 @@ public final class RacingLauncherView extends FrameLayout {
     right.setOnClickListener(v -> open(b));
   }
 
+  private boolean stackedHome(){return getResources().getConfiguration().screenWidthDp<540 || largeText();}
   private void grid(LinearLayout body) {
-    body.setGravity(Gravity.BOTTOM);
-    TextView eyebrow = text("YOUR NEXT SESSION", 10, MUTED, true);
-    eyebrow.setLetterSpacing(.16f);
-    body.addView(eyebrow);
-    gap(body, 8);
-    TextView heading =
-        text(
-            model.ready ? "THE ROAD IS YOURS." : "YOUR HORIZON STARTS HERE.",
-            compact ? 35 : 43,
-            WHITE,
-            true);
-    heading.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD_ITALIC));
-    body.addView(heading, lp(-1, -2));
-    gap(body, 8);
-    TextView configured = text(model.graphics, 12, MUTED, false);
-    body.addView(configured, lp(-1, -2));
-    if (!model.notice.isEmpty()) {
-      gap(body, 6);
-      TextView warning = text(model.notice, 11, 0xfff4bf6a, false);
-      warning.setMaxLines(2);
-      body.addView(warning, lp(-1, -2));
-    }
-    gap(body, compact ? 16 : 24);
-    tileScroller = new HorizontalScrollView(getContext());
-    tileScroller.setHorizontalScrollBarEnabled(false);
-    tileScroller.setClipToPadding(false);
-    tileScroller.setFocusable(false);
-    tileScroller.setSmoothScrollingEnabled(true);
-    int available = getResources().getConfiguration().screenWidthDp - (compact ? 48 : 60);
-    int tileWidth =
-        Math.max(
-            available,
-            Math.round(730 * Math.max(1, uiScale() * getResources().getConfiguration().fontScale)));
-    LinearLayout tiles =
-        new LinearLayout(getContext()) {
-          @Override
-          protected void onMeasure(int width, int height) {
-            super.onMeasure(
-                MeasureSpec.makeMeasureSpec(dp(tileWidth), MeasureSpec.EXACTLY), height);
-          }
-        };
-    tiles.setGravity(Gravity.CENTER_VERTICAL);
-    tiles.setClipChildren(false);
-    tileScroller.addView(tiles, new FrameLayout.LayoutParams(dp(tileWidth), -1));
-    body.addView(tileScroller, lp(-1, cardHeight(compact ? 110 : 132)));
-    String[][] entries = {
-      {
-        "play",
-        "play",
-        model.running ? "Resume" : model.ready ? "Play" : "Set up game",
-        "Start Forza Horizon"
-      },
-      {"settings", "sliders", "Settings", "Graphics & sound"},
-      {"controls", "controller", "Controls", "Touch & controller"},
-      {"files", "folder", "Game files", "Install & storage"},
-      {"more", "grid", "More", "Mods, saves & tools"}
-    };
-    for (int i = 0; i < entries.length; i++) {
-      String[] item = entries[i];
-      FocusCard tile = card(item[0], item[1], item[2], item[3], i == 0, true);
-      LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, -1, i == 0 ? 1.7f : 1);
-      if (i > 0) p.leftMargin = dp(10);
-      tiles.addView(tile, p);
-      tile.setOnClickListener(v -> activate(item[0]));
+    body.setGravity(Gravity.CENTER_VERTICAL);
+    title(body, model.running?"Game running":model.ready?"Ready to drive":"Game files needed", model.graphics, compact ? 23 : 29);
+    if(!model.notice.isEmpty()){TextView notice=text(model.notice,11,0xfff4bf6a,false);notice.setMaxLines(2);body.addView(notice,lp(-1,-2));}
+    gap(body,compact?10:16);
+    if(stackedHome()){
+      FocusCard play=card("play","play",model.running?"Resume":model.ready?"Play":"Set up game","Start Forza Horizon",true,false);
+      body.addView(play,lp(-1,cardHeight(compact?72:80)));play.setOnClickListener(v->activate("play"));
+      gap(body,compact?6:10);
+      LinearLayout first=row(),second=row();body.addView(first,lp(-1,cardHeight(compact?45:58)));gap(body,compact?6:10);body.addView(second,lp(-1,cardHeight(compact?45:58)));
+      addPair(first,"settings","sliders","Settings","Graphics & sound","controls","controller","Controls","Touch & controller");
+      addPair(second,"files","folder","Game files","Installation & storage","more","grid","More","Mods, saves & tools");
+    }else{
+      LinearLayout area=row();body.addView(area,lp(-1,cardHeight(compact?105:135)));
+      FocusCard play=card("play","play",model.running?"Resume":model.ready?"Play":"Set up game","Start Forza Horizon",true,true);
+      area.addView(play,new LinearLayout.LayoutParams(0,-1,1));play.setOnClickListener(v->activate("play"));
+      LinearLayout options=column();LinearLayout.LayoutParams op=new LinearLayout.LayoutParams(0,-1,1.6f);op.leftMargin=dp(10);area.addView(options,op);
+      LinearLayout first=row(),second=row();options.addView(first,new LinearLayout.LayoutParams(-1,0,1));gap(options,8);options.addView(second,new LinearLayout.LayoutParams(-1,0,1));
+      addPair(first,"settings","sliders","Settings","Graphics & sound","controls","controller","Controls","Touch & controller");
+      addPair(second,"files","folder","Game files","Installation & storage","more","grid","More","Mods, saves & tools");
     }
   }
 
@@ -630,6 +586,7 @@ public final class RacingLauncherView extends FrameLayout {
       view.setMinimumHeight(dp(32));
       view.setFocusable(true);
       view.setFocusableInTouchMode(true);
+      FestivalUi.touchFocus(view);
       view.setClickable(true);
       android.graphics.drawable.StateListDrawable background =
           new android.graphics.drawable.StateListDrawable();
@@ -828,13 +785,13 @@ public final class RacingLauncherView extends FrameLayout {
         edge("files", View.FOCUS_DOWN, "youtube");
         edge("more", View.FOCUS_DOWN, "github");
       } else {
-        String[] order = {"play", "settings", "controls", "files", "more"};
-        for (int i = 0; i < order.length; i++) {
-          edge(order[i], View.FOCUS_UP, "profile");
-          edge(order[i], View.FOCUS_DOWN, i < 2 ? "youtube" : i == 2 ? "telegram" : "github");
-          if (i > 0) edge(order[i], View.FOCUS_LEFT, order[i - 1]);
-          if (i + 1 < order.length) edge(order[i], View.FOCUS_RIGHT, order[i + 1]);
-        }
+        edge("play",View.FOCUS_RIGHT,"settings");edge("play",View.FOCUS_DOWN,stackedHome()?"settings":"youtube");
+        edge("settings",View.FOCUS_UP,stackedHome()?"play":"profile");edge("controls",View.FOCUS_UP,stackedHome()?"play":"profile");
+        edge("settings",View.FOCUS_LEFT,"play");edge("files",View.FOCUS_LEFT,"play");
+        edge("settings",View.FOCUS_RIGHT,"controls");edge("controls",View.FOCUS_LEFT,"settings");edge("controls",View.FOCUS_RIGHT,"controls");
+        edge("settings",View.FOCUS_DOWN,"files");edge("files",View.FOCUS_UP,"settings");edge("controls",View.FOCUS_DOWN,"more");edge("more",View.FOCUS_UP,"controls");
+        edge("files",View.FOCUS_RIGHT,"more");edge("more",View.FOCUS_LEFT,"files");edge("more",View.FOCUS_RIGHT,"more");
+        edge("files",View.FOCUS_DOWN,"youtube");edge("more",View.FOCUS_DOWN,"github");
       }
       edge("youtube", View.FOCUS_UP, "files");
       edge("telegram", View.FOCUS_UP, "more");
@@ -1055,6 +1012,7 @@ public final class RacingLauncherView extends FrameLayout {
       setClickable(true);
       setFocusable(true);
       setFocusableInTouchMode(true);
+      FestivalUi.touchFocus(this);
       setContentDescription(
           AppLanguage.text(getContext(), title)
               + (subtitle.isEmpty() ? "" : ". " + AppLanguage.text(getContext(), subtitle)));

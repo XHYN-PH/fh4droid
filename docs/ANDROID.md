@@ -30,7 +30,7 @@ notice is in `android/drivers/turnip-gen8-v37/NOTICE.txt`) and installs it
 into `files/state/drivers` at start. SETTINGS > GRAPHICS > GPU DRIVER picks
 the Vulkan driver loaded at the next start (`android_gpu_driver`): AUTO, the
 default, loads the one recommended for the GPU (Turnip Gen8 V37 on Adreno
-7xx and 8xx, the system's elsewhere), SYSTEM the device's own, and every
+7xx and 8xx except 730, which uses the system driver; system elsewhere), SYSTEM the device's own, and every
 folder under `files/state/drivers` by name. IMPORT DRIVER (.ZIP) opens the
 system's file picker for an adrenotools package (a `.zip` with `meta.json`
 and the driver `.so`), which is unpacked into a folder named after the zip.
@@ -390,8 +390,9 @@ the updated Odin run produces no corresponding native crash record.
 ## Current mobile presentation
 
 The launcher shows the existing transparent FH4Droid logo without a backing box.
-The race-grid launcher uses the approved B home layout with a horizontal Play,
-Settings, Controls, Game files and More row. More groups content, drivers, saves,
+The race-grid launcher uses the approved B dashboard: Play on the left and
+Settings, Controls, Game files and More in a two-by-two grid on the right.
+Narrow displays or larger text stack Play above the grid. More groups content, drivers, saves,
 achievements, reports and About into a six-card management grid. The existing
 road background and transparent logo remain. Profile is available in the header;
 Cheats is in the Mods tab. Focus settles over 160 ms and pages slide/fade over
@@ -399,7 +400,11 @@ Cheats is in the Mods tab. Focus settles over 160 ms and pages slide/fade over
 are documented in [tests/android/ui](../tests/android/ui/README.md).
 
 Settings use Graphics, Audio, Controls, Interface, Gameplay and Advanced sections;
-Android Back opens Resume, Settings, Controls, More and Quit. The touch editor
+Descriptions stay on the right at both tested landscape sizes. Focus updates
+the explanation; Left/Right adjusts choice rows, including render resolution.
+The game uses a small menu icon at the upper right and text-only menu actions.
+Android Back also opens that menu. It offers Resume, Settings, Touch controls,
+Controller, Diagnostics, Achievements, Profile, More and Quit. The touch editor
 uses the whole window for placement, with a separate full-window Properties
 view and Save, Cancel, Test and Hide tools actions. The active custom layout is
 kept until the player explicitly applies a preset or saves an edited draft.

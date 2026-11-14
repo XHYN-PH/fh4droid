@@ -37,6 +37,8 @@ public final class MobileRefinementsTest {
       check(Math.abs(DrivingMath.tilt(-179,179,35))<.1f,"tilt handles angle wraparound");
       check(DrivingMath.tilt(Float.POSITIVE_INFINITY,0,35)==0,"invalid sensor input releases steering");
       check(Float.isFinite(DrivingMath.tilt(Float.MAX_VALUE,-Float.MAX_VALUE,35)),"extreme finite sensor values normalize without an unbounded loop");
+      check(DrivingMath.phoneTilt(35,0,35,.03f,false)==-1&&DrivingMath.phoneTilt(-35,0,35,.03f,false)==1,"phone roll maps to the corrected steering axis");
+      check(DrivingMath.phoneTilt(35,0,35,.03f,true)==1&&DrivingMath.phoneTilt(0,0,35,.03f,false)==0,"invert preference and centred phone input");
       check(DrivingMath.sustainedTarget(0,false,4)==0&&DrivingMath.sustainedTarget(20,false,4)==20,"disabled thermal mode preserves custom limits");
       check(DrivingMath.sustainedTarget(0,true,3)==30&&DrivingMath.sustainedTarget(60,true,3)==30,"severe heat bounds uncapped and high targets");
       check(DrivingMath.sustainedTarget(20,true,3)==20&&DrivingMath.sustainedTarget(40,true,0)==40,"thermal mode never raises a low limit and restores the requested limit");

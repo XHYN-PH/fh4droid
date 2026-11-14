@@ -302,6 +302,10 @@ int main() {
   CHECK(!Has(pad,"RT")&&!Has(pad,"LEFT")&&Has(pad,"A")&&Has(pad,"B")&&Has(pad,"UP"));
   CHECK(!Find(pad,"A").driving_icons&&pad.Visible());
   Press(pad,3,"A");CHECK(pad.State().buttons==rex::input::X_INPUT_GAMEPAD_A);Release(pad,3);
+  CHECK(Has(pad,"LS")&&Has(pad,"RS"));
+  Press(pad,25,"LS");auto ls=Find(pad,"LS");Access::Touch(pad,25,Action::kMove,ls.x+ls.radius*.8f,ls.y-ls.radius*.6f);
+  CHECK(pad.State().thumb_lx>10000&&pad.State().thumb_ly>10000);Release(pad,25);
+  Press(pad,26,"RS");auto rs=Find(pad,"RS");Access::Touch(pad,26,Action::kMove,rs.x+rs.radius*.8f,rs.y);CHECK(pad.State().thumb_rx>10000);Release(pad,26);
   pad.SetMenuContext(false);pad.SetPhoneSteering(0,false);
   CHECK(Has(pad,"RT")&&!Has(pad,"A")&&!Has(pad,"B")&&pad.State().buttons==0);
   {std::ofstream out(layout);out<<"idle_seconds 0\nmap A Y\nmap Y A\nmap LS RT\n";}

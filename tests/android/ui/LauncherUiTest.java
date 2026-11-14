@@ -100,7 +100,7 @@ public class LauncherUiTest {
     Bitmap image = screenshot(root, "B-home");
     assertEquals(
         "Approved B home pixels changed",
-        "9cc20da1ae83a8c112cc5ba40e4274ebcd8cdc1dfea0c70e1526925bed7db9d9",
+        "4286376af7d26f01699391bd112bbf7de3ab6e76ed754374257009cce9ccfbc7",
         pixelDigest(image));
     String baseline = System.getProperty("launcher.preview.baseline");
     if (baseline != null) {
@@ -135,7 +135,7 @@ public class LauncherUiTest {
     root.requestActionFocus("play");
     key(root, KeyEvent.KEYCODE_BUTTON_A);
     assertEquals(Arrays.asList("play"), actions);
-    for (int i = 0; i < 4; i++) key(root, KeyEvent.KEYCODE_DPAD_RIGHT);
+    key(root, KeyEvent.KEYCODE_DPAD_RIGHT);key(root, KeyEvent.KEYCODE_DPAD_RIGHT);key(root, KeyEvent.KEYCODE_DPAD_DOWN);
     assertEquals("more", root.focusedAction());
     key(root, KeyEvent.KEYCODE_DPAD_DOWN);
     assertEquals("github", root.focusedAction());
@@ -424,10 +424,10 @@ public class LauncherUiTest {
     right = stick(1, InputDevice.SOURCE_JOYSTICK);
     root.dispatchGenericMotionEvent(right);
     right.recycle();
-    assertEquals("files", root.focusedAction());
+    assertEquals("controls", root.focusedAction());
     root.onWindowFocusChanged(false);
     settle();
-    assertEquals("files", root.focusedAction());
+    assertEquals("controls", root.focusedAction());
   }
 
   private TextView findText(View root, String text) {

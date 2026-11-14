@@ -25,6 +25,7 @@ final class FestivalUi {
   static final int FULL_PAGE = 0x7f0a7f04;
   static final int FOCUS_KEY = 0x7f0a7f05;
   static final int DEFAULT_FOCUS = 0x7f0a7f06;
+  static final int HEADER_ACTIONS = 0x7f0a7f07;
   private static final int SCROLL_STATE = 0x7f0a7f01;
   private static final int REFRESH = 0x7f0a7f02;
   private static final int PAGE_SCROLL = 0x7f0a7f03;
@@ -89,8 +90,11 @@ final class FestivalUi {
     states.setEnterFadeDuration(animations(a)?120:0);
     v.setBackground(new RippleDrawable(
         ColorStateList.valueOf(0x22ffffff), states, surface(a, Color.WHITE, radius)));
+    touchFocus(v);
     MenuMotion.press(v);
   }
+  // Gain focus on down, so Android does not consume the first release only to focus.
+  static void touchFocus(View view){view.setOnTouchListener((v,event)->{if(event.getActionMasked()==MotionEvent.ACTION_DOWN&&v.isEnabled())v.requestFocus();return false;});}
   private static void buttonMotion(Button b) { MenuMotion.press(b); }
   static Button button(Activity a, String title, boolean primary) {
     Button b = new Button(a);
@@ -99,7 +103,7 @@ final class FestivalUi {
     b.setTextSize(Math.max(15,16 * scale(a)));
     b.setTextColor(primary ? BG : TEXT);
     String iconKind=MenuIcon.kind(title);
-    if(iconKind!=null){b.setCompoundDrawablesRelativeWithIntrinsicBounds(new MenuIcon(a,iconKind,primary ? BG : TEXT),null,null,null);b.setCompoundDrawablePadding(dp(a,8));}
+    if(!(a instanceof PinyonShiftActivity)&&iconKind!=null){b.setCompoundDrawablesRelativeWithIntrinsicBounds(new MenuIcon(a,iconKind,primary ? BG : TEXT),null,null,null);b.setCompoundDrawablePadding(dp(a,8));}
     b.setTypeface(Typeface.create("sans-serif-medium", 0));
     b.setGravity(Gravity.CENTER);
     b.setIncludeFontPadding(false);
@@ -120,6 +124,7 @@ final class FestivalUi {
     b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33ffffff),states,surface(a,Color.WHITE,12)));
     b.setFocusable(true);
     b.setFocusableInTouchMode(true);
+    touchFocus(b);
     b.setMinimumHeight(dp(a, 48));
     b.setMinHeight(dp(a, 48));
     b.setMinWidth(0);
@@ -640,7 +645,7 @@ final class FestivalUi {
     return s;
   }
   static void controlFocus(Activity a,View control){
-    control.setFocusable(true);control.setFocusableInTouchMode(true);
+    control.setFocusable(true);control.setFocusableInTouchMode(true);touchFocus(control);
     StateListDrawable states=new StateListDrawable();
     states.addState(new int[]{android.R.attr.state_focused},outlined(a,0x10272530,ORANGE,1.5f,8));
     states.addState(new int[]{},new ColorDrawable(Color.TRANSPARENT));
@@ -678,6 +683,7 @@ final class FestivalUi {
         head.addView(resume, new LinearLayout.LayoutParams(-2, -2));
         resume.setOnClickListener(v -> ((PinyonShiftActivity) a).resumeDriving());
       }
+      Object headerActions=body.getTag(HEADER_ACTIONS);if(headerActions instanceof View){View actions=(View)headerActions;if(actions.getParent() instanceof ViewGroup)((ViewGroup)actions.getParent()).removeView(actions);head.addView(actions);}
       p.addView(head);
     }
     if(Boolean.TRUE.equals(body.getTag(FULL_PAGE))){

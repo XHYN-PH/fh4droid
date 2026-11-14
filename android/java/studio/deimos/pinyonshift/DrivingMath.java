@@ -31,6 +31,10 @@ final class DrivingMath {
     if (difference < -180) difference += 360;
     return axis(difference / Math.max(15, Math.min(75, range)), deadzone, 1, 1);
   }
+  // Device roll and the XInput steering axis have opposite signs.
+  static float phoneTilt(float angle,float centre,float range,float deadzone,boolean invert){
+    float value=-tilt(angle,centre,range,deadzone);return invert?-value:value;
+  }
   static int sustainedTarget(int requested, boolean enabled, int thermal) {
     int normal = Math.max(0, Math.min(240, requested));
     return enabled && thermal >= 3 ? normal==0?30:Math.min(30, normal) : normal;

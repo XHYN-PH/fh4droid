@@ -22,7 +22,9 @@ final class MenuIcon extends Drawable {
   @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
   @Override public void draw(Canvas canvas) {
     Rect b=getBounds();canvas.save();canvas.translate(b.left,b.top);canvas.scale(b.width()/24f,b.height()/24f);
-    if(kind.equals("play")) {
+    if(kind.equals("menu")) {
+      for(int y:new int[]{6,12,18})canvas.drawLine(4,y,20,y,paint);
+    } else if(kind.equals("play")) {
       Path p=new Path();p.moveTo(7,3);p.lineTo(20,12);p.lineTo(7,21);p.close();paint.setStyle(Paint.Style.FILL);canvas.drawPath(p,paint);paint.setStyle(Paint.Style.STROKE);
     } else if(kind.equals("settings")) {
       for(int y:new int[]{6,12,18}) canvas.drawLine(3,y,21,y,paint);
