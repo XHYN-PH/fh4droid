@@ -4,6 +4,8 @@ This test build brings the revised dashboard and settings into the app, using th
 
 - Play sits beside a two-by-two action grid. Narrow displays and larger text use a stacked layout.
 - Settings show explanations on the right. Move focus to read about an option; use Left/Right to adjust choices. Render resolution changes by 1% and saves for the next launch. Search, favourites, reset and undo remain available.
+- Driving touch controls use text action names or controller codes. The editor uses the same text artwork as the game.
+- The full-screen editor offers gridlines, optional snapping and 16/24/32 dp grid spacing under Edit. Snapping respects safe screen edges; Hide tools frees the canvas for placement. Properties uses the full window.
 - The in-game menu opens from a small icon at the upper right or Android Back. Its actions use text only. The pressed-button popup is removed.
 - Menu buttons activate on the first tap. Profile actions use a compact grid; achievements have search, filters and six entries per page.
 - Phone tilt has corrected steering direction and an optional inversion setting. Both analog sticks stay available in detected menu/photo contexts, even when driving uses arrows. Arrow processing no longer overwrites the menu's left-stick input.

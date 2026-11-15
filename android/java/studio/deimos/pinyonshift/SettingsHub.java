@@ -436,12 +436,12 @@ final class SettingsHub {
       FestivalUi.onRefresh(style, () -> {
         TouchLayout current = new TouchLayout();
         current.load(a);
-        style.setText("Layout: " + (current.drivingLabels ? "Mobile driving" : "Xbox buttons"));
+        style.setText("Layout: " + (current.drivingLabels ? "Driving action names" : "Controller button codes"));
       });
       style.setOnClickListener(v -> {
         TouchLayout current = new TouchLayout();
         current.load(a);
-        FestivalUi.choose(a, "Touch layout", new String[] {"Xbox buttons", "Mobile driving"},
+        FestivalUi.choose(a, "Touch layout", new String[] {"Controller button codes", "Driving action names"},
             current.drivingLabels ? 1 : 0, i -> {
               try {
                 TouchLayout.selectStyle(a, i == 1);
@@ -461,8 +461,8 @@ final class SettingsHub {
           catch(IOException error){error(a,error);}
         });});
       FestivalUi.toggle(a, rows, "Button names",
-          "Button codes above each icon and action names below. "
-              + "Action icons assume the game's default bindings.",
+          "Optional controller codes above the text action names. "
+              + "Action names assume the game's default bindings.",
           ()->{TouchLayout current=new TouchLayout();current.load(a);return current.buttonHints;}, on -> {
             try {
               TouchLayout current = new TouchLayout();

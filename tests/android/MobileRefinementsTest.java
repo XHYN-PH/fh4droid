@@ -49,6 +49,8 @@ public final class MobileRefinementsTest {
       String configured=AdrenoSettings.configure("TU_DEBUG=gmem,perf;IR3_SHADER_DEBUG=nouboopt",1,true,false);
       check(configured.equals("TU_DEBUG=perf,sysmem,nolrz;IR3_SHADER_DEBUG=nouboopt"),"changing memory mode preserves independent expert entries");
       check(AdrenoSettings.configure(configured,0,false,false).equals("TU_DEBUG=perf;IR3_SHADER_DEBUG=nouboopt"),"Adreno reset removes only managed workarounds");
+      check(LayoutGrid.position(53,10,200,24,true)==48&&LayoutGrid.position(53,10,200,24,false)==53,"grid snap is optional and uses square pixel spacing");
+      check(LayoutGrid.position(1,17,100,24,true)==17&&LayoutGrid.position(199,17,100,24,true)==100,"snapping cannot move targets outside the safe area");
       TouchLayout layout=new TouchLayout();layout.steering="stick";layout.leftMode=2;layout.rightMode=1;layout.timeout[5]=3;layout.idleSeconds=0;layout.drivingLabels=false;layout.buttonHints=false;layout.highContrast=true;layout.analogPedals=true;
       TouchLayout restored=new TouchLayout();restored.parse(layout.serialize());
       check(restored.steering.equals("stick")&&restored.leftMode==2&&restored.rightMode==1,"steering and both stick modes survive saving");

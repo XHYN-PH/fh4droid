@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the shared control atlas from square SVG icons. --check is stdlib-only.
+"""Build the shared text-only control atlas. --check is stdlib-only.
 
 Regeneration uses Pillow 11.3.0 and CairoSVG 2.8.2. SVG aspect ratios are kept
 unchanged. Native gameplay and the Android editor consume identical PNG bytes.
@@ -112,21 +112,16 @@ def render():
             cell = Image.new('RGBA', (size, size))
             draw = ImageDraw.Draw(cell)
             if plane == 0:
-                svg = ET.fromstring((VECTORS / item['svg']).read_bytes())
-                svg.set('color', '#ffffff')
-                svg.set('stroke', '#ffffff')
-                svg.set('stroke-width', str(item.get('stroke', 1.25)))
-                if item.get('filled'):
-                    svg.set('fill', '#ffffff')
-                extent = round(radius * item.get('glyph_scale', 1.3))
-                # Render once to a SQUARE; never force a symbol into its button's
-                # rectangular bounds. In particular, camera lenses stay round.
-                raw = cairosvg.svg2png(bytestring=ET.tostring(svg), output_width=extent,
-                                      output_height=extent)
-                symbol = Image.open(io.BytesIO(raw)).convert('RGBA')
-                offset = item.get('offset', [0, -.02])
-                cell.alpha_composite(symbol, (round(radius * (1 + offset[0]) - extent/2),
-                                              round(radius * (1 + offset[1]) - extent/2)))
+                # Text artwork is shared byte-for-byte by the game and editor.
+                # Keep the original hit geometry and leave the moving stick knob blank.
+                label = item['label']
+                n = round(radius * .38)
+                f = ImageFont.load_default(size=n)
+                max_width = radius * min(1.55, legacy[key]['bounds'][0]*1.65)
+                while draw.textbbox((0,0),label,font=f)[2] > max_width and n > 8:
+                    n -= 1
+                    f = ImageFont.load_default(size=n)
+                draw.text((radius,radius),label,font=f,anchor='mm',fill='white')
             elif plane == 1:
                 button = item.get('button', '')
                 if button:
@@ -140,16 +135,6 @@ def render():
                                            outline=(255,255,255,100), width=max(1, round(radius*.012)))
                     draw.text((radius, cy), button, font=f, anchor='mm', fill='white',
                               stroke_width=max(0, round(radius*.003)))
-                label = item['label']
-                n = round(radius * .23)
-                max_width = radius * min(1.08, legacy[key]['bounds'][0]*1.70)
-                f = ImageFont.load_default(size=n)
-                while draw.textbbox((0,0),label,font=f)[2] > max_width and n > 8:
-                    n -= 1
-                    f = ImageFont.load_default(size=n)
-                y = radius * (1 + min(.73, legacy[key]['bounds'][1]-.20))
-                draw.text((radius,y), label, font=f, anchor='mm', fill='white',
-                          stroke_width=max(0,round(radius*.002)))
             else:
                 caption = legacy[key].get('hint')
                 if not caption:
@@ -187,7 +172,7 @@ def main():
         PNG.write_bytes(data)
         for path,text in expected.items():
             path.write_text(text, encoding='utf-8')
-    print(f'Shared SVG control artwork: 20 icons, code badges and action labels; {len(data)} PNG bytes')
+    print(f'Shared text-only control artwork: 20 action labels and optional code badges; {len(data)} PNG bytes')
 
 
 if __name__ == '__main__':

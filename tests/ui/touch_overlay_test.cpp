@@ -22,19 +22,15 @@ int main(int argc,char** argv){
   int width=0,height=0,channels=0;
   auto* png=stbi_load_from_memory(kTouchArtworkPng,sizeof(kTouchArtworkPng),&width,&height,&channels,4);
   assert(png&&width==640&&height==2400);
-  // Regression: the camera lens is a circle in the production atlas, not
-  // the flattened ellipse used by the previous artwork.
-  const auto* camera=FindTouchIcon("RB");assert(camera);
-  const auto camera_index=size_t(camera-kTouchIcons);
-  const int camera_x=int(camera_index%kTouchArtworkColumns)*kTouchArtworkTile;
-  const int camera_y=int(camera_index/kTouchArtworkColumns)*kTouchArtworkTile;
-  int x0=160,y0=160,x1=0,y1=0;
-  for(int y=64;y<=102;y++)for(int x=61;x<=99;x++){
-    if(png[((camera_y+y)*width+camera_x+x)*4+3]<128)continue;
-    x0=std::min(x0,x);x1=std::max(x1,x);y0=std::min(y0,y);y1=std::max(y1,y);
+  // Every text-only action label is nonempty and fits its saved touch target.
+  for(unsigned i=0;i<std::size(kTouchIcons);i++){
+    unsigned count=0;for(unsigned y=0;y<kTouchArtworkTile;y++)for(unsigned x=0;x<kTouchArtworkTile;x++){
+      unsigned px=(i%kTouchArtworkColumns)*kTouchArtworkTile+x,py=(i/kTouchArtworkColumns)*kTouchArtworkTile+y;
+      if(png[(py*width+px)*4+3]<32)continue;++count;const auto& icon=kTouchIcons[i];
+      float nx=((x+.5f)/kTouchArtworkTile*2-1)/icon.width,ny=((y+.5f)/kTouchArtworkTile*2-1)/icon.height;
+      assert(std::abs(nx)<.98f&&std::abs(ny)<.98f);
+    }assert(count>30);
   }
-  assert(x1-x0>=28&&y1-y0>=28&&std::abs((x1-x0)-(y1-y0))<=1);
-  assert(png[((camera_y+83)*width+camera_x+80)*4+3]<32); // Open lens centre.
   // Captions remain inside their backing, including long Back/Start names.
   for(unsigned i=0;i<std::size(kTouchIcons);i++)for(unsigned y=0;y<kTouchArtworkTile;y++)for(unsigned x=0;x<kTouchArtworkTile;x++){
     unsigned px=(i%kTouchArtworkColumns)*kTouchArtworkTile+x;
@@ -65,17 +61,8 @@ int main(int argc,char** argv){
     }
   }
   assert(sprite_count==76); // Live sticks use geometry plus a caption, not a painted second knob.
-  // Modern pedal faces are the button artwork, without a second keycap.
-  // Classic controller mode still has its normal backing and letters.
-  for(const char* name:{"RT","LT","LB"}){
-    TouchOverlayDisc pedal;pedal.label=name;pedal.x=100;pedal.y=100;pedal.radius=60;
-    for(const auto& b:BuildTouchOverlay(std::span(&pedal,1)))assert(b.artwork);
-    pedal.pressed=true;
-    for(const auto& b:BuildTouchOverlay(std::span(&pedal,1)))for(auto v:b.vertices)assert((v.color&255)>((v.color>>16)&255));
-    pedal.driving_icons=false;bool backing=false;
-    for(const auto& b:BuildTouchOverlay(std::span(&pedal,1)))backing|=!b.artwork;
-    assert(backing);
-  }
+  // Text pedals retain a visible backing in both display styles.
+  for(const auto* name:{"RT","LT","LB"}){TouchOverlayDisc pedal;pedal.label=name;pedal.x=100;pedal.y=100;pedal.radius=60;bool backing=false,artwork=false;for(const auto& b:BuildTouchOverlay(std::span(&pedal,1))){backing|=!b.artwork;artwork|=b.artwork;}assert(backing&&artwork);}
   auto classic=discs;for(auto& d:classic)d.driving_icons=false;
   size_t classic_sprites=0;for(const auto& b:BuildTouchOverlay(classic))if(b.artwork)classic_sprites+=b.vertices.size()/4;
   assert(classic_sprites==40); // Stick letters belong to their moving knobs.
@@ -121,5 +108,5 @@ int main(int argc,char** argv){
     assert(out.good());
   }
   stbi_image_free(png);
-  std::puts("PASS: 20 production icons, normal/pressed/classic states, UVs, captions and unlabelled stick knobs");
+  std::puts("PASS: 20 production text controls, normal/pressed/classic states, UVs, captions and unlabelled stick knobs");
 }

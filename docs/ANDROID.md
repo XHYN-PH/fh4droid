@@ -409,9 +409,9 @@ uses the whole window for placement, with a separate full-window Properties
 view and Save, Cancel, Test and Hide tools actions. The active custom layout is
 kept until the player explicitly applies a preset or saves an edited draft.
 
-`config/touch-artwork.json` generates the PNG loaded by Android and embedded
+`config/touch-artwork.json` generates the text-label PNG loaded by Android and embedded
 byte-for-byte in the native overlay. `tools/generate-touch-artwork.py --check`
-validates both consumers without Pillow. Regeneration uses Pillow 11.3.0 and CairoSVG 2.8.2 from `tools/requirements-touch-artwork.txt`. The source SVGs use square 24-unit viewports, with proportions preserved. Lucide/Feather license notices ship in the Android resources and are available through More → About → Control artwork credits. The
+validates both consumers without Pillow. Regeneration uses Pillow 11.3.0 and CairoSVG 2.8.2 from `tools/requirements-touch-artwork.txt`. The retained SVG sources are unused by the current text-only driving labels. Lucide/Feather license notices ship in the Android resources and are available through More → About → Control artwork credits. The
 production mesh readback test covers all 20 symbols, captions, classic letters,
 pressed state and stick knobs; its optional PPM output is a software artwork
 proof, not an Android gameplay screenshot. Phone layout and legibility still
@@ -422,8 +422,8 @@ in the [Android player guide](../site/pages/android.md#fractional-resolution-lin
 The fix changes intermediate untiled-band clears only; guest texture layouts
 and 100% resolution remain unchanged.
 
-The current driving artwork uses thin utility symbols and translucent pedal
-faces with bevel highlights and grip grooves. Accelerator, brake and clutch
-use their pedal silhouette directly; the touch targets retain their saved size.
-Pressed modern pedals receive the same warm tint in native rendering and the
-editor. SVG gradients reference only definitions inside the same source file.
+The current driving artwork uses text action names or controller button codes,
+with translucent targets and pink pressed feedback. The same PNG is consumed by
+the native overlay and the full-screen editor. Edit offers a grid, optional
+snapping and 16/24/32 dp grid spacing. Placement is clamped inside safe-area
+bounds. Properties fills the window; Hide tools frees the canvas.
