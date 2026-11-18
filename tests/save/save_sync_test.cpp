@@ -22,17 +22,6 @@ void RecordEvent(std::string_view, std::initializer_list<Field>) {}
 void RecordEvent(std::string_view, std::span<const Field>) {}
 }  // namespace pinyon_shift::diagnostics
 
-// The settings file's writer replaces files through the platform layer,
-// which is not linked here either.
-namespace pinyon_shift::platform {
-bool ReplaceFileAtomically(const std::filesystem::path& temporary,
-                           const std::filesystem::path& destination) {
-  std::error_code error;
-  std::filesystem::rename(temporary, destination, error);
-  return !error;
-}
-}  // namespace pinyon_shift::platform
-
 namespace fs = std::filesystem;
 using pinyon_shift::SaveSync;
 
