@@ -87,15 +87,14 @@ inline std::vector<TouchOverlayBatch> BuildTouchOverlay(std::span<const TouchOve
     if(opacity<=0 || !icon)continue;
     const float ink=std::clamp(disc.icon_opacity,0.f,1.f);
     const float stroke=std::max(1.1f,disc.radius*.022f);
-    const uint32_t fill=disc.pressed?TouchRgba(255,108,53,int(220*opacity)):disc.thumb_knob?TouchRgba(220,226,235,int(170*opacity)):TouchRgba(20,27,37,int(190*opacity));
-    const uint32_t border=disc.pressed?TouchRgba(255,145,90,int(255*ink)):TouchRgba(184,201,220,int(150*opacity));
-    const bool pedal=disc.driving_icons&&!disc.thumb_knob&&
-        (disc.label=="RT"||disc.label=="LT"||disc.label=="LB");
-    if(!pedal)AppendTouchFrame(batches_,disc.x,disc.y,disc.radius*icon->width,disc.radius*icon->height,
+    const uint32_t fill=disc.pressed?TouchRgba(74,20,45,int(210*opacity)):disc.thumb_knob?TouchRgba(220,226,235,int(170*opacity)):TouchRgba(20,18,26,int(165*opacity));
+    const uint32_t border=disc.pressed?TouchRgba(255,0,96,int(255*ink)):TouchRgba(235,231,240,int(150*opacity));
+    // Text controls retain a visible touch target.
+    AppendTouchFrame(batches_,disc.x,disc.y,disc.radius*icon->width,disc.radius*icon->height,
                    icon->rectangular,stroke,fill,border);
     if(disc.driving_icons&&!disc.thumb_knob&&disc.amount>0){
       const float w=disc.radius*.85f*std::clamp(disc.amount,0.f,1.f);
-      AppendTouchFrame(batches_,disc.x-disc.radius*.425f+w*.5f,disc.y+disc.radius*.65f,w,disc.radius*.065f,true,0,TouchRgba(255,165,94,int(240*ink)),0);
+      AppendTouchFrame(batches_,disc.x-disc.radius*.425f+w*.5f,disc.y+disc.radius*.65f,w,disc.radius*.065f,true,0,TouchRgba(255,0,96,int(240*ink)),0);
     }
     if(disc.thumb_knob&&disc.driving_icons)continue;
     // In classic mode the stick letters follow the knob; modern captions
@@ -108,7 +107,7 @@ inline std::vector<TouchOverlayBatch> BuildTouchOverlay(std::span<const TouchOve
       if(batches_.empty()||!batches_.back().artwork||batches_.back().vertices.size()>60000)batches_.push_back(TouchOverlayBatch{.artwork=true});
       auto& batch=batches_.back();const auto base=uint16_t(batch.vertices.size());
       const float right=u+1.f/kTouchArtworkColumns,bottom=v+1.f/(kTouchArtworkRows*3);
-      const auto color=pedal&&disc.pressed?TouchRgba(255,190,125,int(255*ink)):TouchRgba(255,255,255,int(255*ink));
+      const auto color=TouchRgba(255,255,255,int(255*ink));
       batch.vertices.push_back({disc.x-disc.radius,disc.y-disc.radius,u,v,color});
       batch.vertices.push_back({disc.x+disc.radius,disc.y-disc.radius,right,v,color});
       batch.vertices.push_back({disc.x+disc.radius,disc.y+disc.radius,right,bottom,color});

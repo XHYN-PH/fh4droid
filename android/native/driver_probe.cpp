@@ -268,7 +268,8 @@ std::string RenderTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
 }
 
 std::string Probe(void* loader, std::string* first_name = nullptr,
-                  uint32_t max_api = VK_API_VERSION_1_3, bool force_legacy = false) {
+                  uint32_t max_api = VK_API_VERSION_1_3, bool force_legacy = false,
+                  bool require_vertex_stores = true) {
   auto get = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
       dlsym(loader, "vkGetInstanceProcAddr"));
   if (!get) return Error("Missing Vulkan entry points.");
@@ -341,17 +342,20 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
     const bool core13=std::min(p.apiVersion,app.apiVersion)>=VK_API_VERSION_1_3;
     const bool dependencies=p.apiVersion>=VK_API_VERSION_1_2 || (has(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME)&&has(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME));
     const bool dynamic_supported=!force_legacy && (core13 || (has(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME)&&dependencies));
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR shading{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR};
+    void* optional=has(VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME)?&shading:nullptr;
     VkPhysicalDeviceDynamicRenderingFeatures f13{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES};
+    f13.pNext=optional;
     VkPhysicalDeviceVulkan12Features f12{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-    f12.pNext = dynamic_supported ? &f13 : nullptr;
+    f12.pNext = dynamic_supported ? static_cast<void*>(&f13) : optional;
     VkPhysicalDeviceFeatures2 f{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    f.pNext = p.apiVersion>=VK_API_VERSION_1_2 ? static_cast<void*>(&f12) : dynamic_supported ? static_cast<void*>(&f13) : nullptr;
+    f.pNext = p.apiVersion>=VK_API_VERSION_1_2 ? static_cast<void*>(&f12) : dynamic_supported ? static_cast<void*>(&f13) : optional;
     features(device, &f);
     if (p.apiVersion < VK_API_VERSION_1_1 ||
         !f.features.independentBlend || !f.features.fragmentStoresAndAtomics ||
-        !f.features.vertexPipelineStoresAndAtomics) {
+        (require_vertex_stores && !f.features.vertexPipelineStoresAndAtomics)) {
       last = std::string(p.deviceName) +
              ": missing Vulkan 1.1 or required blend/atomic "
              "features.";
@@ -403,7 +407,7 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
     VkPhysicalDeviceFeatures enabled{};
     enabled.independentBlend = VK_TRUE;
     enabled.fragmentStoresAndAtomics = VK_TRUE;
-    enabled.vertexPipelineStoresAndAtomics = VK_TRUE;
+    enabled.vertexPipelineStoresAndAtomics = f.features.vertexPipelineStoresAndAtomics;
     VkPhysicalDeviceDynamicRenderingFeatures enabled13{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES};
     enabled13.dynamicRendering = VK_TRUE;
@@ -446,6 +450,8 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
              ",\"api\":" + std::to_string(p.apiVersion) +
              ",\"driver\":" + std::to_string(p.driverVersion) +
              ",\"dynamic_rendering\":" + (dynamic ? "true" : "false") +
+             ",\"coarse_shading_supported\":" + (shading.pipelineFragmentShadingRate ? "true" : "false") +
+             ",\"bc_textures_supported\":" + (f.features.textureCompressionBC ? "true" : "false") +
              ",\"renderer\":" + Quote(dynamic ? "native" : "compatibility") +
              ",\"descriptor_indexing\":" +
              (f12.runtimeDescriptorArray && f12.descriptorBindingPartiallyBound
@@ -468,7 +474,7 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
 
 #ifndef FH4DROID_DRIVER_PROBE_TEST
 extern "C" JNIEXPORT jstring JNICALL
-Java_studio_deimos_pinyonshift_DriverProbeActivity_nativeProbe(JNIEnv* env,jclass,jstring native_value,jstring root_value,jstring internal_value,jstring selected_value,jstring environment_value,jboolean no_preamble){
+Java_studio_deimos_pinyonshift_DriverProbeActivity_nativeProbe(JNIEnv* env,jclass,jstring native_value,jstring root_value,jstring internal_value,jstring selected_value,jstring environment_value,jboolean no_preamble,jboolean require_vertex_stores){
     rex::cvar::SetFlagByName("android_gpu_driver_env",Read(env,environment_value));
     rex::cvar::SetFlagByName("android_gpu_driver_no_preamble",no_preamble?"true":"false");
     const auto root=std::filesystem::path(Read(env,root_value));
@@ -486,8 +492,9 @@ Java_studio_deimos_pinyonshift_DriverProbeActivity_nativeProbe(JNIEnv* env,jclas
             Read(env,internal_value),Read(env,native_value),selection);
         if(!loader)return env->NewStringUTF(Error("The selected custom driver could not be loaded.").c_str());
     }
-    std::string report=Probe(loader);
+    std::string report=Probe(loader,nullptr,VK_API_VERSION_1_3,false,require_vertex_stores);
     if(!report.empty()&&report.back()=='}'){report.pop_back();report+=",\"effective_driver\":"+Quote(selection)+"}";}
+    if(!require_vertex_stores && !report.empty() && report.back()=='}'){report.pop_back();report+=",\"vertex_stores_fallback\":true}";}
     // A fresh process is killed after reporting; do not unload live driver hooks.
     return env->NewStringUTF(report.c_str());
 }

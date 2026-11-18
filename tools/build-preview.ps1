@@ -24,33 +24,21 @@ if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
 $root = Get-PinyonRepoRoot
 $config = Get-PinyonReleaseToolchain
 $environment = Enter-PinyonBuildEnvironment
+# TP-2/TP-3: a prebuilt ShiftGlue kit (tools/build-shiftglue-kit.ps1) for
+# the pinned revision brings the generator and the runtime, so neither is
+# compiled here.
+$kitRoot = Get-PinyonShiftGlueKitRoot
 $sdkRoot = Resolve-PinyonRexGlueRoot
 $generatedRoot = Resolve-PinyonLocalPath -RelativePath '.local/generated'
-$rexglueExe = Join-Path $sdkRoot 'out/win-amd64/Release/rexglue.exe'
+$rexglueExe = if ($kitRoot) { Join-Path $kitRoot 'bin/rexglue.exe' } else { Join-Path $sdkRoot 'out/win-amd64/Release/rexglue.exe' }
 $manifest = Join-Path $root 'config/rexglue/pinyon_shift_manifest.toml'
 $logs = Resolve-PinyonLocalPath -RelativePath '.local/logs'
 [void](New-Item -ItemType Directory -Force -Path $logs)
 $env:SOURCE_DATE_EPOCH = '1784764800'
 $previewPreset = 'win-amd64-' + $Configuration.ToLowerInvariant()
 if ($Parallel -eq 0) { $Parallel = Get-PinyonBuildJobCount }
-function Test-PinyonCpuFma {
-    # Windows reports AVX2 only when it also saves the AVX register state, and
-    # every CPU with AVX2 has FMA3.
-    if (-not ('PinyonShift.CpuFeatures' -as [type])) {
-        Add-Type -Namespace PinyonShift -Name CpuFeatures -MemberDefinition @'
-[System.Runtime.InteropServices.DllImport("kernel32.dll")]
-public static extern bool IsProcessorFeaturePresent(uint feature);
-'@
-    }
-    return [PinyonShift.CpuFeatures]::IsProcessorFeaturePresent(40)
-}
-$cpuBaseline = if ($CpuBaseline -ne 'auto') { $CpuBaseline }
-    elseif (Test-PinyonCpuFma) { 'fma' } else { 'sse4.1' }
-$cpuFlags = switch ($cpuBaseline) {
-    'v3' { '-msse4.1 -mfma -ffp-contract=off -march=x86-64-v3' }
-    'fma' { '-msse4.1 -mfma -ffp-contract=off' }
-    default { '-msse4.1' }
-}
+$cpu = Select-PinyonCpuBaseline -CpuBaseline $CpuBaseline
+$cpuBaseline = $cpu.Baseline
 
 $supportedDumps = Get-Content -LiteralPath (Join-Path $root 'config/supported-dumps.json') -Raw |
     ConvertFrom-Json
@@ -69,32 +57,36 @@ if ($gameXexInfo.Length -ne [int64]$supportedXex.size_bytes -or
 $guestPatchPath = Join-Path $root 'config/rexglue/analysis/fh1-post-processing.toml'
 $guestPatchSetSha256 = (Get-FileHash -LiteralPath $guestPatchPath -Algorithm SHA256).Hash
 
-Write-PinyonEvent build 62 'Building the local code generator.' -JsonEvents:$JsonEvents
 $memoryBytes = Get-PinyonTotalMemoryBytes
 $memoryText = if ($memoryBytes -gt 0) { ", $([Math]::Round($memoryBytes / 1GB)) GB memory" } else { '' }
 Write-PinyonEvent build 62 "Compiling with $Parallel parallel jobs ($([Environment]::ProcessorCount) logical processors$memoryText)." -JsonEvents:$JsonEvents
 # A folder moved since the last build (a portable install) is configured afresh.
-foreach ($buildTree in @((Join-Path $sdkRoot 'out/build/win-amd64'), (Join-Path $root "out/build/$previewPreset"))) {
+# A kit build has no SDK tree; leave it out of the list rather than passing
+# a $null element to the mandatory -BuildDirectory.
+$buildTrees = @(Join-Path $root "out/build/$previewPreset")
+if (-not $kitRoot) { $buildTrees = @(Join-Path $sdkRoot 'out/build/win-amd64') + $buildTrees }
+foreach ($buildTree in $buildTrees) {
     if (Reset-PinyonRelocatedCMakeCache -BuildDirectory $buildTree) {
         Write-PinyonEvent build 62 "The build folder moved; configuring $buildTree again." -JsonEvents:$JsonEvents
     }
 }
+if ($kitRoot) {
+    Write-PinyonEvent build 62 'Using the prebuilt ShiftGlue kit.' -JsonEvents:$JsonEvents
+}
+else {
+Write-PinyonEvent build 62 'Building the local code generator.' -JsonEvents:$JsonEvents
 Push-Location $sdkRoot
 try {
     Invoke-PinyonBuildCommand $environment.CMake @('--preset', 'win-amd64',
-        '-DREXGLUE_ENABLE_TRACY=OFF', '-DSDL_HIDAPI_LIBUSB=OFF') `
+        '-DREXGLUE_ENABLE_TRACY=OFF', '-DSDL_HIDAPI_LIBUSB=OFF',
+        "-DCMAKE_EXE_LINKER_FLAGS=$(Get-PinyonCodegenManifestLinkFlag)") `
         (Join-Path $logs 'rexglue-configure.log') 'ReXGlue configuration failed.' -Step 'Configure the ReXGlue code generator'
     Invoke-PinyonBuildCommand $environment.CMake @('--build', '--preset', 'win-amd64-release',
         '--target', 'rexglue', '--parallel', "$Parallel") `
         (Join-Path $logs 'rexglue-build.log') 'ReXGlue code-generator build failed.' -Step 'Build the ReXGlue code generator'
 }
 finally { Pop-Location }
-# The pinned CLI uses narrow argv and file APIs. UTF-8 process code pages keep
-# Unicode installation paths intact on Windows 10 1903 and newer.
-Invoke-PinyonBuildCommand 'mt.exe' @('-nologo', "-inputresource:$rexglueExe;#1",
-    '-manifest', (Join-Path $root 'config/rexglue/codegen-windows.manifest'),
-    "-outputresource:$rexglueExe;#1") (Join-Path $logs 'rexglue-manifest.log') `
-    'Could not enable Unicode paths for the code generator.' -Step 'Configure code generator Unicode paths'
+}
 if (-not (Test-Path -LiteralPath $rexglueExe -PathType Leaf)) {
     throw "The ReXGlue code generator was not produced: $rexglueExe"
 }
@@ -161,10 +153,16 @@ try {
     Write-PinyonEvent build 83 "CPU baseline: $cpuBaseline." -JsonEvents:$JsonEvents
     # The presets build the Vulkan backend, whose glslang reads its version
     # through Python: the pinned runtime, since a pyenv shim breaks that.
-    Invoke-PinyonBuildCommand $environment.CMake @('--preset', $previewPreset, "-DREXSDK_DIR=$sdkRoot",
-        "-DPINYON_SHIFT_CPU_BASELINE=$cpuBaseline", "-DCMAKE_C_FLAGS=$cpuFlags",
-        "-DCMAKE_CXX_FLAGS=$cpuFlags", "-DPYTHON_EXECUTABLE=$(Get-PinyonPython)") `
+    # The kit or the source tree; a build folder switches between them on
+    # the next configure.
+    # With the kit, the release's prebuilt host objects too (TP-3 host split).
+    $sdkArguments = if ($kitRoot) { @('-DREXSDK_DIR=', "-DPINYON_SHIFT_SHIFTGLUE_KIT=$kitRoot",
+            "-DPINYON_SHIFT_HOST_OBJECTS=$(Install-PinyonHostObjects -Variant base)") }
+        else { @("-DREXSDK_DIR=$sdkRoot", '-DPINYON_SHIFT_SHIFTGLUE_KIT=', '-DPINYON_SHIFT_HOST_OBJECTS=') }
+    Invoke-PinyonBuildCommand $environment.CMake (@('--preset', $previewPreset) + $sdkArguments +
+        $cpu.CMakeArguments + @("-DPYTHON_EXECUTABLE=$(Get-PinyonPython)")) `
         (Join-Path $logs 'preview-configure.log') 'Preview configuration failed.' -Step 'Configure the game build'
+    Remove-PinyonStalePch -BuildDirectory (Join-Path $root "out/build/$previewPreset")
     Invoke-PinyonBuildCommand $environment.CMake @('--build', '--preset', $previewPreset, '--parallel', "$Parallel") `
         (Join-Path $logs 'preview-build.log') 'Preview compilation failed.' -Step 'Compile the game'
 }
@@ -176,18 +174,27 @@ if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
 }
 $manifestName = if ($Configuration -eq 'Release') { 'build.json' } else { 'build-profile.json' }
 $manifestPath = Resolve-PinyonLocalPath -RelativePath ".local/$manifestName"
-$git = Get-PinyonGit
-$sourceProvenance = Get-PinyonSourceProvenance -Root $root -Git $git
+if ($kitRoot) {
+    # Setup fetches no Git on this path: the payload records its commit, the
+    # kit its own. A developer checkout still reads its commit through Git.
+    $git = try { Get-PinyonGit } catch { '' }
+    $sourceProvenance = Get-PinyonSourceProvenance -Root $root -Git $git
+    $rexglueCommit = (Get-Content -LiteralPath (Join-Path $kitRoot 'kit.json') -Raw | ConvertFrom-Json).shiftglue_revision
+    $rexglueDirty = $false
+}
+else {
+    $git = Get-PinyonGit
+    $sourceProvenance = Get-PinyonSourceProvenance -Root $root -Git $git
+    $rexglueCommit = @(& $git -C $sdkRoot rev-parse HEAD 2>$null | Select-Object -First 1)
+    if ($rexglueCommit.Count -ne 1 -or
+        $rexglueCommit[0] -notmatch '^[0-9a-fA-F]{40}$') {
+        throw 'Build provenance requires an exact ShiftGlue commit.'
+    }
+    $rexglueCommit = $rexglueCommit[0].ToLowerInvariant()
+    $rexglueDirty = @(& $git -C $sdkRoot status --porcelain --ignore-submodules=dirty).Count -ne 0
+}
 $sourceCommit = $sourceProvenance.Commit
 $sourceDirty = $sourceProvenance.Dirty
-
-$rexglueCommit = @(& $git -C $sdkRoot rev-parse HEAD 2>$null | Select-Object -First 1)
-if ($rexglueCommit.Count -ne 1 -or
-    $rexglueCommit[0] -notmatch '^[0-9a-fA-F]{40}$') {
-    throw 'Build provenance requires an exact ShiftGlue commit.'
-}
-$rexglueCommit = $rexglueCommit[0].ToLowerInvariant()
-$rexglueDirty = @(& $git -C $sdkRoot status --porcelain --ignore-submodules=dirty).Count -ne 0
 $payloadMarkerPath = Join-Path $root '.pinyon-source-sha256'
 $payloadSha256 = if (Test-Path -LiteralPath $payloadMarkerPath -PathType Leaf) {
     (Get-Content -LiteralPath $payloadMarkerPath -Raw).Trim().ToUpperInvariant()
@@ -206,11 +213,19 @@ $result = [ordered]@{
     pinyon_shift_source_payload_sha256 = $payloadSha256
     rexglue_commit = $rexglueCommit
     rexglue_dirty = $rexglueDirty.ToString().ToLowerInvariant()
+    shiftglue_kit = [bool]$kitRoot
     guest_executable_sha256 = $gameXexSha256
     guest_codegen_patch_profile = 'fh1-retail-base-post-processing-v1'
     guest_codegen_patch_set_sha256 = $guestPatchSetSha256
+    variant = 'base'
+    cpu_flags = $cpu.Flags
+    analysis_sha256 = [ordered]@{}
 }
-$resultJson = ($result | ConvertTo-Json) + [Environment]::NewLine
+foreach ($file in Get-ChildItem -LiteralPath (Join-Path $root 'config/rexglue/analysis') -Filter '*.toml' |
+        Sort-Object Name) {
+    $result.analysis_sha256[$file.Name] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+}
+$resultJson = ($result | ConvertTo-Json -Depth 4) + [Environment]::NewLine
 [IO.File]::WriteAllText($manifestPath, $resultJson,
     [Text.UTF8Encoding]::new($false))
 $runtimeManifestPath = Join-Path (Split-Path $executable -Parent) 'pinyon_shift_build.json'

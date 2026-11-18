@@ -58,10 +58,14 @@ try {
             'pinyon_shift_touch_overlay_tests',
             'pinyon_shift_touch_pad_tests',
             'pinyon_shift_view_policy_tests',
+            'pinyon_shift_stall_timer_tests',
             'pinyon_shift_fh1_ui_api_tests',
+            'pinyon_shift_frame_inspector_tests',
+            'pinyon_shift_frame_inspector_input_tests',
             'pinyon_shift_hostui_tests',
             'pinyon_shift_host_config_tests',
             'pinyon_shift_profile_body_tests',
+            'pinyon_shift_car_recovery_tests',
             'pinyon_shift_rally_progress_tests',
             'pinyon_shift_rally_pace_tests',
             'pinyon_shift_car_cards_tests',
@@ -69,8 +73,10 @@ try {
             'pinyon_shift_content_roots_tests',
             'pinyon_shift_telemetry_tests',
             'pinyon_shift_overlay_device_tests',
+            'pinyon_shift_shader_override_tests',
             'pinyon_shift_fh1_raster_scale_tests',
-            'pinyon_shift_fh1_edram_tiles_tests')) {
+            'pinyon_shift_fh1_edram_tiles_tests',
+            'pinyon_shift_head_tracking_tests')) {
         $exe = Join-Path $BuildDirectory "$test.exe"
         Write-Host "== $test"
         & $exe

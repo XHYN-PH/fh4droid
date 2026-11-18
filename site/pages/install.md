@@ -20,21 +20,23 @@ The launcher verifies your disc image, installs the build tools, builds the game
 
 ![The launcher, ready to play: Vulkan at 1x (1280 × 720), with Play and Settings buttons](img/launcher-ready.png)
 
-Your disc image and game files stay on your machine. The launcher downloads only build tools and the pinned ShiftGlue source.
+Your disc image and game files stay on your machine. The launcher downloads only build tools and the pinned ShiftGlue source, or ShiftGlue and the host code that doesn't depend on your game prebuilt when the release carries them.
 
 ## Verify the download
 
-The launcher isn't code-signed yet, so SmartScreen may call it an unrecognized app. Download it only from this repository's releases, and compare the ZIP's SHA-256 with the value in the release notes:
+The launcher isn't code-signed yet, so SmartScreen may call it an unrecognized app. Download it only from this repository's releases, and compare the ZIP's SHA-256 with that asset's `digest` in the [GitHub release API](https://api.github.com/repos/arcanite24/pinyon-shift/releases/latest) (use `/releases/tags/<tag>` for older releases):
 
 ```powershell
 Get-FileHash .\PinyonShift-Launcher.zip -Algorithm SHA256
 ```
 
-Administrator permission is requested only when Visual Studio 2022 C++ Build Tools (17.1 or newer) must be installed. VS 2019 alone isn't enough.
+A matching hash identifies the official download. If Defender names a threat or quarantines a file, follow [the detection reporting steps](troubleshooting.md#defender-reports-a-trojan-or-quarantines-a-file) before running it.
+
+The setup screen asks whether you accept [Microsoft's licence](https://go.microsoft.com/fwlink/?LinkId=2179911) for its C++ libraries and Windows SDK. Ticked, setup downloads just those (about 770 MB, no administrator prompt). Unticked, setup uses or installs Visual Studio 2022 C++ Build Tools (17.1 or newer; VS 2019 alone isn't enough), and administrator permission is requested only for that install.
 
 ## Updating
 
-Choose **Update to <version>** in the launcher's footer when it appears. The launcher downloads the release from GitHub, checks its SHA-256, replaces itself and restarts. Saves, settings and game files stay where they are; choose your disc image to build the new version, which takes a while. Downloading the new `PinyonShift-Launcher.zip` and running it still works too. On Android, rebuild the APK on the PC and share it again: the app offers the newer build.
+Choose **Update to <version>** in the launcher's footer when it appears. The launcher downloads the release from GitHub, checks its SHA-256, replaces itself and restarts. Saves, settings, the gamertag and game files stay where they are: the update only replaces the launcher and its bundled source, and the profile lives in the state folder it doesn't touch. The game itself is rebuilt, not patched: choose your disc image again (the launcher asks; it doesn't remember the earlier choice) and the new version is built, which takes a while. Downloading the new `PinyonShift-Launcher.zip` and running it still works too. On Android, rebuild the APK on the PC and share it again: the app offers the newer build.
 
 ## Use an extracted folder
 
@@ -42,7 +44,7 @@ Choose **Update to <version>** in the launcher's footer when it appears. The lau
 
 ## Install location
 
-By default everything lives under `%LOCALAPPDATA%\PinyonShift`. To build on another drive, choose **Change** next to **Installs to** on the setup screen. This picks where new installs go; it doesn't move an existing install or save. Microsoft Build Tools still need space on the system drive.
+By default everything lives under `%LOCALAPPDATA%\PinyonShift`. To build on another drive, choose **Change** next to **Installs to** on the setup screen. This picks where new installs go; it doesn't move an existing install or save. The ISO's drive doesn't matter. Setup needs about 30 GB free on the install drive (the build, the extracted game and the tools). The system drive needs about 3 GB for compiler temporary files, plus about 8 GB if the Microsoft C++ Build Tools are not installed yet. If the install folder is on the system drive, the two add up to 33 to 41 GB there. A "not enough free disk space" error lists each drive's free space and what it is needed for; if the install folder is on the Windows drive, choose **Change** and pick a roomier drive.
 
 ## Portable install
 
@@ -64,7 +66,7 @@ PinyonShift\
 
 ![The launcher's Settings panel: Vulkan, internal resolution, output scaling and the Treasure Map toggle](img/launcher-settings.png)
 
-**Settings** sets the internal resolution and the output scaling (bilinear, CAS, FSR 1, or FSR 2 and FSR 3 when their runtime is installed; Linux, macOS and Android builds include it), and shows the resulting resolutions. It also has the Treasure Map toggle. **This PC** lists the GPU, its memory, the CPU cores and the display's refresh rate, and recommends an in-game preset. Everything else is in the [in-game settings](playing.md).
+**Settings** sets the internal resolution and the output scaling (bilinear, CAS, FSR 1, FSR 2, FSR 3, and on Windows NVIDIA DLSS for RTX GPUs; setup downloads or builds their runtimes, so there is nothing to install by hand), and shows the resulting resolutions. It also has the Treasure Map toggle. **This PC** lists the GPU, its memory, the CPU cores and the display's refresh rate, and recommends an in-game preset. Everything else is in the [in-game settings](playing.md).
 
 ## Uninstall
 

@@ -63,6 +63,17 @@ source = """src/pinyon_shift_runtime_hooks.cpp RallySeriesLoader; docs/DLC_BACKL
 
 [[finding]]
 group = """Script actions"""
+base = """sub_825558A0, sub_82554598"""
+v4 = """sub_825D4500, sub_825D3548"""
+name = """ordinary free-roam parameter construction"""
+what = """The ordinary free-roam loader calls a parameter constructor (base sub_825558A0, v4 sub_825D4500) that selects track 317. Its setup call receives the parameter object in r3, track ID in r4 and 1 in r5 (base sub_82554598, v4 sub_825D3548). This is separate from v4's Rally menu-hub loader."""
+how = """Read-only generated-code call-site and argument inspection, starting at the already identified free-roam loader in both builds."""
+confidence = """confirmed"""
+note = """The meaning of r5 and safety of reinitializing live parameters are not established; no runtime wrapper is implemented."""
+source = """docs/RALLY_FREEROAM.md Owned data contract"""
+
+[[finding]]
+group = """Script actions"""
 base = """sub_82983A90"""
 v4 = """sub_82A37858"""
 name = """CStoreRestorePlayerCarPosition"""
@@ -130,3 +141,13 @@ confidence = """probable"""
 note = """The map-pin reading of the coordinates is a guess."""
 negative = true
 source = """docs/TITLE_UPDATE_V4_BACKLOG.md Review of the base-disc Rally adapter"""
+
+[[finding]]
+group = """Flow scripts"""
+base = """media/gamemodes.zip; behaviour registered in sub_829944C0"""
+name = """loading waits in the flow graphs"""
+what = """Loads are gated by state, not by timers. `global.wait_for_streaming` (`CWaitForStreaming`) appears four times in the free-roam flow, twice in festival races and once in fast travel; free roam and the festival also wait in `LoadAndWaitForLOD0Cars`, and `enable_streaming`/`disable_streaming` bracket loads. The only fixed waits are `wait_half_sec` after the nemesis sequence, one `wait_2_sec`, one `wait_3_sec` and three `wait_one_frame`. `CCompressDatabase` states (`decompress_database_wait`, `compress_database_*`) are defined but used by no flow file read so far."""
+how = """Element and attribute census of the extracted flow XML."""
+confidence = """confirmed"""
+note = """The time spent inside `CWaitForStreaming` is not measured (CE-0.1, CE-13); its update method is not traced."""
+source = """docs/CONSOLE_ERA_RESEARCH.md CE-13"""

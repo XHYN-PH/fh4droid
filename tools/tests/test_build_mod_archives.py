@@ -1,5 +1,6 @@
 import importlib.util
 import shutil
+import sqlite3
 import struct
 import sys
 import tempfile
@@ -26,6 +27,211 @@ def manifest_line(archive: Path, guest: str) -> str:
 
 
 class BuildModArchivesTests(unittest.TestCase):
+    def test_update_merge_has_its_own_mount_and_keeps_verified_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state, game = root / "state", root / "game"
+            update = state / "title-update-v4" / "media.zip"
+            update.parent.mkdir(parents=True)
+            with zipfile.ZipFile(update, "w") as archive:
+                archive.writestr("camera/cameraphysics.xml", '<CameraPhysics><FollowCam NumLayers="80"/></CameraPhysics>')
+                archive.writestr("other.bin", b"unchanged")
+            original = update.read_bytes()
+            for mod, count in (("first", 84), ("second", 90)):
+                patch = state / "mods" / mod / "merge-update" / "media.zip" / "camera" / "cameraphysics.xml"
+                patch.parent.mkdir(parents=True)
+                patch.write_text(f'<CameraPhysics><FollowCam NumLayers="{count}"/></CameraPhysics>')
+                (state / "mods" / mod / "mod.toml").write_text('shares_save = true\n')
+            config = state / "config" / "pinyon_shift.toml"
+            config.parent.mkdir()
+            config.write_text('enabled_mods = "first,second"\n')
+            result = MODULE.build(state, game)
+            output = state / "mods" / MODULE.GENERATED
+            with zipfile.ZipFile(output / "update" / "media.zip") as archive:
+                self.assertIn(b'NumLayers="84"', archive.read("camera/cameraphysics.xml"))
+                self.assertEqual(b"unchanged", archive.read("other.bin"))
+            self.assertFalse((output / "game").exists())
+            self.assertEqual(update.read_bytes(), original)
+            self.assertEqual(result["archives"][0]["update_archive"], "media.zip")
+            MODULE.build(state, game)  # Repeat launch uses the same original, not the appended output.
+            self.assertEqual(update.read_bytes(), original)
+            replacement = state / "mods" / "replacement"
+            (replacement / "update").mkdir(parents=True)
+            (replacement / "mod.toml").write_text('shares_save = true\n')
+            with zipfile.ZipFile(replacement / "update" / "media.zip", "w") as archive:
+                archive.writestr("camera/cameraphysics.xml", '<CameraPhysics><FollowCam NumLayers="80"/></CameraPhysics>')
+                archive.writestr("other.bin", b"custom archive")
+            config.write_text('enabled_mods = "first,second,replacement"\n')
+            MODULE.build(state, game)
+            with zipfile.ZipFile(output / "update" / "media.zip") as archive:
+                self.assertEqual(b"custom archive", archive.read("other.bin"))
+                self.assertIn(b'NumLayers="84"', archive.read("camera/cameraphysics.xml"))
+            self.assertEqual(update.read_bytes(), original)
+
+    def test_update_merge_is_inactive_without_update_and_rejects_missing_member(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            patch = state / "mods" / "camera" / "merge-update" / "media.zip" / "missing.xml"
+            patch.parent.mkdir(parents=True)
+            patch.write_text('<CameraPhysics/>')
+            config = state / "config" / "pinyon_shift.toml"
+            config.parent.mkdir()
+            config.write_text('enabled_mods = "camera"\n')
+            self.assertFalse(MODULE.build(state, state / "no-disc")["patched"])
+            update = state / "title-update-v4" / "media.zip"
+            update.parent.mkdir()
+            with zipfile.ZipFile(update, "w") as archive:
+                archive.writestr("other.xml", '<CameraPhysics/>')
+            with self.assertRaisesRegex(MODULE.ArchiveError, "has no member"):
+                MODULE.build(state, state / "no-disc")
+
+    def test_database_scripts_patch_the_update_copy_v4_reads(self):
+        # v4 opens db/gamedb.slt inside update:\media.zip, so a game: copy
+        # alone is never read there (#895).
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state, game = root / "state", root / "game"
+            v4_database = root / "v4.slt"
+            connection = sqlite3.connect(v4_database)
+            connection.executescript(
+                "create table Data_Car (Id integer, IsUnicorn integer);"
+                "insert into Data_Car values (320, 1), (251, 1), (1600, 0);")
+            connection.commit()
+            connection.close()
+            update = state / "title-update-v4" / "media.zip"
+            update.parent.mkdir(parents=True)
+            with zipfile.ZipFile(update, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.write(v4_database, "db/gamedb.slt")
+                archive.writestr("camera/cameraphysics.xml",
+                                 '<CameraPhysics><FollowCam NumLayers="80"/></CameraPhysics>')
+                archive.writestr("other.bin", b"unchanged")
+            original = update.read_bytes()
+            unicorns = state / "mods" / "unicorns" / "db" / "10-unicorns.sql"
+            unicorns.parent.mkdir(parents=True)
+            unicorns.write_text("update Data_Car set IsUnicorn = 0 where Id = 320;")
+            camera = state / "mods" / "camera" / "merge-update" / "media.zip" / "camera" / "cameraphysics.xml"
+            camera.parent.mkdir(parents=True)
+            camera.write_text('<CameraPhysics><FollowCam NumLayers="84"/></CameraPhysics>')
+            config = state / "config" / "pinyon_shift.toml"
+            config.parent.mkdir()
+            config.write_text('enabled_mods = "unicorns,camera"\n')
+            result = MODULE.build(state, game)
+            output = state / "mods" / MODULE.GENERATED / "update" / "media.zip"
+            patched = root / "patched.slt"
+            with zipfile.ZipFile(output) as archive:
+                patched.write_bytes(archive.read("db/gamedb.slt"))
+                self.assertIn(b'NumLayers="84"', archive.read("camera/cameraphysics.xml"))
+                self.assertEqual(b"unchanged", archive.read("other.bin"))
+            connection = sqlite3.connect(patched)
+            rows = connection.execute("select Id, IsUnicorn from Data_Car order by Id").fetchall()
+            connection.close()
+            # The update's own rows (1600) survive; only the script's change applies.
+            self.assertEqual([(251, 1), (320, 0), (1600, 0)], rows)
+            self.assertEqual(update.read_bytes(), original)
+            self.assertEqual(["10-unicorns.sql"],
+                             [s["script"] for s in result["archives"][0]["database_scripts"]])
+
+    def test_database_scripts_fill_mod_options_in_the_update_copy(self):
+        # The v4 copy runs the same filled scripts as the game: copy, not the
+        # raw {{key}} text, which would not be valid SQL.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state, game = root / "state", root / "game"
+            v4_database = root / "v4.slt"
+            connection = sqlite3.connect(v4_database)
+            connection.executescript(
+                "create table Data_Car (Id integer, BaseCost integer);"
+                "insert into Data_Car values (1496, 120000);")
+            connection.commit()
+            connection.close()
+            update = state / "title-update-v4" / "media.zip"
+            update.parent.mkdir(parents=True)
+            with zipfile.ZipFile(update, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.write(v4_database, "db/gamedb.slt")
+            cheap = state / "mods" / "cheap"
+            (cheap / "db").mkdir(parents=True)
+            (cheap / "mod.toml").write_text(
+                'name = "cheap"\nabi = 1\n\n[[option]]\nkey = "divide"\ndefault = "2"\n'
+                'choices = ["2", "4"]\n', encoding="utf-8")
+            (cheap / "db" / "10-price.sql").write_text(
+                "update Data_Car set BaseCost = BaseCost / {{divide}} where Id = 1496;", encoding="utf-8")
+            config = state / "config" / "pinyon_shift.toml"
+            config.parent.mkdir()
+            config.write_text('enabled_mods = "cheap"\n')
+            (state / "config" / "mod_options.json").write_text('{"cheap": {"divide": "4"}}', encoding="utf-8")
+            result = MODULE.build(state, game)
+            patched = root / "patched.slt"
+            with zipfile.ZipFile(state / "mods" / MODULE.GENERATED / "update" / "media.zip") as archive:
+                patched.write_bytes(archive.read("db/gamedb.slt"))
+            connection = sqlite3.connect(patched)
+            cost = connection.execute("select BaseCost from Data_Car where Id = 1496").fetchone()[0]
+            connection.close()
+            self.assertEqual(30000, cost)
+            self.assertEqual([{"divide": "4"}],
+                             [s["options"] for s in result["archives"][0]["database_scripts"]])
+
+    def test_database_scripts_skip_mods_not_made_for_v4(self):
+        # The mod host rejects a base-only mod on v4, so its scripts must not
+        # change v4's database either; a mod for v4 or both builds still does.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state, game = root / "state", root / "game"
+            v4_database = root / "v4.slt"
+            connection = sqlite3.connect(v4_database)
+            connection.executescript(
+                "create table Data_Car (Id integer, BaseCost integer);"
+                "insert into Data_Car values (1496, 120000);")
+            connection.commit()
+            connection.close()
+            update = state / "title-update-v4" / "media.zip"
+            update.parent.mkdir(parents=True)
+            with zipfile.ZipFile(update, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.write(v4_database, "db/gamedb.slt")
+            for mod, game_version, cost in (
+                    ("base_only", '"DB40DF605ADE49A6"', 1),
+                    ("both", '["DB40DF605ADE49A6", "74B033805AB1BCAA"]', 2),
+                    ("v4_only", '"74B033805AB1BCAA"', 4)):
+                (state / "mods" / mod / "db").mkdir(parents=True)
+                (state / "mods" / mod / "mod.toml").write_text(
+                    f'name = "{mod}"\nabi = 1\ngame_version = {game_version}\n', encoding="utf-8")
+                (state / "mods" / mod / "db" / f"10-{mod}.sql").write_text(
+                    f"update Data_Car set BaseCost = BaseCost + {cost} where Id = 1496;",
+                    encoding="utf-8")
+            config = state / "config" / "pinyon_shift.toml"
+            config.parent.mkdir()
+            config.write_text('enabled_mods = "base_only"\n')
+            # Only the base-only mod: nothing for v4, so no overlay at all.
+            self.assertFalse(MODULE.build(state, game)["patched"])
+            self.assertFalse((state / "mods" / MODULE.GENERATED).exists())
+            config.write_text('enabled_mods = "base_only,both,v4_only"\n')
+            result = MODULE.build(state, game)
+            patched = root / "patched.slt"
+            with zipfile.ZipFile(state / "mods" / MODULE.GENERATED / "update" / "media.zip") as archive:
+                patched.write_bytes(archive.read("db/gamedb.slt"))
+            connection = sqlite3.connect(patched)
+            cost = connection.execute("select BaseCost from Data_Car where Id = 1496").fetchone()[0]
+            connection.close()
+            self.assertEqual(120006, cost)
+            self.assertEqual(["both", "v4_only"],
+                             [s["mod"] for s in result["archives"][0]["database_scripts"]])
+
+    def test_database_scripts_need_no_update_overlay_without_the_update(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            script = state / "mods" / "unicorns" / "db" / "10-unicorns.sql"
+            script.parent.mkdir(parents=True)
+            script.write_text("select 1;")
+            config = state / "config" / "pinyon_shift.toml"
+            config.parent.mkdir()
+            config.write_text('enabled_mods = "unicorns"\n')
+            self.assertFalse(MODULE.build(state, state / "no-disc")["patched"])
+            update = state / "title-update-v4" / "media.zip"
+            update.parent.mkdir()
+            with zipfile.ZipFile(update, "w") as archive:
+                archive.writestr("other.bin", b"no database")
+            with self.assertRaisesRegex(MODULE.ArchiveError, "has no member db"):
+                MODULE.build(state, state / "no-disc")
+
     def make(self, directory: Path):
         game = directory / "game"
         tables = game / "media" / "StringTables"
@@ -142,6 +348,37 @@ class BuildModArchivesTests(unittest.TestCase):
                 self.assertEqual(b"conversion other", zipped.read("Sub/Other.str"))
             self.assertIn("new_car.zip", (generated / "zipmanifest.xml").read_text(
                 encoding="utf-8-sig"))
+
+    def test_lists_a_new_archive_a_mod_adds(self):
+        # A converted car ships its own media/cars/<MediaName>.zip (#496); the
+        # title opens only archives the manifest lists.
+        with tempfile.TemporaryDirectory() as directory:
+            game, state = self.make(Path(directory))
+            for mod in ("first", "second"):
+                shutil.rmtree(state / "mods" / mod / "members")
+            cars = state / "mods" / "first" / "game" / "media" / "cars"
+            cars.mkdir(parents=True)
+            archive = cars / "PNY_TEST_01.zip"
+            with zipfile.ZipFile(archive, "w") as zipped:
+                zipped.writestr("PNY_TEST_01.carbin", b"model")
+                zipped.writestr("physicsdefinition.bin", b"physics")
+            result = MODULE.build(state, game)
+            self.assertTrue(result["patched"])
+            self.assertIn({"archive": "media/cars/PNY_TEST_01.zip", "new": True}, result["archives"])
+            manifest = (state / "mods" / MODULE.GENERATED / "game" / "media" /
+                        "zipmanifest.xml").read_bytes().decode("utf-8-sig")
+            line = manifest_line(archive, "game:\\media\\cars\\pny_test_01.zip")
+            self.assertEqual(1, manifest.count(line))
+            self.assertLess(manifest.index(line), manifest.index("</ZipFiles>"))
+            # A second build does not list it twice, and a listed archive
+            # takes the priority of the archives beside it.
+            text = manifest.replace(line, line.replace("pny_test_01", "other").replace(
+                'priority="80"', 'priority="70"'))
+            self.assertIn('priority="70"', MODULE.add_manifest_line(
+                text, "media/cars/PNY_TEST_01.zip", 1, 2, 3))
+            self.assertEqual(1, MODULE.build(state, game) and (
+                state / "mods" / MODULE.GENERATED / "game" / "media" / "zipmanifest.xml"
+            ).read_bytes().decode("utf-8-sig").count("pny_test_01.zip"))
 
     def test_removes_the_generated_mod_without_members(self):
         with tempfile.TemporaryDirectory() as directory:

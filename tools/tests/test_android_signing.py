@@ -15,6 +15,17 @@ import pinyon_android
 
 
 class ReleaseSigningTests(unittest.TestCase):
+    def test_release_signing_resolves_pinned_android_tools(self):
+        with tempfile.TemporaryDirectory() as temp:
+            sdk=pathlib.Path(temp)
+            with mock.patch.object(pinyon_android,"sdk_root",return_value=sdk), \
+                 mock.patch.object(pinyon_android,"java_home",return_value=None), \
+                 mock.patch.object(pinyon_android.Tools,"_find",return_value=None):
+                tools=pinyon_android.Tools()
+            build=sdk/"build-tools"/pinyon_android.CONFIG["android_sdk"]["build_tools"]
+            self.assertEqual(tools.zipalign,build/pinyon_android._exe("zipalign"))
+            self.assertEqual(tools.apksigner,build/pinyon_android._script("apksigner"))
+
     def test_bundled_driver_notice_has_one_destination(self):
         with tempfile.TemporaryDirectory() as temp:
             root=pathlib.Path(temp);work=root/"work";binary=work/"drivers/driver";notice=root/"android/drivers/driver"
@@ -37,7 +48,8 @@ class ReleaseSigningTests(unittest.TestCase):
                 (build/name).write_bytes(("unstripped-"+name).encode())
             (root/"android/art").mkdir(parents=True);(root/"config").mkdir()
             (root/"android/AndroidManifest.xml").write_text("<manifest />")
-            (root/"config/supported-extracted-ms-2505.json").write_text("{}")
+            for name in ("supported-extracted-ms-2505.json", "supported-dlc.json", "supported-dumps.json"):
+                (root/"config"/name).write_text("{}")
             for name in ("release.jks","storepass","keypass"):(root/name).write_text("fixture")
             args=SimpleNamespace(title_update_v4=False,keystore=root/"release.jks",key_alias="release",
                                  storepass_file=root/"storepass",keypass_file=root/"keypass")
@@ -65,6 +77,7 @@ class ReleaseSigningTests(unittest.TestCase):
                  mock.patch.object(pinyon_android,"_git",return_value="test"), \
                  mock.patch.object(pinyon_android,"run",side_effect=run), \
                  mock.patch.object(pinyon_android.subprocess,"run",return_value=SimpleNamespace(stdout="LOAD 0x4000\n",returncode=0)), \
+                 mock.patch.object(pinyon_android.android_module_check,"verify"), \
                  mock.patch("builtins.print"):
                 self.assertEqual(pinyon_android.package(args,tools),0)
                 good=(work/"pinyon-shift.apk").read_bytes();fail_sign=True

@@ -29,26 +29,37 @@ set(PINYON_SHIFT_HOST_SOURCES
     src/pinyon_shift_diagnostics.cpp
     src/pinyon_shift_runtime_hooks.cpp
     src/save_backups.cpp
+    src/save_sync.cpp
+    src/cvar_cycle.cpp
     src/cheats.cpp
     src/cheats_map.cpp
     src/audio_mix.cpp
     src/dev_options.cpp
     src/telemetry/forza_dash.cpp
     src/telemetry/telemetry_out.cpp
+    src/telemetry/telemetry_probe.cpp
     src/dlc_token_unlocks.cpp
     src/dlc_treasure_map.cpp
     src/hud_toggle.cpp
     src/auto_start.cpp
+    src/head_tracking/head_tracking.cpp
     src/guest_native/guest_native.cpp
     src/guest_native/crt_math.cpp
     src/guest_native/lzx_decoder.cpp
     src/guest_native/title_waits.cpp
+    src/guest_native/loading_screen.cpp
     src/guest_native/voice_chat.cpp
     src/guest_native/retire_code.cpp
     src/guest_native/fmod_stereo.cpp
     src/guest_native/fmod_dsp.cpp
+    src/guest_native/car_physics.cpp
+    src/guest_native/ui_update.cpp
+    src/guest_native/audio_update.cpp
+    src/guest_native/fmod_reverb.cpp
+    src/guest_native/scene_cull.cpp
     src/guest_native/fmod_output.cpp
     src/guest_native/reference_verify.cpp
+    src/guest_native/region_oracle.cpp
     src/dlc/rally_progress.cpp
     src/dlc/rally_pace_notes.cpp
     src/dlc/rally_audio_probe.cpp
@@ -61,6 +72,7 @@ set(PINYON_SHIFT_HOST_SOURCES
     src/ui/fh1_ui_api.cpp
     src/ui/ui_strings.cpp
     src/ui/host_style.cpp
+    src/ui/hostui/bitmap_font.cpp
     src/ui/hostui/fh1_archive.cpp
     src/ui/hostui/glyph_atlas.cpp
     src/ui/hostui/host_ui.cpp
@@ -74,22 +86,54 @@ set(PINYON_SHIFT_HOST_SOURCES
     src/ui/png_writer.cpp
     src/ui/xam_dialogs.cpp
     src/ui/achievements_menu.cpp
+    src/ui/achievement_icons.cpp
+    src/achievements/fh1_achievements.cpp
+    src/achievements/achievement_progress.cpp
+    src/achievements/achievement_strings.cpp
     src/ui/touch_pad.cpp
     src/config/host_config.cpp
+    src/platform/display_hdr.cpp
     src/platform/host_platform.cpp
     src/platform/sha256.cpp
-    ${REXSDK_DIR}/thirdparty/crypto/sha256.cpp
+    ${PINYON_SHIFT_SDK_SOURCE_DIR}/thirdparty/crypto/sha256.cpp
     src/native_renderer/d3d_census.cpp
     src/native_renderer/d3d_draw.cpp
+    src/native_renderer/d3d_program.cpp
     src/native_renderer/graphics_hooks.cpp
     src/native_renderer/guest_output_renderer.cpp
     src/native_renderer/shader_capture.cpp
 )
 
+if(NOT ANDROID)
+    list(APPEND PINYON_SHIFT_HOST_SOURCES src/ui/frame_inspector.cpp)
+endif()
+if(WIN32)
+    list(APPEND PINYON_SHIFT_HOST_SOURCES src/crash_reporter_win.cpp src/hitch_sampler_win.cpp)
+else()
+    list(APPEND PINYON_SHIFT_HOST_SOURCES src/crash_reporter_posix.cpp)
+endif()
+
+# TP-3 host split (docs/TIME_TO_PLAY_BACKLOG.md): the files that include
+# generated headers or depend on the CPU baseline compile with the game; the
+# rest are pinyon_shift_host, which a release ships prebuilt for each
+# platform and variant (pinyon_shift_add_host_objects).
+set(PINYON_SHIFT_HOST_LOCAL_SOURCES
+    src/main.cpp
+    src/pinyon_shift_app.cpp
+    src/cpu_baseline_guard.cpp
+    src/pinyon_shift_diagnostics.cpp
+    src/guest_native/reference_verify.cpp
+    src/guest_native/region_oracle.cpp
+)
+set(PINYON_SHIFT_HOST_SHARED_SOURCES ${PINYON_SHIFT_HOST_SOURCES})
+list(REMOVE_ITEM PINYON_SHIFT_HOST_SHARED_SOURCES ${PINYON_SHIFT_HOST_LOCAL_SOURCES})
+
 if(ANDROID)
-    add_library(fh4droid_android SHARED android/native/driver_probe.cpp)
+    add_library(fh4droid_android SHARED android/native/driver_probe.cpp
+        android/native/content_tools.cpp src/content/dlc_extract.cpp)
     target_include_directories(fh4droid_android PRIVATE
-        ${REXSDK_DIR}/thirdparty/vulkan-headers/include)
+        ${REXSDK_DIR}/thirdparty/vulkan-headers/include
+        ${REXSDK_DIR}/thirdparty/tomlplusplus/include src)
     target_link_libraries(fh4droid_android PRIVATE rex::runtime android log dl)
     target_link_options(fh4droid_android PRIVATE -Wl,-z,max-page-size=16384)
     add_library(pinyon_shift_android_ui_check OBJECT EXCLUDE_FROM_ALL
@@ -98,21 +142,17 @@ if(ANDROID)
     target_link_libraries(pinyon_shift_android_ui_check PRIVATE rex::runtime)
 endif()
 
-if(PINYON_SHIFT_HOST_TESTS_ONLY)
+if(PINYON_SHIFT_HOST_OBJECTS_ONLY)
+    # The release's prebuilt host objects only: no game, no generated code.
+    pinyon_shift_add_host_objects("")
+elseif(PINYON_SHIFT_HOST_TESTS_ONLY)
     # No game target; the tests and tools below still build.
 elseif(WIN32)
-    add_executable(pinyon_shift WIN32
-        ${PINYON_SHIFT_HOST_SOURCES}
-        src/crash_reporter_win.cpp
-        src/hitch_sampler_win.cpp
-    )
+    add_executable(pinyon_shift WIN32 ${PINYON_SHIFT_HOST_LOCAL_SOURCES})
 elseif(ANDROID)
     # SDL's activity loads the game as libmain.so and calls its SDL_main; the
     # runtime, the GPU plugin and the facades are libraries beside it.
-    add_library(pinyon_shift SHARED
-        ${PINYON_SHIFT_HOST_SOURCES}
-        src/crash_reporter_posix.cpp
-    )
+    add_library(pinyon_shift SHARED ${PINYON_SHIFT_HOST_LOCAL_SOURCES})
     set_target_properties(pinyon_shift PROPERTIES OUTPUT_NAME main)
     target_sources(pinyon_shift PRIVATE src/android_bridge.cpp src/android_achievement_art.cpp)
     add_dependencies(pinyon_shift fh4droid_android)
@@ -125,15 +165,33 @@ elseif(ANDROID)
     # NN-1.9: an lld symbol ordering file from a probe build's call counts
     # (tools/make-symbol-order.py) puts the hot generated functions together:
     # on the Odin race, libmain's resident pages fell from 52 to 34-36 MB.
-    # The tracked file comes from the base image's boot-to-race route, so v4
-    # builds go without one.
+    # The base file comes from the base image's boot-to-race route, the v4
+    # file from a v4 probe build's drive (PINYON_SHIFT_RECOMP_PROBE with
+    # PINYON_SHIFT_TITLE_UPDATE_V4, #745); the base list translated to v4
+    # addresses missed too many entered functions to help.
     if(PINYON_SHIFT_TITLE_UPDATE_V4)
-        set(_pinyon_symbol_order_default "")
+        set(_pinyon_symbol_order_default "${CMAKE_CURRENT_SOURCE_DIR}/config/performance/symbol-order-v4.txt")
     else()
         set(_pinyon_symbol_order_default "${CMAKE_CURRENT_SOURCE_DIR}/config/performance/symbol-order-base.txt")
     endif()
+    # A cache keeps its value when the default changes, so a build directory
+    # still holding the previous default takes the new one. Caches from
+    # before #745 recorded no default; v4's was empty then.
+    if(DEFINED CACHE{PINYON_SHIFT_SYMBOL_ORDER_DEFAULT_USED})
+        set(_pinyon_symbol_order_previous "$CACHE{PINYON_SHIFT_SYMBOL_ORDER_DEFAULT_USED}")
+    elseif(PINYON_SHIFT_TITLE_UPDATE_V4)
+        set(_pinyon_symbol_order_previous "")
+    else()
+        set(_pinyon_symbol_order_previous "${_pinyon_symbol_order_default}")
+    endif()
+    if(DEFINED CACHE{PINYON_SHIFT_SYMBOL_ORDER_FILE} AND
+       "$CACHE{PINYON_SHIFT_SYMBOL_ORDER_FILE}" STREQUAL "${_pinyon_symbol_order_previous}")
+        set_property(CACHE PINYON_SHIFT_SYMBOL_ORDER_FILE PROPERTY VALUE "${_pinyon_symbol_order_default}")
+    endif()
     set(PINYON_SHIFT_SYMBOL_ORDER_FILE "${_pinyon_symbol_order_default}" CACHE FILEPATH
         "lld symbol ordering file for libmain (tools/make-symbol-order.py); empty for none")
+    set(PINYON_SHIFT_SYMBOL_ORDER_DEFAULT_USED "${_pinyon_symbol_order_default}" CACHE INTERNAL
+        "the symbol ordering default this build directory last configured with")
     if(PINYON_SHIFT_SYMBOL_ORDER_FILE)
         target_link_options(pinyon_shift PRIVATE
             "-Wl,--symbol-ordering-file=${PINYON_SHIFT_SYMBOL_ORDER_FILE}"
@@ -142,20 +200,34 @@ elseif(ANDROID)
             "${PINYON_SHIFT_SYMBOL_ORDER_FILE}")
     endif()
 else()
-    add_executable(pinyon_shift
-        ${PINYON_SHIFT_HOST_SOURCES}
-        src/crash_reporter_posix.cpp
-    )
+    add_executable(pinyon_shift ${PINYON_SHIFT_HOST_LOCAL_SOURCES})
 endif()
 
+# The host tests and developer tools compile SDK sources and private headers,
+# so they need the source tree; a build from the prebuilt kit (TP-3) has only
+# the game.
+if(REXSDK_DIR)
 add_executable(pinyon_shift_view_policy_tests EXCLUDE_FROM_ALL tests/ui/view_policy_test.cpp)
 target_include_directories(pinyon_shift_view_policy_tests PRIVATE src)
+
+add_executable(pinyon_shift_stall_timer_tests EXCLUDE_FROM_ALL tests/stall_timer_test.cpp)
+target_include_directories(pinyon_shift_stall_timer_tests PRIVATE src)
 
 add_executable(pinyon_shift_fh1_ui_api_tests EXCLUDE_FROM_ALL
     tests/ui/fh1_ui_api_test.cpp
     src/ui/fh1_ui_api.cpp
 )
 target_include_directories(pinyon_shift_fh1_ui_api_tests PRIVATE src)
+
+add_executable(pinyon_shift_frame_inspector_tests EXCLUDE_FROM_ALL
+    tests/ui/frame_inspector_test.cpp)
+target_include_directories(pinyon_shift_frame_inspector_tests PRIVATE ${REXSDK_DIR}/include)
+find_package(Threads REQUIRED)
+target_link_libraries(pinyon_shift_frame_inspector_tests PRIVATE Threads::Threads)
+
+add_executable(pinyon_shift_frame_inspector_input_tests EXCLUDE_FROM_ALL
+    tests/ui/frame_inspector_input_test.cpp)
+target_link_libraries(pinyon_shift_frame_inspector_input_tests PRIVATE rex::ui rex::runtime)
 
 add_executable(pinyon_shift_fh1_shader_pack_tests EXCLUDE_FROM_ALL
     tests/native_renderer/fh1_shader_pack_test.cpp
@@ -169,8 +241,18 @@ if(WIN32)
     target_link_libraries(pinyon_shift_fh1_shader_pack_tests PRIVATE bcrypt)
 endif()
 
+if(REXGLUE_USE_VULKAN)
+    add_executable(pinyon_shift_shader_override_tests EXCLUDE_FROM_ALL
+        tests/native_renderer/shader_override_test.cpp
+        ${REXSDK_DIR}/src/graphics/vulkan/shader_override_files.cpp)
+    target_include_directories(pinyon_shift_shader_override_tests PRIVATE ${REXSDK_DIR}/include)
+    target_link_libraries(pinyon_shift_shader_override_tests PRIVATE
+        rex::runtime SPIRV-Tools-static fmt::fmt)
+endif()
+
 add_executable(pinyon_shift_hostui_tests EXCLUDE_FROM_ALL
     tests/ui/hostui_test.cpp
+    src/ui/hostui/bitmap_font.cpp
     src/ui/hostui/fh1_archive.cpp
     src/ui/hostui/glyph_atlas.cpp
     src/ui/hostui/menu.cpp
@@ -179,7 +261,7 @@ add_executable(pinyon_shift_hostui_tests EXCLUDE_FROM_ALL
     src/ui/hostui/xds_texture.cpp
 )
 target_include_directories(pinyon_shift_hostui_tests PRIVATE src ${REXSDK_DIR}/include)
-target_link_libraries(pinyon_shift_hostui_tests PRIVATE rex::runtime)
+target_link_libraries(pinyon_shift_hostui_tests PRIVATE rex::ui rex::runtime)
 
 add_executable(pinyon_shift_host_config_tests EXCLUDE_FROM_ALL
     tests/config/host_config_test.cpp
@@ -193,6 +275,16 @@ add_executable(pinyon_shift_profile_body_tests EXCLUDE_FROM_ALL
     src/save/profile_body.cpp
 )
 target_include_directories(pinyon_shift_profile_body_tests PRIVATE src)
+
+add_executable(pinyon_shift_cheats_destination_tests EXCLUDE_FROM_ALL
+    tests/config/cheats_destination_test.cpp)
+target_include_directories(pinyon_shift_cheats_destination_tests PRIVATE src)
+target_compile_options(pinyon_shift_cheats_destination_tests PRIVATE -UNDEBUG)
+
+add_executable(pinyon_shift_car_recovery_tests EXCLUDE_FROM_ALL
+    tests/save/car_recovery_test.cpp src/cheats.cpp src/save/profile_body.cpp)
+target_include_directories(pinyon_shift_car_recovery_tests PRIVATE src)
+target_link_libraries(pinyon_shift_car_recovery_tests PRIVATE rex::runtime)
 
 add_executable(pinyon_shift_rally_progress_tests EXCLUDE_FROM_ALL
     tests/dlc/rally_progress_test.cpp
@@ -218,6 +310,13 @@ add_executable(pinyon_shift_save_backups_tests EXCLUDE_FROM_ALL
     tests/save/save_backups_test.cpp src/save_backups.cpp)
 target_include_directories(pinyon_shift_save_backups_tests PRIVATE src)
 target_link_libraries(pinyon_shift_save_backups_tests PRIVATE rex::runtime)
+
+# Save sync's two-device test (docs/SAVE_SYNC.md).
+add_executable(pinyon_shift_save_sync_tests EXCLUDE_FROM_ALL
+    tests/save/save_sync_test.cpp src/save_sync.cpp src/save_backups.cpp
+    src/config/host_config.cpp src/platform/host_platform.cpp)
+target_include_directories(pinyon_shift_save_sync_tests PRIVATE src)
+target_link_libraries(pinyon_shift_save_sync_tests PRIVATE rex::runtime)
 
 add_executable(pinyon_shift_telemetry_tests EXCLUDE_FROM_ALL
     tests/telemetry/forza_dash_test.cpp src/telemetry/forza_dash.cpp)
@@ -251,20 +350,35 @@ target_include_directories(pinyon_shift_touch_overlay_tests PRIVATE src ${REXSDK
 target_link_libraries(pinyon_shift_touch_overlay_tests PRIVATE rex::runtime)
 
 # Every host-side test, for CI (PINYON_SHIFT_HOST_TESTS_ONLY) and local runs.
+add_executable(pinyon_shift_camera_tuning_tests tests/camera_tuning_tests.cpp)
+target_include_directories(pinyon_shift_camera_tuning_tests PRIVATE src)
+add_executable(pinyon_shift_head_tracking_tests EXCLUDE_FROM_ALL
+    tests/head_tracking/head_tracking_test.cpp src/head_tracking/head_tracking.cpp)
+target_include_directories(pinyon_shift_head_tracking_tests PRIVATE src)
+target_link_libraries(pinyon_shift_head_tracking_tests PRIVATE rex::runtime)
+if(WIN32)
+    target_link_libraries(pinyon_shift_head_tracking_tests PRIVATE ws2_32)
+endif()
+
 add_custom_target(pinyon_shift_host_tests)
 add_executable(pinyon_shift_touch_pad_tests EXCLUDE_FROM_ALL
     tests/ui/touch_pad_test.cpp src/ui/touch_pad.cpp)
 target_include_directories(pinyon_shift_touch_pad_tests PRIVATE src)
 target_link_libraries(pinyon_shift_touch_pad_tests PRIVATE rex::runtime)
 add_dependencies(pinyon_shift_host_tests
+    pinyon_shift_camera_tuning_tests
     pinyon_shift_touch_overlay_tests
     pinyon_shift_touch_pad_tests
     pinyon_shift_view_policy_tests
+    pinyon_shift_stall_timer_tests
     pinyon_shift_fh1_ui_api_tests
+    pinyon_shift_frame_inspector_tests
+    pinyon_shift_frame_inspector_input_tests
     pinyon_shift_fh1_shader_pack_tests
     pinyon_shift_hostui_tests
     pinyon_shift_host_config_tests
     pinyon_shift_profile_body_tests
+    pinyon_shift_car_recovery_tests
     pinyon_shift_rally_progress_tests
     pinyon_shift_rally_pace_tests
     pinyon_shift_car_cards_tests
@@ -273,9 +387,13 @@ add_dependencies(pinyon_shift_host_tests
     pinyon_shift_telemetry_tests
     pinyon_shift_overlay_device_tests
     pinyon_shift_fh1_edram_tiles_tests
+    pinyon_shift_head_tracking_tests
     pinyon_shift_fh1_raster_scale_tests
     pinyon_shift_disc_image_bounds_tests
     pinyon_shift_mod_hello_telemetry)
+if(TARGET pinyon_shift_shader_override_tests)
+    add_dependencies(pinyon_shift_host_tests pinyon_shift_shader_override_tests)
+endif()
 
 # These checks use assert; Release must execute them instead of compiling
 # away the test operations themselves.
@@ -286,20 +404,14 @@ foreach(pinyon_host_check IN LISTS pinyon_host_checks)
             $<IF:$<CXX_COMPILER_ID:MSVC>,/UNDEBUG,-UNDEBUG>)
     endif()
 endforeach()
+endif()  # REXSDK_DIR
 
 add_executable(pinyon_shift_fh1_archive_extract EXCLUDE_FROM_ALL
     tools/fh1_archive_extract.cpp
     src/ui/hostui/fh1_archive.cpp
 )
 
-add_executable(pinyon_shift_fh1_texture_import EXCLUDE_FROM_ALL
-    tools/fh1_texture_import.cpp
-    ${REXSDK_DIR}/src/graphics/pipeline/texture/util.cpp
-    ${REXSDK_DIR}/src/graphics/pipeline/texture/info_formats.cpp)
-target_include_directories(pinyon_shift_fh1_texture_import PRIVATE
-    ${REXSDK_DIR}/include)
-target_include_directories(pinyon_shift_fh1_archive_extract PRIVATE
-    src ${REXSDK_DIR}/include)
+target_include_directories(pinyon_shift_fh1_archive_extract PRIVATE src)
 target_link_libraries(pinyon_shift_fh1_archive_extract PRIVATE rex::runtime)
 if(UNIX AND NOT APPLE)
     # As the game: find librexruntime.so beside the extractor (or in the
@@ -309,6 +421,14 @@ if(UNIX AND NOT APPLE)
         INSTALL_RPATH "$ORIGIN:$ORIGIN/rexglue-artifacts"
         BUILD_WITH_INSTALL_RPATH ON)
 endif()
+
+if(REXSDK_DIR)
+add_executable(pinyon_shift_fh1_texture_import EXCLUDE_FROM_ALL
+    tools/fh1_texture_import.cpp
+    ${REXSDK_DIR}/src/graphics/pipeline/texture/util.cpp
+    ${REXSDK_DIR}/src/graphics/pipeline/texture/info_formats.cpp)
+target_include_directories(pinyon_shift_fh1_texture_import PRIVATE
+    ${REXSDK_DIR}/include)
 
 # FSB4 banks to WAV for the asset export (#446), with the SDK's FFmpeg (MP3
 # and the XMA frame decoder the game's audio runs on).
@@ -327,9 +447,11 @@ if(WIN32)
     target_include_directories(pinyon_shift_vram_balloon PRIVATE
         ${REXSDK_DIR}/thirdparty/vulkan-headers/include)
 endif()
+endif()  # REXSDK_DIR
 
 if(NOT PINYON_SHIFT_HOST_TESTS_ONLY)
 pinyon_shift_attach_rexglue(pinyon_shift)
+pinyon_shift_add_host_objects(pinyon_shift)
 add_dependencies(pinyon_shift pinyon_shift_fh1_archive_extract)
 
 # ReXGlue's SDL backend loads project overrides from the executable directory.
@@ -352,9 +474,30 @@ if(WIN32 AND DEFINED ENV{VCToolsRedistDir})
     set(PINYON_SHIFT_VC_REDIST_DIR "$ENV{VCToolsRedistDir}" CACHE PATH
         "Visual C++ redistributable folder of the build toolset")
 endif()
-if(WIN32 AND PINYON_SHIFT_VC_REDIST_DIR)
-    file(GLOB PINYON_SHIFT_VC_RUNTIME_DLLS
-        "${PINYON_SHIFT_VC_REDIST_DIR}/x64/Microsoft.VC*.CRT/*.dll")
+if(WIN32 AND (PINYON_SHIFT_VC_REDIST_DIR OR PINYON_SHIFT_SHIFTGLUE_KIT))
+    set(PINYON_SHIFT_VC_RUNTIME_DLLS)
+    if(PINYON_SHIFT_VC_REDIST_DIR)
+        file(GLOB PINYON_SHIFT_VC_RUNTIME_DLLS
+            "${PINYON_SHIFT_VC_REDIST_DIR}/x64/Microsoft.VC*.CRT/*.dll")
+    endif()
+    # A prebuilt kit carries the runtime its DLLs were built against; the
+    # newer of the two toolsets' runtimes serves both (Microsoft keeps it
+    # backward compatible). The fetched sysroot (TP-4) has no runtime, so the
+    # kit's is the only one; it must be at least as new as the sysroot's
+    # C++ library.
+    if(PINYON_SHIFT_SHIFTGLUE_KIT AND EXISTS "${PINYON_SHIFT_SHIFTGLUE_KIT}/redist")
+        string(JSON _pinyon_kit_toolset GET "${_pinyon_kit}" msvc_toolset)
+        if(NOT PINYON_SHIFT_VC_RUNTIME_DLLS OR _pinyon_kit_toolset VERSION_GREATER "$ENV{VCToolsVersion}")
+            file(GLOB PINYON_SHIFT_VC_RUNTIME_DLLS "${PINYON_SHIFT_SHIFTGLUE_KIT}/redist/*.dll")
+        endif()
+        string(REGEX MATCH "^[0-9]+\\.[0-9]+" _pinyon_kit_runtime "${_pinyon_kit_toolset}")
+        string(REGEX MATCH "^[0-9]+\\.[0-9]+" _pinyon_headers "$ENV{VCToolsVersion}")
+        if(NOT PINYON_SHIFT_VC_REDIST_DIR AND _pinyon_headers AND
+           _pinyon_kit_runtime VERSION_LESS _pinyon_headers)
+            message(WARNING "The kit's C++ runtime (${_pinyon_kit_toolset}) is older than "
+                "the C++ library this build compiles against ($ENV{VCToolsVersion}).")
+        endif()
+    endif()
     if(PINYON_SHIFT_VC_RUNTIME_DLLS)
         add_custom_target(pinyon_shift_stage_vc_runtime ALL
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -375,9 +518,9 @@ endif()
 # The mod ABI header (NP-7) and the TOML parser mod.toml is read with.
 target_include_directories(pinyon_shift PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${REXSDK_DIR}/thirdparty/tomlplusplus/include
-    ${REXSDK_DIR}/thirdparty/renderdoc
-    ${REXSDK_DIR})
+    ${PINYON_SHIFT_SDK_SOURCE_DIR}/thirdparty/tomlplusplus/include
+    ${PINYON_SHIFT_SDK_SOURCE_DIR}/thirdparty/renderdoc
+    ${PINYON_SHIFT_SDK_SOURCE_DIR})
 endif()  # NOT PINYON_SHIFT_HOST_TESTS_ONLY
 
 # Sample mods (NP-7.6): plain C libraries against include/pinyon_mod.h. Not
@@ -390,3 +533,33 @@ set_target_properties(pinyon_shift_mod_hello_telemetry PROPERTIES
     OUTPUT_NAME hello_telemetry
     PREFIX ""
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/mods/hello_telemetry/code")
+
+# This smoke test needs the private generated project and both real facades.
+if(UNIX AND NOT ANDROID AND NOT PINYON_SHIFT_TITLE_UPDATE_V4 AND
+   NOT PINYON_SHIFT_HOST_TESTS_ONLY AND NOT PINYON_SHIFT_HOST_OBJECTS_ONLY)
+    file(READ "${PINYON_SHIFT_GENERATED_DIR}/pinyon_shift_init.cpp" _module_test_init)
+    string(REGEX MATCH "const rex::PPCImageInfo PPCImageConfig = [{][^;]*;"
+        _module_test_image "${_module_test_init}")
+    file(STRINGS "${PINYON_SHIFT_GENERATED_DIR}/pinyon_shift_pch.h" _module_test_macros
+        REGEX "^#define (REX_IMAGE_BASE|REX_IMAGE_SIZE|REX_CODE_BASE|REX_CODE_SIZE|REXCRT_HEAP) ")
+    list(JOIN _module_test_macros "\n" _module_test_layout)
+    set(_module_test_metadata "${CMAKE_CURRENT_BINARY_DIR}/module-test-image.cpp")
+    file(GENERATE OUTPUT "${_module_test_metadata}" CONTENT
+"#include <rex/image_info.h>
+#include <rex/ppc/func.h>
+${_module_test_layout}
+void RegisterRecompiledModules(rex::system::KernelState*);
+const PPCFuncMapping PPCFuncMappings[] = {{0,nullptr}};
+const PPCFoldedRange PPCFoldedRanges[] = {{}};
+const uint64_t PPCFoldedHash=0;
+extern const rex::PPCImageInfo PPCImageConfig;
+${_module_test_image}
+")
+    add_executable(pinyon_shift_recompiled_module_tests EXCLUDE_FROM_ALL
+        tests/modules/recompiled_module_test.cpp "${_module_test_metadata}"
+        "${PINYON_SHIFT_GENERATED_DIR}/module_registry.cpp")
+    target_link_libraries(pinyon_shift_recompiled_module_tests PRIVATE
+        rex::runtime ${CMAKE_DL_LIBS})
+    add_dependencies(pinyon_shift_recompiled_module_tests
+        pinyon_shift_SpeechFacade_default pinyon_shift_XMediaFacade_default)
+endif()

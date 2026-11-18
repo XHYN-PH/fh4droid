@@ -64,7 +64,8 @@ In progress:
   FH1, measured on the Odin 2 Portal and the Steam Deck, by replacing
   emulated layers (the GPU command front end, the audio path, kernel
   objects) and translation overhead
-  ([near-native research](NEAR_NATIVE_RESEARCH.md))
+  ([near-native research](NEAR_NATIVE_RESEARCH.md); the long-term
+  rebuild it points to is in the [clean-slate research](CLEAN_SLATE_RESEARCH.md))
 - [ ] Fix remaining crashes, loading failures, rendering regressions and
   recurring stutter: hills seen through (#424), hitching (#381), frame drops
   in free roam (#416), resuming after quitting before the first festival
@@ -121,8 +122,9 @@ Mid term, in priority order:
 - [ ] Nintendo Switch support, starting with hardware feasibility and
   performance validation
 - [ ] Racing wheel, pedal and force feedback support
-- [ ] Install, enable and order any mod from the launcher, with compatibility
-  guidance for existing FH1 mods
+- [x] Install, enable and order any mod from the launcher
+- [x] Compatibility guidance for existing FH1 mods, and a tool that imports
+  mods made of changed game files
 - [ ] Verify DualSense and variable refresh rate displays
 - [ ] Sign the launcher and preview executables
 

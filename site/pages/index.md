@@ -19,7 +19,7 @@ The download is the launcher. It doesn't contain the game: the launcher verifies
 | --- | --- |
 | Game | USA retail disc of *Forza Horizon*, serial `MS-2505`, title ID `4D5309C9`, as an ISO or an [extracted folder](install.md#use-an-extracted-folder) |
 | System | Windows 10 or 11, x64; x86-64 Linux or SteamOS; macOS 13 on Apple silicon |
-| GPU | Vulkan. Android requires the listed features, with experimental 1.1/1.2 paths; see [Android qualification limits](android.md#r7-changes-and-limits). Older desktop measurements are device-specific |
+| GPU | Vulkan. Android requires the listed features, with experimental 1.1/1.2 paths; see [Android qualification limits](android.md#current-changes-and-limits). Older desktop measurements are device-specific |
 | CPU | 4 cores for the Low-spec 60 preset |
 | Disk | About 30 GB free. The first build takes 20 to 60 minutes |
 
@@ -36,7 +36,7 @@ A playable preview. Expect some rendering bugs and slowdowns. Vulkan is the only
 | Resolution | 1x to 4x internal resolution, FSR 1 output scaling, ultrawide with a 16:9 HUD |
 | In game | Settings on <kbd>F6</kbd>, trainer, photo export, achievements, save backups, 18 languages |
 | DLC | Your own Xbox 360 packages, verified and imported. Rally and 1000 Club run on the optional v4 build |
-| Mods | Asset, database, texture and native mods; see [Modding](modding.md) |
+| Mods | Asset, database, texture, Vulkan shader and native mods; see [Modding](modding.md) |
 | Android | Developer alpha. About 60 fps on Snapdragon 8 Gen 2 handhelds |
 
 ## What's in the repository

@@ -1,5 +1,105 @@
 # Changelog
 
+## 0.9.1 - 2026-11-17
+
+- Fixed: setup stopped on the first build after updating to 0.9.0 with
+  "modified since the precompiled header" (#1096, #1097, #1098).
+
+## 0.9.0 - 2026-11-17
+
+- New: frame generation with FSR 3 and DLSS on Windows, Linux and the
+  Steam Deck, with the HUD kept sharp and HDR supported.
+- New: ambient occlusion, FRAME RATE up to 240 fps as one setting, save
+  sync through a folder-sync app and a 540p scene resolution (#1070).
+- New: resolution scale, MSAA and texture size apply without a restart;
+  loading screens end when loading does; the idle mouse pointer hides
+  (#1076); experimental Linux ARM64 builds from source, built in CI.
+- Faster: one-pass scene tiles, native scene culling, 2 MiB code pages and
+  earlier LODs on Linux and the Steam Deck; audio updates at 30 Hz.
+- Fixed: the Android build after downloading host objects (#1041, #1042,
+  #1045, #1072); v4 setup on upgraded Linux and macOS installs (#1046,
+  #1079, #1081); macOS on Python 3.9 (#1051) and exFAT drives (#1052,
+  #1053); interrupted ShiftGlue downloads; setup from PowerShell 7.
+
+## 0.8.2 - 2026-11-07
+
+- Fixed: Windows setup from a disc image stopped on a missing
+  `copy-disc-executables.py` (#1014).
+- Fixed: Linux builds from the prebuilt kit failed to link with
+  "recompile with -fPIC" (#1001).
+- Fixed: the Android build stopped with "Git is not available".
+- Fixed: starting a Rally championship with a database mod ran out of
+  memory on the base game (#1024).
+- Fixed: the macOS launcher's hardware check found no Vulkan GPU in kit
+  builds; Apple silicon builds target macOS 13.3 for Xcode 16 (#918).
+- New: a Mods panel in the launcher with mod options (#878), the festival
+  pacing mod (#879), opentrack head tracking (#817), field of view up to
+  200 % (#927) and `pinyon.py import-mod` (#917).
+
+## 0.8.1 - 2026-11-05
+
+- Fixed: Windows setup stopped with "Cannot bind argument to parameter
+  'BuildDirectory' because it is an empty string" when it used the
+  prebuilt ShiftGlue kit (#1000).
+- Experimental Intel Mac launcher (`macos-x86_64`, macOS 13.3 or newer),
+  tested only under Rosetta so far.
+
+## 0.8.0 - 2026-11-04
+
+- Faster first setup: prebuilt ShiftGlue kits, a trimmed LLVM and Linux
+  sysroot, and prebuilt host code; Windows builds without Visual Studio
+  after accepting Microsoft's licence; downloads and disc extraction
+  overlap the build; 4 MiB generated files; no double translation;
+  Android APKs from a prebuilt shell without a JDK.
+- New achievements screen (F7); free-roam shaders built ahead of time;
+  Mali starts at coarse scene shading; macOS caps full screen at 4K and
+  QUALITY 60 uses 2x MSAA.
+- Fixed: XE 1.0 with UDLC stopping a new save (#901), a clean close
+  reported as a crash (#946), title-thread spikes with a tracked
+  achievement, Android push-data without the pipeline list.
+
+## 0.7.1 - 2026-10-27
+
+- Fixed: Windows setup failed to download ShiftGlue ("schannel: failed
+  to open CA file") under a user folder with an accented or other
+  non-ASCII name; Git now uses Windows' certificate store.
+
+## 0.7.0 - 2026-10-27
+
+- The launcher installs the community UDLC pack and its Traffic Car
+  Unlocker from browser downloads (#595); DLC import takes several files
+  and folders and nested ZIPs (#857).
+- Database mods apply on the v4 build; QUIT GAME in the F6 menu; DualSense
+  settings always listed; DLSS and FSR at a 1:1 resolution anti-alias
+  (#804); an Android hint for non-Qualcomm GPUs.
+- Fixed: updates that kept the old game (#802), the SET WRISTBAND settings
+  file, an empty pinyon_shift.toml (#793), Android builds without
+  developer tools (#810, #811, #868, #799), Steam Deck SD card folders
+  (#805), macOS with current Xcode (#798), glows through the car (#803),
+  push descriptors on Mesa ANV (#813), an XMA crash (#827).
+- Faster: save backups at most every ten minutes instead of every
+  autosave; 4x depth aliases share memory (1.09 ms GPU at 3x, RTX 4080).
+
+## 0.6.1 - 2026-10-21
+
+- Builds again on Linux and Steam Deck in folders with spaces (#727) and
+  with FidelityFX on SteamOS (#681); Android APKs build from the release
+  source (#716) and after a stopped build (#763).
+- Setup fetches AMD's FidelityFX and NVIDIA's DLSS runtimes on Windows;
+  the upscaler setting names FSR 1 when the chosen one can't run (#762,
+  #670).
+- Racing wheel force feedback and a launcher wheel screen (#337); fuller
+  telemetry with the Forza Horizon 4/5 layout as an option.
+- WINDOWS HDR switch, live chase camera tuning (#487) and the immersive
+  camera on v4, trainer road travel and GPS (#485), shader replacement
+  mods (#522), a frame inspector (#529), and an Android opt-in for Mali
+  GPUs.
+- Fixed: shadows-off garage photos (#700, #733), textures after livery
+  edits (#628), hidden cars for sale (#669), settings written by a mod
+  builder, older Apple clang (#775).
+- Faster: no double presents with overlays open and no per-frame GPU wait
+  for exposure.
+
 ## 0.6.0 - 2026-10-17
 
 - Temporal FSR 2 and FSR 3 in OUTPUT SCALING, fed with depth, camera and

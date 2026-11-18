@@ -77,8 +77,13 @@ try {
         draw_resolution_scale_x = '1'; draw_resolution_scale_y = '1'
     }
     $config = Join-Path $StateRoot 'config/pinyon_shift.toml'
-    if (Test-Path -LiteralPath $config) {
-        $text = Get-Content -LiteralPath $config -Raw
+    # Get-Content -Raw returns $null for an empty file, and [regex]::Match
+    # throws on $null (#793): read the settings as an empty string instead.
+    $configText = if (Test-Path -LiteralPath $config -PathType Leaf) {
+        [string](Get-Content -LiteralPath $config -Raw)
+    } else { '' }
+    if ($configText) {
+        $text = $configText
         foreach ($name in @($settings.Keys)) {
             $match = [regex]::Match($text, "(?m)^\s*$name\s*=\s*([^#\r\n]+)")
             if ($match.Success) { $settings[$name] = $match.Groups[1].Value.Trim().ToLowerInvariant() }
@@ -87,6 +92,15 @@ try {
     # Do not prepare legacy packs from a saved Direct3D 12 selection before
     # the game's schema 28 migration replaces it with Vulkan.
     if (-not $LegacyD3D12) {
+        # Free roam's pipelines, rebuilt from this disc (AOT-4), before the
+        # route so its start builds them too. Rewritten only when the
+        # catalog or the installed DLC change; a failure is only logged.
+        try {
+            $output = & (Get-PinyonPython) (Join-Path $PSScriptRoot 'pinyon.py') prepare-shaders --pipelines-only `
+                --state-root $StateRoot --game-root $GameRoot --build-directory $BuildDirectory `
+                $(if ($JsonEvents) { '--json' })
+            if ($LASTEXITCODE -ne 0) { throw "pinyon.py prepare-shaders exited with $LASTEXITCODE ($output)" }
+        } catch { Write-PinyonEvent shaders 0 "Ahead-of-time pipelines were skipped: $($_.Exception.Message)" -JsonEvents:$JsonEvents }
         $stored = @(Get-ChildItem -LiteralPath (Join-Path $cache 'shaders/shareable') -Filter '*.vk.xpso' -File -ErrorAction SilentlyContinue)
         # A preparation that failed, or was stopped, for this build is not retried
         # at every start: the attempt is recorded before it runs (#389). The game
@@ -105,8 +119,8 @@ try {
         return
     }
     # Not a key input: whether the other scales are prepared as well.
-    $prepareAllScales = (Test-Path -LiteralPath $config) -and [regex]::IsMatch(
-        (Get-Content -LiteralPath $config -Raw), '(?m)^\s*pinyon_shift_prepare_all_scales\s*=\s*true\b')
+    $prepareAllScales = [regex]::IsMatch(
+        $configText, '(?m)^\s*pinyon_shift_prepare_all_scales\s*=\s*true\b')
     $scale = [int]$settings.draw_resolution_scale_x
     if ($scale -lt 1 -or $scale -gt 4 -or [int]$settings.draw_resolution_scale_y -ne $scale) {
         throw 'Choose a matching 1x, 2x, 3x or 4x graphics resolution before preparing shaders.'

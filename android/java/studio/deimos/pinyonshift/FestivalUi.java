@@ -17,13 +17,15 @@ import java.util.function.*;
  * position.
  */
 final class FestivalUi {
-  // RED and ORANGE are the two ends of the accent gradient (magenta to hot pink). The names are
-  // kept because many pages already reference them.
-  static final int BG = 0xff0a0a10, PANEL = 0xf0101015, TEXT = 0xfff7f4f8, MUTED = 0xffb9b3c2,
-                   RED = 0xffd9145a, ORANGE = 0xffff2e7e;
-  static final int GLASS = 0xd9101116, GLASS_SELECTED = 0xe61d0c17, GLASS_FOCUS = 0xf0301424,
-                   STROKE = 0x2effffff;
+  // Keep the legacy accent names for existing pages; both use the approved racing pink.
+  static final int BG = 0xff0b1016, PANEL = 0xf2171d27, TEXT = 0xfff6f4f1, MUTED = 0xffaeb8c5,
+                   RED = 0xffff326e, ORANGE = 0xffff326e;
+  static final int GLASS = 0xe8171d27, GLASS_SELECTED = 0xf0272530, GLASS_FOCUS = 0xf0272530,
+                   STROKE = 0x14ffffff;
   static final int FULL_PAGE = 0x7f0a7f04;
+  static final int FOCUS_KEY = 0x7f0a7f05;
+  static final int DEFAULT_FOCUS = 0x7f0a7f06;
+  static final int HEADER_ACTIONS = 0x7f0a7f07;
   private static final int SCROLL_STATE = 0x7f0a7f01;
   private static final int REFRESH = 0x7f0a7f02;
   private static final int PAGE_SCROLL = 0x7f0a7f03;
@@ -31,6 +33,7 @@ final class FestivalUi {
     int y;
     boolean restoring;
     View focus;
+    String focusKey;
   }
   interface PanelHost {
     void showPanel(String title, View body);
@@ -48,13 +51,13 @@ final class FestivalUi {
     return Float.isFinite(value) ? Math.max(.7f, Math.min(1.05f, value)) : .82f;
   }
   static boolean animations(Context c) {
-    return ValueAnimator.areAnimatorsEnabled()
-        && c.getSharedPreferences("mobile", 0).getBoolean("animations", true);
+    return MenuMotion.enabled(c);
   }
   static TextView text(Activity a, String s, int size, int color) {
     TextView v = new TextView(a);
     v.setText(AppLanguage.text(a,s));
-    v.setTextSize(Math.max(size>=18?16:13,size * scale(a)));
+    v.setTextSize(size * scale(a) / .82f);
+    v.setIncludeFontPadding(false);
     v.setTextColor(color);
     v.setTypeface(Typeface.create("sans-serif", 0));
     return v;
@@ -84,54 +87,44 @@ final class FestivalUi {
     states.addState(new int[] {android.R.attr.state_focused}, focus);
     states.addState(new int[] {android.R.attr.state_selected}, focus);
     states.addState(new int[] {}, base);
+    states.setEnterFadeDuration(animations(a)?120:0);
     v.setBackground(new RippleDrawable(
-        ColorStateList.valueOf(0x33ffffff), states, surface(a, Color.WHITE, radius)));
+        ColorStateList.valueOf(0x22ffffff), states, surface(a, Color.WHITE, radius)));
+    touchFocus(v);
+    MenuMotion.press(v);
   }
-  private static void buttonMotion(Button b) {
-    b.animate().cancel();
-    b.setScaleX(1);
-    b.setScaleY(1);
-    if (!animations(b.getContext())) {
-      b.setStateListAnimator(null);
-      return;
-    }
-    StateListAnimator states = new StateListAnimator();
-    for (boolean pressed : new boolean[] {true, false}) {
-      AnimatorSet set = new AnimatorSet();
-      float s = pressed ? .975f : 1;
-      set.playTogether(
-          ObjectAnimator.ofFloat(b, "scaleX", s), ObjectAnimator.ofFloat(b, "scaleY", s));
-      set.setDuration(pressed ? 90 : 160);
-      set.setInterpolator(new DecelerateInterpolator());
-      states.addState(pressed ? new int[] {android.R.attr.state_pressed} : new int[0], set);
-    }
-    b.setStateListAnimator(states);
-  }
+  // Gain focus on down, so Android does not consume the first release only to focus.
+  static void touchFocus(View view){view.setOnTouchListener((v,event)->{if(event.getActionMasked()==MotionEvent.ACTION_DOWN&&v.isEnabled())v.requestFocus();return false;});}
+  private static void buttonMotion(Button b) { MenuMotion.press(b); }
   static Button button(Activity a, String title, boolean primary) {
     Button b = new Button(a);
     b.setText(AppLanguage.text(a,title));
     b.setAllCaps(false);
     b.setTextSize(Math.max(15,16 * scale(a)));
-    b.setTextColor(TEXT);
-    b.setTypeface(Typeface.create("sans-serif", 1));
+    b.setTextColor(primary ? BG : TEXT);
+    String iconKind=MenuIcon.kind(title);
+    if(!(a instanceof PinyonShiftActivity)&&iconKind!=null){b.setCompoundDrawablesRelativeWithIntrinsicBounds(new MenuIcon(a,iconKind,primary ? BG : TEXT),null,null,null);b.setCompoundDrawablePadding(dp(a,8));}
+    b.setTypeface(Typeface.create("sans-serif-medium", 0));
     b.setGravity(Gravity.CENTER);
     b.setIncludeFontPadding(false);
     GradientDrawable d;
     if (primary) {
-      d = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[] {RED, ORANGE});
-      d.setCornerRadius(dp(a, 12));
+      d = surface(a,TEXT,10);
     } else {
-      d = outlined(a, GLASS, STROKE, 1, 12);
+      d = surface(a,GLASS,10);
     }
 
     b.setBackgroundTintList(null);
-    GradientDrawable focused = outlined(a, primary ? ORANGE : GLASS_FOCUS, primary ? TEXT : ORANGE, 2, 12);
+    GradientDrawable focused = outlined(a, primary ? TEXT : GLASS_FOCUS, ORANGE, 2, 10);
     StateListDrawable states=new StateListDrawable();
     states.addState(new int[]{android.R.attr.state_focused},focused);
     states.addState(new int[]{android.R.attr.state_selected},focused);
     states.addState(new int[]{},d);
+    states.setEnterFadeDuration(animations(a)?120:0);
     b.setBackground(new RippleDrawable(ColorStateList.valueOf(0x33ffffff),states,surface(a,Color.WHITE,12)));
     b.setFocusable(true);
+    b.setFocusableInTouchMode(true);
+    touchFocus(b);
     b.setMinimumHeight(dp(a, 48));
     b.setMinHeight(dp(a, 48));
     b.setMinWidth(0);
@@ -190,10 +183,10 @@ final class FestivalUi {
     lp.topMargin = dp(a, 8);
     return lp;
   }
-  /** Width of the page content in dp. Wide screens keep it to the left so the artwork shows. */
+  /** Launcher tools use the full content width; the game drawer keeps its compact layout. */
   static int contentWidthDp(Activity a) {
     int w = a.getResources().getConfiguration().screenWidthDp;
-    return wideLayout(a) ? Math.round(w * .62f) - 36 : w - 36;
+    return a instanceof LauncherActivity || a instanceof ContentActivity ? w - 60 : wideLayout(a) ? Math.round(w * .62f) - 36 : w - 36;
   }
   static boolean wideLayout(Activity a) {
     android.content.res.Configuration c = a.getResources().getConfiguration();
@@ -300,7 +293,7 @@ final class FestivalUi {
   /** A tappable card with an icon, a title, a subtitle and a chevron. */
   static LinearLayout listRow(Activity a, LinearLayout parent, String icon, String title,
       String sub, Runnable action) {
-    LinearLayout r = row(a, icon, title, sub, false, icon(a, "chevron", MUTED), 14, 40, 10);
+    LinearLayout r = row(a, icon, title, sub, false, icon(a, "chevron", MUTED), 10, 24, 12);
     parent.addView(r, stacked(a));
     r.setOnClickListener(v -> action.run());
     role(r, "android.widget.Button", null);
@@ -310,7 +303,7 @@ final class FestivalUi {
   static LinearLayout radioRow(Activity a, LinearLayout parent, String icon, String title,
       String sub, boolean selected, Runnable action) {
     RadioDot dot = new RadioDot(a, selected);
-    LinearLayout r = row(a, icon, title, sub, selected, dot, 14, 40, 10);
+    LinearLayout r = row(a, icon, title, sub, selected, dot, 10, 24, 12);
     parent.addView(r, stacked(a));
     r.setOnClickListener(v -> action.run());
     role(r, "android.widget.RadioButton", dot::on);
@@ -324,8 +317,8 @@ final class FestivalUi {
     t.setMinimumHeight(dp(a, 64));
     t.setFocusable(true);
     t.setClickable(true);
-    glassBackground(a, t, false, 14);
-    t.addView(icon(a, icon, TEXT), new LinearLayout.LayoutParams(dp(a, 32), dp(a, 32)));
+    glassBackground(a, t, false, 10);
+    t.addView(icon(a, icon, TEXT), new LinearLayout.LayoutParams(dp(a, 24), dp(a, 24)));
     LinearLayout words = column(a);
     words.setPadding(dp(a, 8), 0, 0, 0);
     TextView x = text(a, title, 15, TEXT);
@@ -439,7 +432,7 @@ final class FestivalUi {
     t.setMinimumHeight(dp(a, 66));
     t.setFocusable(true);
     t.setClickable(true);
-    glassBackground(a, t, false, 14);
+    glassBackground(a, t, false, 10);
     t.addView(icon(a, icon, TEXT), new LinearLayout.LayoutParams(dp(a, 30), dp(a, 30)));
     TextView l = text(a, label, 13, TEXT);
     l.setGravity(Gravity.CENTER);
@@ -477,26 +470,18 @@ final class FestivalUi {
     Bitmap bitmap = headerLogo(a);
     if (bitmap != null)
       logo.setImageBitmap(bitmap);
-    row.addView(logo, new LinearLayout.LayoutParams(dp(a, 52), dp(a, 28)));
+    row.addView(logo, new LinearLayout.LayoutParams(dp(a, 58), dp(a, 32)));
     if (wordmark) {
       LinearLayout words = column(a);
       words.setPadding(dp(a, 8), 0, 0, 0);
       TextView name = new TextView(a);
       name.setText("FH4DROID");
-      name.setTextSize(19);
+      name.setTextSize(24);
       name.setTextColor(TEXT);
-      name.setTypeface(Typeface.create("sans-serif", Typeface.BOLD_ITALIC));
+      name.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
       name.setLetterSpacing(.04f);
       name.setIncludeFontPadding(false);
       words.addView(name);
-      TextView tagline = new TextView(a);
-      tagline.setText("YOUR NEXT DRIVE AWAITS");
-      tagline.setTextSize(8);
-      tagline.setTextColor(MUTED);
-      tagline.setLetterSpacing(.14f);
-      tagline.setIncludeFontPadding(false);
-      tagline.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-      words.addView(tagline);
       row.addView(words);
     }
     return row;
@@ -538,7 +523,7 @@ final class FestivalUi {
     if (android.os.Build.VERSION.SDK_INT >= 28)
       t.setAccessibilityHeading(true);
     head.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
-    head.addView(backPill(a, back), new LinearLayout.LayoutParams(-2, dp(a, 42)));
+    head.addView(backPill(a, back), new LinearLayout.LayoutParams(-2, dp(a, 48)));
     return head;
   }
 
@@ -552,6 +537,7 @@ final class FestivalUi {
       Window w = d.getWindow();
       if (w != null) {
         w.setBackgroundDrawableResource(android.R.color.transparent);
+        if(android.os.Build.VERSION.SDK_INT>=31)w.setBackgroundBlurRadius(dp(a,18));
         w.setDimAmount(.6f);
         w.setLayout(
             Math.min(dp(a, 640), (int) (a.getResources().getDisplayMetrics().widthPixels * .94f)),
@@ -601,6 +587,7 @@ final class FestivalUi {
       label.setOnClickListener(v -> explain(a, title, help));
     }
     Switch s = new Switch(a);
+    controlFocus(a,s);
     s.setTextColor(TEXT);
     s.setChecked(enabled);
     s.setMinHeight(dp(a, 48));
@@ -633,6 +620,7 @@ final class FestivalUi {
     TextView value = text(a, label.apply(initial), 13, ORANGE);
     c.addView(value);
     SeekBar s = new SeekBar(a);
+    controlFocus(a,s);
     s.setMax((max - min) / step);
     s.setProgress(Math.max(0, Math.min(s.getMax(), (initial - min) / step)));
     s.setContentDescription(title);
@@ -656,15 +644,23 @@ final class FestivalUi {
     });
     return s;
   }
+  static void controlFocus(Activity a,View control){
+    control.setFocusable(true);control.setFocusableInTouchMode(true);touchFocus(control);
+    StateListDrawable states=new StateListDrawable();
+    states.addState(new int[]{android.R.attr.state_focused},outlined(a,0x10272530,ORANGE,1.5f,8));
+    states.addState(new int[]{},new ColorDrawable(Color.TRANSPARENT));
+    states.setEnterFadeDuration(animations(a)?120:0);control.setBackground(states);
+  }
   static View panel(Activity a, String title, View body, Runnable back) {
     remember(body);
     if (body.getParent() instanceof ViewGroup)
       ((ViewGroup) body.getParent()).removeView(body);
     // The launcher and setup screens are full pages with the brand header. The in-game menu keeps
     // its compact header inside a drawer.
-    boolean page = a instanceof LauncherActivity || a instanceof SetupActivity;
+    boolean page = a instanceof LauncherActivity || a instanceof SetupActivity || a instanceof ContentActivity;
     LinearLayout p = column(a);
     if (page) {
+      int pad=dp(a,30);p.setPadding(pad,dp(a,18),pad,dp(a,10));
       p.addView(pageHeader(a, title, back));
     } else {
       int pad = dp(a, 10);
@@ -687,6 +683,7 @@ final class FestivalUi {
         head.addView(resume, new LinearLayout.LayoutParams(-2, -2));
         resume.setOnClickListener(v -> ((PinyonShiftActivity) a).resumeDriving());
       }
+      Object headerActions=body.getTag(HEADER_ACTIONS);if(headerActions instanceof View){View actions=(View)headerActions;if(actions.getParent() instanceof ViewGroup)((ViewGroup)actions.getParent()).removeView(actions);head.addView(actions);}
       p.addView(head);
     }
     if(Boolean.TRUE.equals(body.getTag(FULL_PAGE))){
@@ -703,10 +700,9 @@ final class FestivalUi {
     scroll.setClipToPadding(false);
     scroll.setPadding(0, dp(a, 6), 0, dp(a, 6));
     scroll.addView(body);
-    // On wide screens keep the content in the left column so the artwork stays visible.
-    int width = page && wideLayout(a)
-        ? Math.round(a.getResources().getDisplayMetrics().widthPixels * .62f)
-        : -1;
+    // Management pages use the available width and keep one scroll container.
+    int width = -1;
+    scroll.setSmoothScrollingEnabled(true);
     p.addView(scroll, new LinearLayout.LayoutParams(width, 0, 1));
     scroll.setOnScrollChangeListener((v, x, y, ox, oy) -> {
       if (!state.restoring)
@@ -716,8 +712,8 @@ final class FestivalUi {
     scroll.post(() -> {
       if (body.getTag(PAGE_SCROLL) != scroll)
         return;
-      if (state.focus != null && state.focus.isAttachedToWindow())
-        state.focus.requestFocus();
+      View focus=state.focus!=null&&state.focus.isAttachedToWindow()?state.focus:findFocusKey(body,state.focusKey);
+      if(focus!=null)focus.requestFocus();
       scroll.scrollTo(0, state.y);
       state.restoring = false;
     });
@@ -747,9 +743,11 @@ final class FestivalUi {
     if (!(body.getTag(SCROLL_STATE) instanceof PageState))
       return;
     PageState state = (PageState) body.getTag(SCROLL_STATE);
-    if (body.getParent() instanceof ScrollView && !state.restoring) {
-      state.y = ((ScrollView) body.getParent()).getScrollY();
+    ScrollView scroll=body.getTag(PAGE_SCROLL) instanceof ScrollView?(ScrollView)body.getTag(PAGE_SCROLL):body.getParent() instanceof ScrollView?(ScrollView)body.getParent():null;
+    if (scroll!=null && !state.restoring) {
+      state.y = scroll.getScrollY();
       state.focus = body.findFocus();
+      if(state.focus!=null)state.focusKey=focusKey(state.focus);
       state.restoring = true;
     }
   }
@@ -759,6 +757,29 @@ final class FestivalUi {
       ViewGroup group = (ViewGroup) view;
       for (int i = 0; i < group.getChildCount(); i++) rememberTree(group.getChildAt(i));
     }
+  }
+  static void transferPageState(View previous,View replacement){
+    remember(previous);if(previous.getTag(SCROLL_STATE) instanceof PageState)replacement.setTag(SCROLL_STATE,previous.getTag(SCROLL_STATE));
+  }
+  static void attachPageScroll(View body,ScrollView scroll){
+    PageState state=body.getTag(SCROLL_STATE) instanceof PageState?(PageState)body.getTag(SCROLL_STATE):new PageState();
+    body.setTag(SCROLL_STATE,state);body.setTag(PAGE_SCROLL,scroll);state.restoring=true;
+    scroll.setOnScrollChangeListener((v,x,y,ox,oy)->{if(!state.restoring)state.y=y;});
+  }
+  static void restorePage(View body,ScrollView scroll){
+    refreshTree(body);
+    if(!(body.getTag(SCROLL_STATE) instanceof PageState)){java.util.ArrayList<View> views=new java.util.ArrayList<>();body.addFocusables(views,View.FOCUS_FORWARD);if(!views.isEmpty())views.get(0).requestFocus();return;}
+    PageState state=(PageState)body.getTag(SCROLL_STATE);
+    View focus=state.focus!=null&&state.focus.isAttachedToWindow()?state.focus:findFocusKey(body,state.focusKey);
+    if(focus==null&&body.getTag(DEFAULT_FOCUS) instanceof View)focus=(View)body.getTag(DEFAULT_FOCUS);
+    if(focus!=null)focus.requestFocus();
+    else{java.util.ArrayList<View> candidates=new java.util.ArrayList<>();body.addFocusables(candidates,View.FOCUS_FORWARD);if(!candidates.isEmpty())candidates.get(0).requestFocus();}
+    scroll.scrollTo(0,state.y);state.restoring=false;
+  }
+  private static String focusKey(View view){if(view.getTag(FOCUS_KEY) instanceof String)return (String)view.getTag(FOCUS_KEY);CharSequence label=view.getContentDescription();if(label==null&&view instanceof TextView)label=((TextView)view).getText();return label==null?null:label.toString();}
+  private static View findFocusKey(View view,String key){
+    if(key==null)return null;if(view.isFocusable()&&key.equals(focusKey(view)))return view;
+    if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++){View found=findFocusKey(group.getChildAt(i),key);if(found!=null)return found;}}return null;
   }
   private static void motion(View v, boolean horizontal) {
     v.animate().cancel();
@@ -816,20 +837,13 @@ final class FestivalUi {
         c.drawBitmap(
             art, null, new RectF((w - bw) / 2, (h - bh) / 2, (w + bw) / 2, (h + bh) / 2), paint);
       }
-      // Dusk grade: deep purple sky, a magenta/orange glow at the horizon and a dark road.
-      paint.setShader(new LinearGradient(0, 0, 0, h,
-          new int[] {0xcc1b0b3d, 0x70a3175f, 0x66ff7a3d, 0xe00a0710},
-          new float[] {0, .45f, .62f, 1}, Shader.TileMode.CLAMP));
-      c.drawRect(0, 0, w, h, paint);
-      // Keep the left side calm so text and cards stay readable over the picture.
-      paint.setShader(new LinearGradient(
-          0, 0, w, 0, new int[] {0xe60a0810, 0x880a0810, 0x100a0810}, null, Shader.TileMode.CLAMP));
-      c.drawRect(0, 0, w, h, paint);
-      paint.setShader(null);
-      paint.setShader(new LinearGradient(
-          0, h - 3 * d, w, h, new int[] {RED, ORANGE}, null, Shader.TileMode.CLAMP));
-      c.drawRect(0, h - 3 * d, w, h, paint);
-      paint.setShader(null);
+      paint.setShader(new LinearGradient(0,0,w*.88f,0,
+          new int[]{0xf3090c13,0xc50b0f17,0x1a090b11},new float[]{0,.48f,1},Shader.TileMode.CLAMP));
+      c.drawRect(0,0,w,h,paint);
+      paint.setShader(new LinearGradient(0,0,0,h,
+          new int[]{0x82090c12,0x00090c12,0xf0090c12},new float[]{0,.45f,1},Shader.TileMode.CLAMP));
+      c.drawRect(0,0,w,h,paint);paint.setShader(null);
+      paint.setColor(ORANGE);c.drawRect(30*d,h-3*d,98*d,h,paint);
     }
   }
   private FestivalUi() {}

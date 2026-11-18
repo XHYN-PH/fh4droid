@@ -65,6 +65,14 @@ public final class ProfileArchiveTest {
             boolean rejectedFile=false;try{SaveArchive.importInto(malformed,new ByteArrayInputStream(archive("FH4Droid base-game saves v2\n","user/profile/save","user-modded/profile/save")));}catch(IOException expected){rejectedFile=true;}
             check(rejectedFile&&Files.readAllBytes(userFile.toPath())[0]==9,"a non-directory live profile is preserved on import failure");
             check(get(malformed,SaveArchive.MODDED).equals("keep-modded"),"invalid normal profile cannot alter the other scoped save");
+            // DLC shares the user tree but must neither inflate backups nor be replaced by them.
+            Path dlc=new File(state,"user/4D5309C9/00000002/example/payload").toPath();Files.createDirectories(dlc.getParent());try(RandomAccessFile large=new RandomAccessFile(dlc.toFile(),"rw")){large.setLength(600L*1024*1024);}
+            Path disabled=new File(state,"user/4D5309C9/Disabled/00000002/example/data").toPath();Files.createDirectories(disabled.getParent());Files.write(disabled,new byte[]{17});
+            Path header=new File(state,"user/4D5309C9/Headers/00000002/example.header").toPath();Files.createDirectories(header.getParent());Files.write(header,new byte[]{42});
+            byte[] small=export(state,SaveArchive.NORMAL);check(small.length<10000,"DLC is excluded before applying save archive budgets");
+            SaveArchive.importInto(state,new ByteArrayInputStream(small));check(Files.size(dlc)==600L*1024*1024&&Files.readAllBytes(disabled)[0]==17&&Files.readAllBytes(header)[0]==42,"save import retains active, disabled and licensed DLC");
+            SaveArchive.restore(state);check(Files.size(dlc)==600L*1024*1024&&Files.readAllBytes(header)[0]==42,"save restore retains installed DLC");
+            boolean legacyDlc=false;try{SaveArchive.importInto(state,new ByteArrayInputStream(archive("FH4Droid base-game saves v2\n","user/profile/save","user/4D5309C9/00000002/old/data")));}catch(IOException expected){legacyDlc=true;}check(legacyDlc&&Files.size(dlc)==600L*1024*1024,"old archives containing packages cannot overwrite installed DLC");
             System.out.println("PASS: "+checks+" profile identity and scoped save archive checks");
         }finally{SaveArchive.delete(temp.toFile());}
     }

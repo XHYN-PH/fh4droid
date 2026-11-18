@@ -27,7 +27,9 @@ final class OutlineIcon extends View {
     p.setStrokeWidth(Math.max(1.5f, r * .1f));
     p.setStrokeCap(Paint.Cap.ROUND);
     p.setStrokeJoin(Paint.Join.ROUND);
-    if (kind.equals("trash")) {
+    if (kind.equals("menu")) {
+      for (float dy : new float[]{-.5f,0,.5f}) c.drawLine(x-r*.7f,y+r*dy,x+r*.7f,y+r*dy,p);
+    } else if (kind.equals("trash")) {
       c.drawLine(x - r * .7f, y - r * .55f, x + r * .7f, y - r * .55f, p);
       c.drawRoundRect(x - r * .5f, y - r * .5f, x + r * .5f, y + r * .7f, r * .1f, r * .1f, p);
       c.drawLine(x - r * .2f, y - r * .8f, x + r * .2f, y - r * .8f, p);

@@ -5,9 +5,11 @@
 #include <string>
 
 #include <rex/kernel/xam/ui_provider.h>
-#include <rex/ui/overlay/achievement_icon_cache.h>
 #include <rex/rex_app.h>
 #include <rex/ui/window_listener.h>
+
+#include "achievements/fh1_achievements.h"
+#include "save_sync.h"
 
 namespace pinyon_shift::config {
 class HostConfig;
@@ -17,6 +19,12 @@ class SaveBackups;
 }
 namespace pinyon_shift::hostui {
 class HostUi;
+class MenuScreen;
+}
+namespace pinyon_shift::ui {
+class AchievementIcons;
+class AchievementUiState;
+class FrameInspector;
 }
 namespace rex::ui::vulkan {
 class VulkanDevice;
@@ -49,6 +57,8 @@ class PinyonShiftApp final : public rex::ReXApp {
   bool ShouldStartModuleThread() override;
   void OnGuestThreadExit(rex::system::XThread* thread) override;
   bool OnWindowCloseRequested() override;
+  // QUIT GAME and the quit key: closes the window as its close button does.
+  void QuitFromMenu();
   void OnShutdown() override;
   // Achievements use the host UI: F7 toggles its list, unlocks show its
   // toast, so the ImGui overlay and toast are not created.
@@ -63,9 +73,19 @@ class PinyonShiftApp final : public rex::ReXApp {
   void ToggleGameMenu();
   // Opens the settings screen unless it is open; UI thread.
   void OpenSettingsMenu();
+  // The achievements screen (AC-2) and its notifications (AC-3); UI thread.
+  std::unique_ptr<pinyon_shift::hostui::MenuScreen> CreateAchievementsMenu();
+  bool EnsureAchievementUi();
+  void ShowUnlock(const rex::system::AchievementInfo& achievement);
+  void ShowProgress(pinyon_shift::achievements::ProgressSource source, uint32_t previous,
+                    uint32_t current);
   // Creates the host UI and installs its XAM dialogs once presentation is
   // ready; UI thread.
   bool EnsureHostUi();
+#if !defined(__ANDROID__)
+  void ToggleFrameInspector();
+  std::unique_ptr<pinyon_shift::ui::FrameInspector> frame_inspector_;
+#endif
   // NP-4.4 Hor+: the title's aspect for the window's (pinyon_shift_hor_plus).
   void UpdateHorPlus();
   // Under Hor+, present frames without the gameplay view 16:9 letterboxed.
@@ -90,17 +110,28 @@ class PinyonShiftApp final : public rex::ReXApp {
   bool resize_listener_added_ = false;
 
   std::atomic_bool shutdown_recorded_{false};
+  std::atomic_bool close_started_{false};
   std::atomic_bool android_menu_active_{false};
   // Created on first use: the presenter and input system it needs exist only
   // after runtime setup.
   std::unique_ptr<pinyon_shift::hostui::HostUi> host_ui_;
   // The XAM message box and keyboard drawn by host_ui_ (NP-5.2).
   std::unique_ptr<rex::kernel::xam::XamUiProvider> xam_dialogs_;
-  // Achievement icons for the unlock toast (the title's XDBF images).
-  std::unique_ptr<rex::ui::AchievementIconCache> achievement_icons_;
+  // The achievements screen's icons (with grey copies and the packages'
+  // own) and remembered state; created with the host UI.
+  std::unique_ptr<pinyon_shift::ui::AchievementIcons> achievement_icons_;
+  std::unique_ptr<pinyon_shift::ui::AchievementUiState> achievement_ui_state_;
   uint64_t achievement_listener_ = 0;
   uint64_t android_achievement_listener_ = 0;
   std::unique_ptr<pinyon_shift::SaveBackups> save_backups_;
+  // Save sync through a folder a sync app shares (docs/SAVE_SYNC.md); null
+  // when no folder is set.
+  std::unique_ptr<pinyon_shift::SaveSync> save_sync_;
+  pinyon_shift::SaveSync::StartupResult sync_startup_;
+  // A plain notification from any thread, shown by the host UI.
+  void PostToast(std::string heading, std::string title, std::string detail);
+  // Publishes the player's own save as the title left it (at exit).
+  void ExportSaveSync();
   // enabled_mods as the settings file had it at start (NP-7).
   std::string enabled_mods_;
   // The settings file the in-game settings screen edits.

@@ -5,6 +5,75 @@ hook points and a C API, and asset mods that replace game files. This page
 is the contract for mod authors. The design and its history are in the
 [native port backlog](NATIVE_PORT_BACKLOG.md#np-7-mod-host-v1) (NP-7).
 
+## Shader replacements
+
+Vulkan mods put independently authored SPIR-V in `mods/<name>/shaders/`.
+Use an ordinary `mod.toml` without `library`; a visual-only mod can declare
+`shares_save = true`. Only successfully loaded mods participate. The earlier
+mod in resolved load order wins for each exact shader identity, as for
+`game/` files. Dependencies and `load_after` are resolved first. Restart
+after changing mods or bytecode.
+
+Each file is named
+`shader_<guest hash>_<modification>_<translated hash>.spv`, with three
+uppercase 16-digit hexadecimal values. The last value is XXH3-64 of the
+**original** translation before mod or built-in edits. Specialization,
+translator output and graphics settings can change that identity. A
+nonmatching filename is ignored; rebuild and reverify against a fresh
+capture instead of renaming old bytecode to bypass the check.
+
+Mods precede developer `vulkan_shader_override_dirs` (semicolon-separated),
+then legacy `vulkan_shader_override_dir`, then built-in edits. The first
+valid matching file wins; replacements of one shader do not merge. Files
+are limited to 16 MiB and checked by the bundled SPIRV-Tools Vulkan 1.2
+validator, including the translation's `main` execution model. Unreadable,
+malformed or wrong-stage files are logged and skipped, allowing the next
+directory or built-in edit. A Vulkan shader-module rejection retries the
+original translation. `vulkan_shader_overrides = false` disables mod,
+developer and built-in replacements.
+
+To find shaders without disassembly, capture one frame using the native
+Vulkan renderer and a pinned seed:
+
+```powershell
+python tools/run-fh1-render-test.py config/render-tests/fh1-smoke.fh1test `
+  --state-root .local/render-seeds/appdata-2026-09-27 `
+  --output .local/shader-discovery-run `
+  --game-argument=--async_shader_compilation=false `
+  --game-argument=--vulkan_shader_discovery_frame=300 `
+  --game-argument=--vulkan_shader_discovery_dir=C:/path/to/pinyon/.local/shader-discovery
+python tools/discover-fh1-shaders.py .local/shader-discovery
+```
+
+The frame is the GPU swap count; choose one with native draws and a new
+output directory for each capture. Discovery writes original translated
+`.spv` files with full identities and `draws.jsonl`. The tool groups them
+by stage, draw number, HUD boundary and bound color/depth surface (slot,
+packed key, size, format and samples). These are render targets, not
+material or object labels. Use `--shader <hash>`, `--surface <key>` or
+`--json` to inspect them. `--check-mod <state>/mods/<name>/shaders`
+distinguishes stale translations from shaders absent from that frame;
+a matching name still needs runtime validation.
+
+`draws.jsonl` also records used texture slots with dimensions, format,
+physical base/mip addresses and padded guest lengths. Ordered
+`resolves.jsonl` records completed copies and their actual source rectangles;
+`after_draw=N` means after N captured draws, before zero-based draw N.
+Intersecting allocations identifies possible producers, not proof of a
+sample or a complete overwrite. Partial rectangles, aliasing and CPU readers
+need separate analysis. See the [post-chain trace](MODERN_RENDERING_RESEARCH.md#ordered-post-chain-inputs-and-outputs).
+
+Overrides change how existing inputs are used. Preserve descriptor
+bindings, stage inputs/outputs, push constants and the entry point: this
+feature adds no textures, uniforms or game-side data. Validation does not
+prove interface compatibility or visual correctness. Test on the target
+GPU; replacement pipelines still cost driver compilation time, especially
+on Android.
+
+Keep captures and translated guest shaders under `.local/`; never commit
+or distribute them. Distribute only independently authored code or a local
+transformation built from the player's files, following [LEGAL.md](LEGAL.md).
+
 ## Layout and enabling
 
 A mod lives in the state directory, never in the game files:
@@ -14,6 +83,7 @@ A mod lives in the state directory, never in the game files:
   mod.toml
   code/<name>.dll        optional: a native mod
   game/...               optional: files that replace the game's
+  preview.png            optional: images the launcher shows (`images`)
 ```
 
 `<state>` is the directory the launcher runs with (`--state-root`); for an
@@ -25,9 +95,49 @@ setting of `<state>/config/pinyon_shift.toml`:
 enabled_mods = "hello_telemetry,english_strings"
 ```
 
-The in-game SETTINGS screen lists the mods found under `mods/`. A change
-takes effect at the next start. Every load and every rejection is logged as
-a `mod.loaded` or `mod.rejected` event with the reason.
+The launcher's **Mods** button (FEATURE_BACKLOG FB-9.1, both launchers)
+lists the mods found under `mods/` with what each `mod.toml` says about it
+(see [Describing a mod](#describing-a-mod)) and the checks below that would
+stop the game loading it; a Details link shows the technical facts (what it
+changes, the builds it targets, its effect on the save, `requires` and
+`conflicts`). A note above
+the list appears only when it has something to say: mods switched on but
+not installed, and the moment a switch or removal changes which save the
+next start plays. Switching on the first mod that changes saved data moves
+the game to the modded copy; switching off the last one returns it to the
+player's own save, while the copy keeps its progress for when one is
+switched on again. It switches mods on and off, installs mods from a ZIP or
+a folder and removes one. It leaves load order alone: a mod switched on is
+appended to `enabled_mods`, so mods load in the order they were switched on,
+which matters only when two change the same thing; `pinyon.py mods move`
+reorders them. The in-game SETTINGS > MODS screen lists and switches them
+too. A change takes
+effect at the next start. Every load and every rejection is logged as a
+`mod.loaded` or `mod.rejected` event with the reason.
+
+The launcher's work is `tools/pinyon.py mods` (`tools/pinyon_mods.py`), which
+the command line can run as well; every command takes `--state-root` and
+`--json`:
+
+```text
+pinyon.py mods list
+pinyon.py mods enable NAME          also switches on the installed mods it requires
+pinyon.py mods disable NAME
+pinyon.py mods move NAME up|down    earlier mods win where two change the same thing
+pinyon.py mods install PATH [--replace]
+pinyon.py mods remove NAME          switches it off and deletes its folder
+```
+
+`install` takes a ZIP or a folder holding a `mod.toml` at its top, in one
+folder inside it, or one folder per mod (a pack). Member paths that leave the
+folder are refused, as are names Pinyon Shift uses itself (the generated
+`zz-` mods, `custom_radio`, `xe` and the built-in mods). An installed mod of
+the same name is replaced only with `--replace`; the launcher asks first.
+`enable` refuses a mod that names a switched-on mod in `conflicts`, or is
+named in one. Changes are refused while the game runs, which would write its
+own `enabled_mods` back. Generated mods and built-in mods with
+`always_enabled` are not listed, as on F6 > MODS. The Radio and DLC screens
+still make and remove `custom_radio` and `xe`.
 
 ### mod.toml
 
@@ -43,6 +153,11 @@ conflicts = []                    # mods that must not be enabled with this one
 hide_dlc = []                     # marketplace package IDs the title must not see
 profile = ""                      # play a new save, <state>/user-<profile>
 shares_save = false               # true: never changes saved data, keeps the player's save
+title = "Hello telemetry"         # optional: what the launcher calls it
+description = "..."               # optional: one or more paragraphs
+author = "..."                    # optional
+url = "https://..."               # optional: the mod's page
+images = ["preview.png"]          # optional: PNG or JPEG files in the mod's folder
 ```
 
 A mod whose requirement is missing or failed, or that conflicts with an
@@ -69,6 +184,35 @@ is logged once in a `mod.dlc.hidden` event.
 `profile` gives a mod its own new save instead of the shared modded copy
 (see below). Use it when the mod's saves cannot be mixed with the game's,
 such as a total conversion that renumbers cars.
+
+### Describing a mod
+
+`title`, `description`, `author`, `url` and `images` are for the player: the
+launcher's Mods view shows them and the game ignores them, so they change
+nothing about loading. All are optional; without a title the folder name is
+shown.
+
+- `title` is the mod's name, up to 80 characters.
+- `description` is plain text up to 4,000 characters. A blank line starts a
+  new paragraph; single line breaks join, so a TOML multi-line string can be
+  wrapped freely.
+- `url` must start with `http://` or `https://`; anything else is dropped.
+- `images` lists up to eight PNG or JPEG files inside the mod's folder, the
+  first shown first. Paths that leave the folder, or files that are missing,
+  are skipped. The launcher draws them about 520 pixels wide, so a 16:9
+  image of 1280 x 720 is plenty.
+
+```toml
+title = "Sharper road textures"
+author = "A modder"
+url = "https://example.com/sharper-roads"
+description = """
+Replaces the road and kerb textures with four times larger copies made from
+your own disc, so the tarmac stays sharp at 4K.
+
+Paint lines, cracks and patches keep their places."""
+images = ["preview.png", "screens/night.jpg"]
+```
 
 ## Your saves stay separate
 
@@ -115,19 +259,94 @@ its `SpringK` or `NoiseSeed`, and the game's per-frame layer update scales
 the group by `pinyon_shift_camera_gforce`, `_lean`, `_shake` and `_head`
 (0 to 2, applied at once). F6 > DISPLAY > IMMERSIVE CAMERA sets all four
 (OFF 0, SUBTLE 0.5, DEFAULT 1, STRONG 1.5), and the four CAMERA rows below it
-set each one (CUSTOM). On the v4 build the title update's own
-`media.zip` carries `camera/cameraphysics.xml`, which the game reads instead,
-so the layers do not load there yet.
+set each one (CUSTOM). The cockpit and hood cameras also get six head
+tracking layers (#489, groups 5 to 10, one per axis). Their noise output
+range is 0 to 0, so they are still unless head tracking sets their factor
+(verified with cockpit captures). The v4 update has a separate merge under
+`merge-update/media.zip/camera/cameraphysics.xml`: its chase cameras have
+80/75 stock layers rather than the disc's 74/69. The generator writes both
+variants. Update merges build into the generated mod's `update/` overlay;
+the v4 host mounts it ahead of the verified update on `update:`, leaving
+the installed update untouched. Without an installed update these merges
+are inactive. Misspelt update archive or member names fail the build.
+Merges apply over the winning enabled mod's whole-archive replacement under
+`update/`, when present, using the same load order as disc overrides.
+
+`festival_pacing` (#491, FB-12.16) is the festival pacing pack, a
+database-only mod with two [options](#options). **Prices** (0.5x by default)
+multiplies what cars (`Data_Car.BaseCost`), every `List_Upgrade*` part and
+rims (`List_Wheels`) cost. **Rewards** (2x by default) multiplies finishing
+places (`EventScoring.Credits`), event prizes (`Events.CashPrize`), car-make
+loyalty bonuses (`AffinityLevelDef.BonusCredits`) and the wristband points a
+finish earns (`WristbandScoring.Points`), and divides the XP a driver level
+takes (`PlayerLevelDef.XP`). The wristband thresholds are left alone because
+the events' `UnlockPointsReq` uses the same points, so scaling what a finish
+earns keeps the two in step. Stock is the mod off, or both at 1x, which
+leaves every table as the disc has it. DLC cars and parts come from their
+packages' merge databases while the game runs and keep their prices. It
+plays the modded profile. It targets the base executable (`game_version`)
+because it has not been tried on v4: the mod host rejects it there, and the
+v4 step of the [database patches](#database-patches) leaves its scripts out
+of v4's database.
+`tools/tests/test_festival_pacing.py` runs the scripts on a small copy of
+the tables they touch at the defaults and at 1x.
+
+On `fh1-pacing-upgrade` from a seed parked at Dak's Garage, AUTO UPGRADE
+from C 400 asked 46,956 Cr for B 496 on stock and 24,075 Cr for B 500 at the
+defaults; with the cheaper prices the auto upgrade chose slightly different
+parts. An earlier build with one combined option, at a third of the stock
+prices, asked 16,045 Cr for the same parts, two-thirds of the half-price
+total, so the chosen value reaches the game. A save that already has XP
+keeps its level: a profile edited to 100,000 XP at level 11 (the stock
+curve's level) was saved as level 11 with the mod, where the defaults' curve
+gives level 18. Whether the next XP gain catches it up is not tested. The
+profile has one XP field, `Main/XP`, which the wristband meter reads too, so
+if race finishes add their `WristbandScoring` points to it, Rewards counts
+twice for driver levels.
+
+### Camera editor
+
+F6 > DISPLAY > CAMERA EDITOR (#487) edits both chase views live. Height
+(-0.5 to +1.5 m) and distance (-1 to +3 m) are offsets from the data loaded
+for the current car. FOV (80–130%) and stiffness (50–200%) multiply the
+loaded tuning; stiffness scales yaw and height spring K, and D by the
+square root of that multiplier to preserve the damping ratio. Defaults
+are zero offsets and 100%, so the editor makes no changes until used.
+RESET CAMERA EDITOR restores these values and the normal driving view.
+The existing FIELD OF VIEW setting still multiplies every view as well.
+
+`CameraSettings.ini` in `media/camera.zip` supplies the two chase tuning
+blocks, including when another mod merges that member. Per-car
+`CameraOverrides` can replace the instance's placement. The title parses
+this data once and exposes no qualified hot reload; the host applies the
+editor to its loaded blocks and instance offsets on the guest main thread.
+It retains the original values, detects replacement per-car offsets and
+never accumulates edits. No camera data from the game is distributed.
+The controller mode table also contains WheelCam (10) and CarRelativeCams
+(15). DRIVING VIEW selects these native wheel and car-relative replay
+views while driving, then NORMAL returns to the previous player view.
+Photo mode, free camera and cutscenes retain their own modes.
+
+Windows qualification uses `fh1-camera-editor` with pinned `i443-camera`
+and `i443-camera-v4` seeds on multivac. Captures show isolated height,
+distance and FOV changes and their restoration; driving exercises 50% and
+200% spring stiffness, both replay views and the return to normal. v4
+mounts the separate update overlay and reports all four tagged immersive
+groups in chase/cockpit views. Original archive layers and source hashes
+are unchanged by the generated merges. The UI/reset route is
+`fh1-camera-editor-ui`.
 
 `hidden_cars` (#484) is listed on F6 > MODS, off by default. Its
-`db/10-hidden-cars.sql` lists the 22 cars the database marks drivable but
-not selectable (traffic cars such as the tour bus, the Kenworth T440, the
-Leaf and the Prius, and the showcase Mini, 500 Abarth and 205 T16) and
-prices the seven that cost nothing. They are sold in the Autoshow under
-their make and play the modded profile. Most have no Autoshow thumbnail, so
-their tile is black until bought. The tour bus was bought, saved and driven,
-and the Kenworth raced, on the base build
-(`config/render-tests/fh1-hidden-car-drive.fh1test`).
+`db/10-hidden-cars.sql` lists only the intro Corrado and showcase Mini,
+500 Abarth and 205 T16. Traffic entries, including the tour bus, are no
+longer exposed: `IsDrivable` does not establish garage or paint support
+(#669). Purchases play the modded profile. Existing purchases stay in that
+profile; updating the mod does not delete them. If an unsupported selected
+car prevents garage use, close the game and run
+`python tools/fh1-profile.py recover-car --state-root "<state>"` to back up
+that profile and request the title's starter-car fallback on its next load.
+See [Hidden-car qualification and recovery](HIDDEN_CARS.md) for the complete
+asset audit, limitations and backup restoration steps.
 
 `photo_mode_limits` (#488) is listed on F6 > MODS, off by default, and
 keeps the player's own save (`shares_save`). It merges four
@@ -154,6 +373,14 @@ archive. Nothing from the game disc may be distributed; a mod's install
 instructions should build its files from the player's own copy, as
 `tools/install-sample-mod.py english_strings` does. Each replaced file the
 title opens is logged as `mod.file.override`.
+
+The title only opens archives that `media/zipmanifest.xml` lists. A new
+archive a mod adds under `game/media/` (a car's
+`media/cars/<MediaName>.zip`, say) gets its line there from
+`tools/build-mod-archives.py`, which writes the manifest into
+`zz-archive-patches` with the archive's directory offsets and its
+siblings' priority. Without that line the title ignores the archive: a
+new car archive shows another car's model in the Autoshow.
 
 For an FH1 archive containing XMem members, use
 [`patch-fh1-archive.py`](../tools/patch-fh1-archive.py) to replace selected
@@ -385,10 +612,11 @@ update Data_Car set BaseCost = 1000 where Id = 1496;
 ```
 
 Before each start, `tools/build-mod-patches.py` (run by
-`launch-preview.ps1`) copies the player's own database, applies every
-enabled mod's scripts in load order and file-name order, and serves the
-result as the generated mod `zz-db-patches`, listed first so it wins. With no
-scripts left the generated mod is removed and the stock database returns.
+`launch-preview.ps1`) copies the player's own database, applies the scripts
+of every enabled mod whose `game_version` accepts the base disc in load order
+and file-name order, and serves the result as the generated mod
+`zz-db-patches`, listed first so it wins. With no scripts left the generated
+mod is removed and the stock database returns.
 `zz-db-patches/patches.json` records the base and patched hashes and every
 script applied.
 
@@ -397,6 +625,72 @@ does, the scripts apply to that mod's database instead of the disc's; the
 earliest enabled mod in the load order that ships one is the base, recorded as
 `base` in `patches.json`. Archive members and merges likewise start from a
 mod's replacement archive or `zipmanifest.xml` when one is enabled.
+
+On the base disc with owned Rally ready, the launcher prepares Rally first
+and the scripts apply to the Rally cache's database
+(`cache/rally_adapter/game/media/db/gamedb.slt`), which carries the Rally
+rows; a mod's own database still comes before it. Before 0.8.2 the patch
+started from the disc's copy, so any enabled database mod (such as
+`hidden_cars`) hid the Rally rows, and starting a championship from F6 >
+HORIZON RALLY ran the game out of memory (#1024). Archive mods that replace a
+member Rally also ships (`gamemodes.zip`, the string tables) are not yet
+built on the Rally copies.
+
+The v4 title update doesn't read that file: it opens its own
+`db/gamedb.slt` from the update's `media.zip` on `update:`, which shadows
+any `game:` database. When the update is installed,
+`tools/build-mod-archives.py` therefore also applies the scripts of every
+enabled mod whose `game_version` accepts v4, in the same order, to v4's
+database. A mod made only for the base disc is left out there, as the mod
+host rejects it on v4, and a v4-only mod is likewise left out of the `game:`
+copy. It reads the member from the installed
+update (or from the winning mod's whole `update/media.zip` replacement),
+runs the scripts on that copy, and writes the result into
+`zz-archive-patches/update/media.zip` together with any `merge-update/`
+merges. The v4 host mounts that overlay ahead of the verified update, which
+stays untouched. `patches.json` lists the scripts as `database_scripts`
+under the `media.zip` entry. A script of a mod for both builds (or with no
+`game_version`) must therefore work on both databases; v4's is a superset of the disc's (the same tables plus the Rally
+cars). The v4 copy is built from the update's own database, never from an
+enabled mod's `game:` replacement such as the XE mod's.
+
+### Options
+
+A database mod can offer the player choices, such as how strong its change
+is. It declares each one as an `[[option]]` table at the end of its
+`mod.toml` (after the other keys, which TOML would otherwise read as part of
+the table), and writes `{{key}}` in its scripts where the chosen value goes:
+
+```toml
+[[option]]
+key = "pace"                      # lower-case letters, digits and _
+title = "Career pace"
+description = "How much faster than the stock game credits, XP and wristbands come."
+default = "2"
+choices = [{ value = "0.5", label = "0.5x (slower)" }, { value = "2", label = "2x" }, "3"]
+```
+
+```sql
+update Data_Car set BaseCost = cast(round(BaseCost * 1.0 / {{pace}}) as int);
+```
+
+A choice is a value, or a table with a `value` and the `label` the player
+sees. Values are plain tokens (letters, digits, `.`, `_`, `+`, `-`), since
+they are written into SQL; a mod has at most 8 options of up to 16 choices.
+The launcher's Mods view shows each option as a list under the mod's
+description, and `pinyon.py mods option NAME KEY VALUE` sets one. Choices are
+kept in `<state>/config/mod_options.json`, which only the tools read; a value
+the mod no longer offers falls back to its default. A change applies at the
+next start, when the scripts are filled and the database rebuilt, the v4
+copy included; `patches.json` lists the values each script used.
+
+Options are opt-in and change nothing else: a mod without `[[option]]`
+tables is built exactly as before, a literal `{{...}}` in its scripts
+included, and the game never reads options. A script of a mod with options
+that names an undeclared `{{key}}` stops the build with the script's name,
+so a typo cannot reach the database. Options fill database scripts only;
+files under `game/`, `members/`, `add/`, `merge/` and `strings/` are used as
+written.
 
 ### New cars from existing models
 
@@ -444,6 +738,15 @@ has not been tested. Clones are upgraded, painted (the Autoshow's colour
 choice) and changed like any car: five were bought, driven, Auto
 Upgraded at Dak's Garage and kept after a reload.
 
+A clone can also have a model of its own (the first step of the car
+importer, [#496](https://github.com/arcanite24/pinyon-shift/issues/496)):
+a `db/` script sets its `Data_Car.MediaName` to a new name, and the mod
+ships `game/media/cars/<MediaName>.zip`, built from the source car's
+archive with every member renamed from the source's media name to the
+new one. Members may be stored uncompressed. `tools/fh1_carbin.py` reads
+and rewrites the `.carbin` models in it, refitting each part's box to
+its new vertices.
+
 ## The Forza Horizon XE mod
 
 [Forza Horizon XE](https://www.moddb.com/mods/forza-horizon-xe-mod) by
@@ -470,8 +773,8 @@ automated clients on `/downloads/start/` and `/downloads/mirror/`, the pages a
 scripted download would need (checked 2026-10-10, #426), so the player's
 browser downloads it, from ModDB, with credit to Teancum shown in the launcher.
 
-`install` checks each archive's size and MD5 against ModDB's, extracts them
-(the hotfix over 1.0) with 7-Zip or bsdtar (`tar.exe` on Windows 10 and
+`install` needs both archives. It checks each one's size and MD5 against
+ModDB's, extracts them (the hotfix over 1.0) with 7-Zip or bsdtar (`tar.exe` on Windows 10 and
 later), and keeps only the files that differ from the player's game: 10
 replaced files (seven cars, the database, the UI textures and
 `zipmanifest.xml`) and about 1,140 new ones, 2.4 GB in `<state>/mods/xe`. It
@@ -488,11 +791,89 @@ returns to the player's own save, and `remove` deletes the mod's files but
 keeps `user-xe`. Smaller mods made for XE can be enabled before it; their
 database scripts apply to XE's database.
 
+XE 1.0 without the hotfix stops the game on a new save when the community
+UDLC pack is installed (#901). Right after the new-player opening's intro,
+when the drive loads, the game opens
+`media\Audio\Cars\Engines\Soundbanks\Burbles\` with no file name, gets
+`0xC00000BA` (a directory opened as a file) and stops itself on its
+dirty-disc error (exit `0x80000003`). It reproduces from pinned seeds with
+`fh1-opening-sync`: XE 1.0 plus UDLC stops, while XE 1.0 alone, XE 1.0 with
+the hotfix, and XE 1.0 with the hotfix plus UDLC all reach the opening drive.
+Releases before 0.7.2 installed 1.0 alone when the hotfix was missing, so for
+an install recorded as 1.0 the `mod.toml` also hides UDLC and its Traffic Car
+Unlocker. Each start rewrites an older install's `mod.toml`
+(`pinyon_xe.refresh_manifest`, run by `build-mod-patches.py`), and the
+launcher asks for a reinstall with both downloads. `install` now refuses 1.0
+alone.
+
 Known XE issues, present on the console too: some new cars have black
 thumbnails, and the Autoshow asks for an ambience bank XE does not ship
 while an XE car is shown (`AMB_FA_Autoshow.fsb`, logged and harmless).
 The route `config/render-tests/fh1-xe-buy-car.fh1test` buys an XE car and
 races it from a seed with XE installed.
+
+## Existing FH1 mods
+
+Mods made for the Xbox 360 or Xenia were not written for Pinyon Shift, but
+most of what they change can be carried over (FEATURE_BACKLOG FB-9.2). How
+depends on what the mod changes:
+
+| What the mod ships | In Pinyon Shift |
+| --- | --- |
+| Changed or new game files (a modded game folder, or files to copy over it) | Works: `pinyon.py import-mod` makes an asset mod of the files that differ from your game (below) |
+| The Forza Horizon XE mod | Works: its own installer ([above](#the-forza-horizon-xe-mod)) |
+| A changed `default.xex` (code edits) | The code changes do not carry over: the game is recompiled from the disc's executable, so a patched one is never run. Its files still import; the import warns, and parts of the mod may not work. A code change can be ported as a [native mod](#native-mods) |
+| Xenia game patches (`.patch.toml`) | Not loaded. FH1's four have built-in equivalents (next table) |
+| Changed DLC or title update packages | Refused: imported DLC and the v4 update are checked against the official packages (DLC_BACKLOG.md, TITLE_UPDATE_V4_BACKLOG.md). Put changed files in a mod instead |
+| An edited save | Import it like any save: **Import a save**, or `pinyon.py import-save` (a Xenia save with `--xenia`) |
+
+Xenia Canary's patch file for FH1 (`4D5309C9 - Forza Horizon.patch.toml` in
+[xenia-canary/game-patches](https://github.com/xenia-canary/game-patches),
+for the disc and for title update 4; checked 2026-10-23) has four patches,
+and each one is covered without patching code:
+
+| Xenia patch | Pinyon Shift |
+| --- | --- |
+| Disable Motion Blur | F6 > GRAPHICS > MOTION BLUR |
+| Disable Depth of Field | F6 > GRAPHICS > DEPTH OF FIELD |
+| Disable Shadows | F6 > GRAPHICS > SHADOWS > OFF BY DAY (at night the same passes light the road for the headlights) |
+| Disable hash checks | Not needed: files a mod replaces pass the title's hash check ([Asset mods](#asset-mods)) |
+
+### Importing a mod of game files
+
+```text
+pinyon.py import-mod SOURCE... [--name NAME] [--title TITLE] [--version V]
+                     [--new-save | --keeps-save] [--any-build] [--enable] [--replace]
+```
+
+Each source is a folder, a ZIP, or a 7z or RAR archive (extracted with
+7-Zip or bsdtar, as for XE); later sources apply over earlier ones, such as
+a hotfix over its release. The files may be a copy of the game folder (a
+`media` folder at most three levels down) or start inside `media` (`cars/`,
+`db/`, `UI/` and so on). The tool compares every file under `media/` with
+your game and keeps the changed and new ones in `<state>/mods/<name>/game/`,
+spelled as the disc spells the folders. Unchanged files are dropped, so a
+mod shipped as a whole game folder takes only the space of its changes.
+Executables are left out (see above), readmes are kept beside the mod, and
+anything else outside `media/` is listed as skipped. `import.json` records
+each kept file's SHA-256 and whether it replaces a game file.
+
+The mod plays the shared modded copy of your save. `--new-save` gives it its
+own new save instead, for mods whose readme asks for one (often because they
+renumber cars); the import warns when a mod replaces the database without
+it. `--keeps-save` keeps your own save, for mods that change only looks or
+sound. The mod targets the base disc unless `--any-build`: title update v4
+reads some files, the database among them, from its own archive, so a disc
+mod's copies of those do nothing on v4. It is installed switched off unless
+`--enable`; `--replace` replaces an earlier import of the same name.
+Either way it then shows in the launcher's **Mods** panel
+([Layout and enabling](#layout-and-enabling)) like any other mod, to
+switch on or off, order or remove there.
+Pinyon Shift's own mod names (`xe`, `custom_radio`, the generated `zz-` mods
+and the built-in mods) are refused.
+
+Nothing from the mod or the game is distributed: the import runs on the
+player's machine from their own download and their own game files.
 
 ## Native mods
 

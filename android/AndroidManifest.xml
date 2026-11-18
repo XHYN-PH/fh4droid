@@ -77,6 +77,9 @@
             <meta-data android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+        <activity android:name="studio.deimos.pinyonshift.ContentActivity"
+            android:theme="@style/FH4DroidTheme"
+            android:screenOrientation="landscape" android:exported="false" />
         <activity android:name="studio.deimos.pinyonshift.DriverProbeActivity"
             android:theme="@style/FH4DroidTheme"
             android:process=":driver_probe" android:exported="false"

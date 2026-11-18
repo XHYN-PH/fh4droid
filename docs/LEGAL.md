@@ -28,34 +28,20 @@ Do not commit or redistribute:
 ## Native replacements of game and library code
 
 Pinyon Shift replaces some of the title's translated code with native code:
-`src/guest_native`, hooks, and replacements of the libraries linked into
-the game (XDK libraries and middleware such as FMOD Ex). The repository may
-hold a replacement only when it is independently authored:
+`src/guest_native`, hooks, native versions of game subsystems (physics,
+particles, crowds and others), and replacements of the libraries linked into
+the game (XDK libraries and middleware such as FMOD Ex). Any of these may be
+hand-written, from a single function to a whole subsystem, and may compute
+differently from the original where the result is checked.
 
-- It implements a contract documented from our own analysis: what the
-  function takes, returns and changes in guest state, recorded in
-  `site/findings`, and checked by comparing its results with the translated
-  original within a stated tolerance.
-- Its algorithm is our own or comes from a published source under a
-  compatible licence: standard signal-processing filters, codecs, maths, or an
-  open-source library listed in `THIRD_PARTY_NOTICES.md`.
-
-The repository must not hold:
-
-- a game or library function rewritten statement by statement from its
-  instructions, its disassembly or a decompiler's output. Such a hand
-  translation is derived from the executable like the generated source above;
-- constant tables, coefficients or other data copied from the executable. A
-  replacement that needs them reads them from the player's own files at
-  build or run time;
-- a middleware product's own algorithms reproduced beyond what its public
-  documentation and the published literature define. Middleware is
-  replaced at its documented API boundary.
-
-When a replacement must keep the original's exact arithmetic, it is produced
-at build time from the player's own executable, for example by a
-code-generator option or a specialised translation of that function. It
-then stays in the generated tree, which is never committed.
+Write them from our own analysis: what the code takes, returns and changes in
+guest state, recorded in `site/findings`, and checked against the translated
+original (lockstep verification or a stated tolerance). Committing a
+statement-by-statement transcription of disassembly or decompiler output
+copies the executable's expression and is a copyright risk; a clean-room
+version written from that analysis is fine. Constant tables and other data
+the code needs are game data: read them from the player's own files at build
+or run time instead of committing them.
 
 ## Upscaler and frame generation runtimes
 
@@ -64,7 +50,8 @@ are planned in [UPSCALING_BACKLOG.md](UPSCALING_BACKLOG.md). Their
 licences were read on 2026-10-16 (UP-0.1). The policy:
 
 - **No vendor binary, header or shader is committed, and no release ships
-  one.** Releases stay source and launcher only.
+  one.** Releases stay source and launcher only; the player's setup fetches
+  what the build needs.
 - **Open-source code is fetched at setup and built locally**, like the other
   setup downloads in `THIRD_PARTY_NOTICES.md`: FSR 1-3 and the FidelityFX
   SDK 1.1.x source (MIT), NVIDIA Image Scaling (MIT), Arm ASR (MIT) and
@@ -75,19 +62,23 @@ licences were read on 2026-10-16 (UP-0.1). The policy:
   reverse engineering) and XeSS (Intel Simplified Software License:
   unmodified binaries with the notice; no reverse engineering, no use of
   Intel's name to endorse). XeSS's public headers are MIT since 2026-09.
-- **DLSS (the NVIDIA RTX SDK licence) is opt-in.** That licence lets an
-  application distribute the SDK only as object code inside it. It forbids
-  using the SDK in a way that subjects it to an open-source licence (§4(e)).
-  It requires NVIDIA's marks on the splash screen, about box and credits
-  of an application that incorporates DLSS or NGX, and each use of those
-  marks needs NVIDIA's written approval. It also asks for notice to NVIDIA
-  before a *commercial* release. So the DLSS SDK is never committed, and
-  the player's setup downloads it only after the player accepts NVIDIA's
-  licence. The NGX static library is linked into the player's own build.
-  The game also loads `nvngx_dlss*.dll` from a folder the player fills
-  (NGX's documented `PathListInfo` search path), so any DLSS version the
-  player supplies works. DLSS stays off in releases until NVIDIA answers
-  the questions in UP-0.1 (contact: `nvidia-rtx-license-questions@nvidia.com`).
+- **DLSS (the NVIDIA RTX SDK licence) ships with the Windows build, with
+  NVIDIA's approval (2026-10-20).** That licence lets an application
+  distribute the SDK only as object code inside it, on terms at least as
+  protective as NVIDIA's. It forbids using the SDK in a way that subjects it
+  to an open-source licence (§4(e)), and it asks for attribution with
+  NVIDIA's marks on the splash screen, about box and credits of an
+  application that incorporates DLSS or NGX. So the DLSS SDK is still never
+  committed: the player's setup downloads the NGX headers, the static
+  loader and `nvngx_dlss.dll` from the pinned `github.com/NVIDIA/DLSS`
+  commit, checked by SHA-256 (`thirdparty/shiftglue-sdk/cmake/rexglue_dlss.cmake`),
+  links the loader into the player's own build and stages the DLL with
+  NVIDIA's `LICENSE.txt` in `upscalers/dlss/<version>/`. The attribution
+  is text only, as agreed with NVIDIA: the launcher names it "NVIDIA DLSS"
+  and `THIRD_PARTY_NOTICES.md` attributes it; no NVIDIA logos are used. The
+  game also loads `nvngx_dlss*.dll` from a newer version folder the player
+  adds there (NGX's documented `PathListInfo` search path). Contact for
+  licence questions: `nvidia-rtx-license-questions@nvidia.com`.
 - **`Lossless.dll` is never downloaded, copied or redistributed** by the
   project. Lossless Scaling is a paid Steam application. Its frame
   generation may be used in two ways only:
@@ -99,7 +90,12 @@ licences were read on 2026-10-16 (UP-0.1). The policy:
 
   No terms of use beyond Steam's were found. lsfg-vk, the Linux
   implementation that loads the same DLL, is CC BY-NC-ND since 2026-08, so
-  its newer code is not reused.
+  its newer code is not reused. The in-game path is built from lsfg-vk
+  1.0.0 (MIT) and DXVK's DXBC compiler (zlib); it reads the shaders from
+  the DLL into memory and writes nothing to disk. Until THS gives
+  permission it stays off: it runs only when the player sets
+  `present_lsfg_dll` (or `present_lsfg_experimental`) themselves, and no
+  player page documents it.
 
 Never vendor or link to leaked SDK builds (FSR 4 source, INT8 FSR 4), and
 never document installs that turn off a vendor's signature checks.

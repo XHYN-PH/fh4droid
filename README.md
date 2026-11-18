@@ -14,7 +14,7 @@
 
 **FH4Droid focuses on Android only.** It brings the original Xbox 360 **Forza Horizon (2012)** to compatible phones and handhelds.
 
-**Testing build: 0.6.8-r7.** This build has not been tested on a physical Android device. Expect possible crashes, graphics issues and slowdowns.
+**Testing build: 0.9.1-upstream-test1.** Based on [Pinyon Shift 0.9.1](docs/releases/0.9.1.md). Android gameplay validation is pending.
 
 **You must provide your own legally obtained game files.** Use the supported USA Xbox 360 base-game ISO or complete extracted folder. Game files and game-download links are not provided here.
 
@@ -24,7 +24,7 @@
 - Searchable settings, pinned favourites, section resets, undo and active/saved value labels.
 - Graphics presets, screen modes, FSR profiles, custom values and restart labels.
 - 25–100% rendering resolution in one-percent steps; performance depends on the device.
-- Racing icons for all 20 touch controls, explicit **Arrows / Stick** steering, named local layouts, handed templates, per-control fading and floating/fixed/invisible sticks.
+- Text labels for driving touch controls, explicit **Arrows / Stick** steering, named local layouts, handed templates, per-control fading and floating/fixed/invisible sticks.
 - Controller calibration, optional phone tilt and rumble, achievements and a trainer on a separate profile.
 - Opt-in sustained mode, driver diagnostics, graphics-cache management and labelled performance reports.
 - Save export, import, backups and restoration from your phone.
@@ -36,7 +36,7 @@
 
 | Item | Requirement |
 |---|---|
-| Android | Android 12 (API 31) or newer on a compatible ARM64 phone or handheld |
+| Android | Android 13 (API 33) or newer on a compatible ARM64 phone or handheld |
 | Recommended device | Snapdragon 8 Gen 2 or newer |
 | Graphics | Vulkan 1.1+ with required features; 1.1/1.2 and Mali/Xclipse gameplay support are experimental |
 | Storage | ISO: room for your ISO plus about 150 MB of support files. Folder import: about 8 GB plus the original folder and APK |
@@ -60,13 +60,13 @@ While playing, tap **☰** or press Android Back for the in-game menu. Choose **
 
 Use **Saves** to export or restore the standard base-game profile while the game is closed. The trainer uses a separate modded profile; normal save exports do not include it. Use **Settings → Advanced → Record a performance comparison** when reproducing a problem, then **More → Diagnostics / Reports**. Normal play leaves detailed profiling off.
 
-The launcher uses the transparent FH4Droid logo, one primary Play action and text footer links. Settings are grouped into Graphics, Controls, Audio, Interface, Gameplay and Advanced. The full-window touch editor has a separate full-window Properties view, a Test mode and explicit Save/Cancel. Modern racing controls use the same antialiased PNG artwork in the editor and native overlay; backing and symbol opacity are independent. Existing custom positions are retained. Choose Modern racing or Full controller explicitly under layout presets.
+The launcher uses the transparent FH4Droid logo, one primary Play action and text footer links. Settings are grouped into Graphics, Controls, Audio, Interface, Gameplay and Advanced. The full-window touch editor has a separate full-window Properties view, a Test mode and explicit Save/Cancel. Driving controls use the same text labels in the editor and native overlay; backing and symbol opacity are independent. Existing custom positions are retained. Choose Modern racing or Full controller explicitly under layout presets.
 
 The expanded UI, controls and rendering options still need physical-device gameplay testing. First visits to a scene may pause while graphics are prepared. Performance targets are not guaranteed frame rates.
 
 **Title Update 4 is not needed for this release.** Saves already used with Update 4 will not work with this APK. Back up your saves and use a separate test profile. Game files and saves from the original Pinyon Shift app are not transferred automatically.
 
-See the [release notes](docs/releases/fh4droid-0.6.8-r7.md) for setup and known issues.
+See the [Android guide](site/pages/android.md) for setup and known issues.
 
 ## Reporting a problem
 

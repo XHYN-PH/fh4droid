@@ -33,6 +33,40 @@ The scripted race (`fh1-race-sync`) is the heaviest route. Measured over its bus
 
 At a 60 fps limit, 2x with MSAA holds a 16.66 ms median (p95 17.04 ms).
 
+The 120 limit hides little. With the limit at 240 from the race start, vsync off, 2x with MSAA ran 8.1-9.8 ms a frame in 400-frame windows of 5,200-7,100 draws (median about 8.5 ms, 118 fps; two runs, 2026-11-12). The frame is CPU-bound: the draw recorder thread is busy 7.5-8.2 ms of it, about 1.2 µs a draw, and the GPU commands thread spends about 1.9 ms waiting on the game's GPU-to-CPU callbacks, time the recorder still needs. Lowering the GPU's work therefore leaves the frame time unchanged on this PC.
+
+At 3x with full 4x MSAA, the Vulkan depth-alias optimization saves a median 1.092 ms of executor GPU time on this RTX 4080, range 0.798–1.321 ms across 12 disjoint in-run blocks in both toggle orders. It is enabled automatically; MSAA-off and two-host-sample storage keep their existing path. The advanced setting `fh1_shared_depth_alias = false` in `pinyon_shift.toml` restores the previous path. [Conditions and image checks](renderer.md#edram-and-resolves).
+
+## The title update build
+
+The v4 build players use for Rally and the 1000 Club, with a player's settings: 2x internal resolution, shadows, DLSS to a 3840 × 2160 window, no frame limit and no vsync. The route loads a pinned save into the open world and stands at the Gauntlet's start with traffic passing, for 90 seconds on a wall clock so it plays the same at any frame rate; the last 60 seconds are measured. The game paces its steps to the display's 120 Hz, so every build's median is 8.33 ms and the differences show in CPU time and the slow frames. Four interleaved runs a build (October 2026).
+
+| v4 build | p95 | p99 | Process CPU a frame | Title thread | GPU decoder | GPU recorder |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Before: SSE4.1, no code generation lists | 10.22 ms | 11.67 ms | 36.3 ms | 5.91 ms | 8.50 ms | 7.62 ms |
+| FMA3 | 9.46 ms | 10.85 ms | 34.8 ms | 5.43 ms | 8.36 ms | 7.13 ms |
+| FMA3 and the base build's code generation lists | **9.10 ms** | **10.19 ms** | **33.1 ms** | **4.57 ms** | 8.31 ms | 6.86 ms |
+
+One FMA3 run hitched (p99 42 ms) and is left out of its row. The last row is what `tools/build-v4.ps1` builds now ([recompiler](recompiler.md#the-title-update-build)); resident memory stayed at 2.06-2.08 GB in all three.
+
+## First visits and hitches
+
+Shader preparation covers a short route, so a new area or event can still
+request pipelines it has never reached. The desktop renderer requests a
+frame's new pipelines in parallel and waits at submission replay. A warm
+route and a first visit must be measured separately; a recurring night-race
+stutter is not established to be shader compilation merely because first
+visits also hitch.
+
+The `fh1-hitch-drive` and `fh1-hitch-race` test routes keep only one final
+capture, whose GPU readback is excluded from gameplay timings. Warm repeats
+keep the original seed's user and configuration and add the completed run's
+Vulkan shader storage, base and specialized pipeline descriptions, and
+persisted driver cache. The driver's own disk
+cache remains present in both runs, so an unseeded run is not a cold-driver
+measurement. The [qualification method](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/HITCH_QUALIFICATION.md)
+lists the diagnostics, cache policy and limits of the seeded routes.
+
 ## Fewer cores
 
 The Low-spec 60 preset on the heavy start of the race (about 6,200 draws a frame), with the same machine limited to fewer cores or less free VRAM. These show sensitivity to core count, not real older hardware: a real older CPU also has smaller caches and lower clocks, and the GPU is still an RTX 4080.
@@ -46,7 +80,22 @@ The Low-spec 60 preset on the heavy start of the race (about 6,200 draws a frame
 | 4 slow cores, Balanced 40 | 40 | 39.9 | 25.00 ms | 25.48 ms |
 | 4 cores, 8 threads, about 1 GB VRAM free | 60 | 59.6 | 16.68 ms | 17.02 ms |
 
-The game needs about 1.1 GB of graphics memory at 1x without MSAA, so a 2 GB card has room. Integrated GPUs and the Steam Deck haven't been measured yet.
+The game needs about 1.1 GB of graphics memory at 1x without MSAA, so a 2 GB card has room. Integrated graphics and an old discrete GPU are in the next section; the Steam Deck hasn't been measured for this table.
+
+## An old laptop
+
+One 2017-era laptop with two GPUs: Intel Core i5-8250U (4 cores, 8 threads), 15.9 GB RAM, Windows 11, a TV at 1920 × 1080 60 Hz over HDMI. The GeForce 930MX (2 GB, driver 511.69) renders by default and the Intel UHD 620 (driver 31.0.101.2140) drives the display. The route is the race from `fh1-race-sync` at 1x, one run each, so these are single measurements with no spread.
+
+| Preset and GPU | Target | Presents a second | Median | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Low-spec 60, UHD 620 | 60 | 12.5 | 76 ms | 90 ms |
+| Low-spec 60, GeForce 930MX | 60 | 6.8 | 65 ms | 670 ms |
+| Ultra Low 30, UHD 620 | 30 | 19.7 | 51 ms | 58 ms |
+| Ultra Low 30, GeForce 930MX | 30 | 9.8 | 41 ms | 625 ms |
+
+Neither GPU reaches its target, so this machine is below what the presets support. The Ultra Low 30 rows count only 335 and 574 frames, so they are thin. On the Intel GPU the recorder thread takes 14 to 24 ms a frame, so the CPU limits it as well as the GPU.
+
+The 930MX has a median frame time at or below the Intel's, but about one frame in seven takes 550 to 700 ms, which is why its p95 is so high. These stalls come from showing the window, not from drawing: with the window hidden none occurred in 90 seconds and the median was 55 ms. Turning vsync off cut them to a third, windowed mode and the number of swapchain images did not change them, and timing every presenter and queue call found none that blocked. The wait is below the graphics API, probably in the driver's hand-off from the 930MX to the Intel GPU that drives the display; that is a guess from one machine. On this laptop the Intel GPU is the better choice, which the game can be told with `vulkan_device = 1`. The records are in [benchmarks/low-spec/2026-10-29](https://github.com/arcanite24/pinyon-shift/tree/dev/benchmarks/low-spec/2026-10-29) and the method in [docs/LOW_SPEC_BACKLOG.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/LOW_SPEC_BACKLOG.md).
 
 ## Android
 
@@ -61,3 +110,10 @@ Free roam and races at 1x with the in-game presets.
 The Astra throttles after about three minutes: 37 to 39 fps at 40 to 44 °C skin temperature, 26 to 28 above 44.5 °C. These are rough single-device measurements.
 
 Methods, logs and the full tables are in [docs/PERFORMANCE.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/PERFORMANCE.md) and the records in [benchmarks/](https://github.com/arcanite24/pinyon-shift/tree/dev/benchmarks).
+
+
+## Android comparison tooling
+
+`tools/android-performance-suite.py` prepares controlled experiment overlays for copied test state. It covers texture size/reserve, shader concurrency, effects, scale/upscalers, forced BC decoding and pacing. The comparator requires device, driver, build, route, seed digest, cache state and thermal provenance; missing or confounded results are unqualified. These are measurement tools, not new phone FPS results.
+
+The per-frame summary distinguishes memory gauges (mean/P95/peak) from CPU/upload work totals. Diagnostic Android launches request thread CPU attribution for Guest, GPU, Vulkan, XMA decoder and Audio prefixes; GPU timestamp profiling remains opt-in. See [Android resource policy](android.md#android-resource-policy) for the current defaults and their qualification limits.

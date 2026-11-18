@@ -15,6 +15,70 @@ SPEC.loader.exec_module(dlc)
 
 
 class DlcImportTests(unittest.TestCase):
+    def community_fixture(self, root):
+        source, manifest, package = self.fixture(root)
+        package.update(package_id=dlc.UDLC, source="community", author="Warshack4874")
+        data = bytearray(source.read_bytes())
+        data[0x32C] = 1
+        traffic = package | dict(package_id=dlc.TRAFFIC, content_id=data[0x32C:0x340].hex().upper(),
+                                 display_name="Traffic Car Unlocker", requires=[dlc.UDLC],
+                                 accepted=[package["accepted"][0] | dict(
+                                     sha256=hashlib.sha256(data).hexdigest().upper())])
+        manifest["packages"].append(traffic)
+        archive = root / "udlc.zip"
+        with zipfile.ZipFile(archive, "w") as output:
+            output.writestr(package["package_id"], source.read_bytes())
+            output.writestr(traffic["package_id"], data)
+
+        def extract(args, **kwargs):
+            destination, id = Path(args[3]), args[4]
+            folder = destination / dlc.CONTENT / "00000002" / id
+            folder.mkdir(parents=True)
+            (folder / "offer.puboffer").write_bytes(b"owned")
+            header = destination / dlc.CONTENT / "Headers/00000002" / (id + ".header")
+            header.parent.mkdir(parents=True)
+            header.write_bytes(bytes(328) + b"\1\0\0\0")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        return archive, manifest, extract
+
+    def test_pinned_community_import_requires_parent_and_disable_cascades(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive, manifest, extract = self.community_fixture(root)
+            state = root / "state"
+            with patch.object(dlc, "catalog", return_value=manifest), \
+                    patch.object(dlc.subprocess, "check_output", return_value=b""), \
+                    patch.object(dlc.subprocess, "run", side_effect=extract):
+                rows = dlc.import_content(archive, state, root / "extractor")
+                self.assertEqual([(p["source"], p["enabled"]) for p in rows],
+                                 [("community", False), ("community", False)])
+                self.assertEqual([p["author"] for p in rows], ["Warshack4874"] * 2)
+                with self.assertRaisesRegex(ValueError, "requires.*enable it first.*also disables"):
+                    dlc.set_enabled(state, dlc.TRAFFIC, True)
+                dlc.set_enabled(state, dlc.UDLC, True)
+                rows = dlc.set_enabled(state, dlc.TRAFFIC, True)
+                self.assertTrue(all(p["enabled"] for p in rows))
+                rows = dlc.set_enabled(state, dlc.UDLC, False)
+                self.assertFalse(any(p["enabled"] for p in rows))
+                manifest["packages"][0]["accepted"][0]["sha256"] = "F" * 64
+                with self.assertRaisesRegex(ValueError, "SHA-256 differs"):
+                    dlc.import_content(archive, state, root / "extractor")
+
+    def test_old_udlc_is_recognized_by_zip_size_and_md5_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive, manifest, _ = self.community_fixture(root)
+            with archive.open("rb") as stream:
+                md5 = hashlib.file_digest(stream, "md5").hexdigest()
+            with patch.object(dlc, "OLD_UDLC_SIZE", archive.stat().st_size), \
+                    patch.object(dlc, "OLD_UDLC_MD5", md5):
+                with self.assertRaisesRegex(ValueError,
+                        r"This is UDLC v1.11. Download UDLC v1.2 from ModDB: https://.*udlcv12"):
+                    dlc.stage_inputs(archive, root, manifest)
+                with patch.object(dlc, "OLD_UDLC_MD5", "0" * 32):
+                    self.assertEqual(len(dlc.stage_inputs(archive, root, manifest)), 2)
+
     def test_payload_digest_order_is_the_same_on_every_platform(self):
         # The catalog digests were made on Windows, where paths sort without
         # case; macOS and Linux must list the files in the same order.
@@ -98,6 +162,25 @@ class DlcImportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unsafe ZIP"):
                 dlc.stage_inputs(root / "bad.zip", root, manifest)
             self.assertFalse((root.parent / "escape").exists())
+
+    def test_unsupported_packages_are_named_from_their_header(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, manifest, _ = self.fixture(root)
+            data = bytearray(source.read_bytes())
+            name = "Promo Car".encode("utf-16-be")
+            data[0x411:0x411 + len(name)] = name
+            data[0x32C] = 1
+            source.write_bytes(data)
+            with source.open("rb") as stream, self.assertRaisesRegex(
+                    ValueError, '"Promo Car": this DLC package is not in the verified catalog'):
+                dlc.inspect(stream, len(data), manifest)
+            data[0x32C] = 0
+            data[0x344:0x348] = bytes.fromhex("000D0000")
+            source.write_bytes(data)
+            with source.open("rb") as stream, self.assertRaisesRegex(
+                    ValueError, '"Promo Car": content type 000D0000 is not Marketplace DLC'):
+                dlc.inspect(stream, len(data), manifest)
 
     def test_unreadable_game_zips_in_a_folder_are_skipped(self):
         # An installed package's Media/DLCZips use a method Python cannot
@@ -205,6 +288,63 @@ class DlcImportTests(unittest.TestCase):
             archive_path.rename(only / "big.zip")
             with self.assertRaisesRegex(ValueError, r"big.zip \(it uses a compression method"):
                 dlc.stage_inputs(only, root, manifest)
+
+    def two_packages(self, root):
+        """Two distinct catalogued packages: (data of each, manifest)."""
+        source, manifest, package = self.fixture(root)
+        first = source.read_bytes()
+        second = bytearray(first)
+        second[0x32C] = 1
+        other = package | dict(package_id="B" * 42, content_id=second[0x32C:0x340].hex().upper(), display_name="Other DLC", accepted=[
+            package["accepted"][0] | dict(sha256=hashlib.sha256(second).hexdigest().upper())])
+        manifest["packages"].append(other)
+        return first, bytes(second), manifest
+
+    def test_nested_folders_and_zips_inside_zips_are_searched(self):
+        # #857: packages under subfolders of a ZIP, in a ZIP inside a ZIP,
+        # and under nested folders of a chosen directory all import.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first, second, manifest = self.two_packages(root)
+            inner = root / "inner.zip"
+            with zipfile.ZipFile(inner, "w") as archive:
+                archive.writestr("Pack/Sub/" + "B" * 42, second)
+                archive.writestr("Pack/readme.txt", b"hello")
+            outer = root / "outer.zip"
+            with zipfile.ZipFile(outer, "w") as archive:
+                archive.writestr("Forza Horizon/DLC/Cars/A" + "A" * 41, first)
+                archive.write(inner, "Forza Horizon/Extra/more.zip")
+            ids = lambda inputs: sorted(i[1]["package_id"] for i in inputs)
+            self.assertEqual(ids(dlc.stage_inputs(outer, root, manifest)), ["A" * 42, "B" * 42])
+            folder = root / "dump"
+            (folder / "a" / "b" / "c").mkdir(parents=True)
+            (folder / "a" / "b" / "c" / "pkg").write_bytes(first)
+            outer.rename(folder / "a" / "outer.zip")
+            self.assertEqual(ids(dlc.stage_inputs(folder, root, manifest)), ["A" * 42, "B" * 42])
+            self.assertEqual([p.name for p in root.iterdir() if p.name.startswith("nested-")], [])
+
+    def test_several_sources_are_merged_into_one_batch(self):
+        # #857: several ZIPs and folders chosen together.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first, second, manifest = self.two_packages(root)
+            one = root / "one.zip"
+            with zipfile.ZipFile(one, "w") as archive:
+                archive.writestr("x/y/" + "A" * 42, first)
+            folder = root / "two"
+            folder.mkdir()
+            (folder / "pkg").write_bytes(second)
+            inputs = dlc.stage_inputs([one, folder], root, manifest)
+            self.assertEqual(sorted(i[1]["package_id"] for i in inputs), ["A" * 42, "B" * 42])
+            # The same package in two sources is kept once.
+            twin = root / "twin.zip"
+            twin.write_bytes(one.read_bytes())
+            self.assertEqual(len(dlc.stage_inputs([one, twin], root, manifest)), 1)
+            # A chosen file that is not a package is still refused.
+            junk = root / "junk.txt"
+            junk.write_text("no")
+            with self.assertRaisesRegex(ValueError, "choose a raw DLC package"):
+                dlc.stage_inputs([one, junk], root, manifest)
 
     def test_failed_extraction_never_publishes_and_retry_preserves_save(self):
         with tempfile.TemporaryDirectory() as directory:

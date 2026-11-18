@@ -8,6 +8,18 @@ final class MobileSettings {
           "Requires dynamic-rendering support. Off selects the experimental compatibility renderer at next launch. It can be slower or look different; it is not yet qualified on Mali-G52 or Xclipse.", "false", "true"),
       o("Graphics", "vulkan_dynamic_rendering", "Dynamic rendering", "true", true,
           "Normally on when the driver supports it. Off uses classic render passes and disables the native game renderer. Both paths still require the listed Vulkan features.", "false", "true"),
+      o("Graphics", "vulkan_require_vertex_pipeline_stores_and_atomics", "Require vertex shader stores", "true", true,
+          "Experimental Mali compatibility: turn off only if the system driver lacks vertex shader stores. Those writes are skipped, so graphics can differ. Run the driver test again after changing this.", "false", "true"),
+      s("Graphics", "fh1_coarse_shading", "Scene shading", "", false,
+          "Coarse shades selected scene passes once per 2×2 pixels on supported GPUs. It can improve Mali performance at the cost of scene detail.", "", "1024/32/4x/d1+0/32/4x/c3=2x2,0/16/1x/d1+720/16/1x/c0=2x2"),
+      o("Gameplay", "pinyon_shift_chase_height", "Chase camera height", "0", false,
+          "Live height offset in metres for the chase camera.", "-0.5", "0", "0.25", "0.5", "0.75", "1", "1.5"),
+      o("Gameplay", "pinyon_shift_chase_distance", "Chase camera distance", "0", false,
+          "Live distance offset in metres for the chase camera.", "-1", "-0.5", "0", "0.5", "1", "2", "3"),
+      o("Gameplay", "pinyon_shift_chase_fov", "Chase camera FOV", "1", false,
+          "Field-of-view multiplier for the chase camera, in addition to the global camera setting.", "0.8", "0.9", "1", "1.1", "1.2", "1.3"),
+      o("Gameplay", "pinyon_shift_chase_stiffness", "Chase camera stiffness", "1", false,
+          "Live camera spring stiffness. Lower values follow more softly.", "0.5", "0.75", "1", "1.25", "1.5", "1.75", "2"),
       o("Gameplay", "pinyon_shift_camera_gforce", "Camera G-force motion", "1", false,
           "Scales the built-in immersive camera motion. Does not change vehicle physics.", "0", ".5", "1", "1.5"),
       o("Gameplay", "pinyon_shift_camera_lean", "Camera lean", "1", false,
@@ -16,6 +28,8 @@ final class MobileSettings {
           "Cockpit and hood cameras only. Requires the built-in immersive camera mod.", "0", ".5", "1", "1.5"),
       o("Gameplay", "pinyon_shift_camera_head", "Camera head motion", "1", false,
           "Cockpit and hood cameras only. Requires the built-in immersive camera mod.", "0", ".5", "1", "1.5"),
+      o("Performance", "vulkan_texture_memory_prealloc_mb", "Texture pool reserve", "-1", true,
+          "Automatic reserves 64 MB on low-RAM or up to 4 GB devices, 128 MB up to 6 GB, and 256 MB otherwise. Textures can grow beyond this reserve. Lower values reduce initial allocation, not the guest address space.", "-1", "0", "64", "128", "256", "512"),
       o("Graphics", "vulkan_texture_max_size", "Texture size", "0", true,
           "Smaller textures use less graphics memory. Original preserves the "
               + "game's detail.",
@@ -46,7 +60,7 @@ final class MobileSettings {
               + "targets need a faster device.",
           "30", "40", "60", "120"),
       o("Performance", "vulkan_pipeline_creation_threads", "Shader workers", "-1", true,
-          "Automatic uses up to two workers on Android to leave CPU time for "
+          "Automatic uses one worker on low-memory or four-core devices, up to two otherwise, to leave CPU time for "
               + "the game. More workers can finish preparation sooner but compete "
               + "with gameplay.",
           "-1", "1", "2", "4"),
@@ -55,6 +69,8 @@ final class MobileSettings {
           "Off completes cached pipeline preparation before play. On reaches "
               + "the title sooner but may cause early stutters.",
           "false", "true"),
+      o("Performance", "vulkan_aot_prewarm_threads", "Background preparation workers", "-1", true,
+          "Automatic uses one worker on low-memory or four-core devices, two otherwise. Prepared free-roam pipelines run below normal priority, leaving title and audio work ahead of speculative preparation.", "-1", "1", "2", "4"),
       o("Performance", "host_present_fps_limit", "Additional display limit", "0", false,
           "Automatic follows game frames. An additional cap can reduce display "
               + "work; keep it at or above the game frame limit.",
@@ -177,6 +193,8 @@ final class MobileSettings {
 
   static String label(Option option, String str) {
     str = SettingValues.plain(str);
+    if(option.key.equals("pinyon_shift_fh1_render_fps_limit"))return str+" FPS";
+    if (option.key.equals("fh1_coarse_shading")) return str.isEmpty() ? "Full" : "Coarse";
     if (str.equals("true") || str.equals("false")) {
       boolean zEquals = str.equals("true");
       if (option.key.startsWith("disable_") || option.key.equals("hud_hidden")) {
@@ -187,7 +205,7 @@ final class MobileSettings {
     if (option.key.equals("host_present_fps_limit") && str.equals("0")) {
       return "Automatic";
     }
-    if (option.key.equals("vulkan_pipeline_creation_threads") && str.equals("-1")) {
+    if (automaticResource(option.key) && str.equals("-1")) {
       return "Automatic";
     }
     if (option.key.equals("vulkan_texture_max_size") && str.equals("0")) {
@@ -223,6 +241,7 @@ final class MobileSettings {
       return str;
     return str + "%";
   }
+  static boolean automaticResource(String key){return key.equals("vulkan_pipeline_creation_threads")||key.equals("vulkan_aot_prewarm_threads")||key.equals("vulkan_texture_memory_prealloc_mb");}
 
   static String summary(Activity activity) throws NumberFormatException {
     int i;

@@ -1,5 +1,12 @@
 [CmdletBinding()]
-param([string]$Configuration = 'Release')
+param(
+    [string]$Configuration = 'Release',
+    # TP-1 to TP-3: the release's prebuilt assets (with their .json sidecars)
+    # and the URL they are attached at; tools/apply-prebuilt-pins.py pins
+    # them in the payload's toolchain config.
+    [string]$PrebuiltAssets = '',
+    [string]$ReleaseBaseUrl = ''
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -58,6 +65,11 @@ $release = Get-Content (Join-Path $root 'config/release.json') -Raw | ConvertFro
 # Keep AssemblyVersion (the existing installation directory) stable so updates
 # retain user state, while Windows file/product metadata identifies this release.
 $fileVersion = ($release.version -split '-', 2)[0] + '.0'
+# The wheel screen reads devices through SDL3.dll, built from the SDK's SDL3 source.
+if (-not (Test-Path -LiteralPath (Join-Path $root 'launcher/PinyonShift.Launcher/Wheel/Native/SDL3.dll'))) {
+    & (Join-Path $root 'tools/wheel-setup/build-sdl.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Building SDL3.dll for the wheel screen failed.' }
+}
 & dotnet publish (Join-Path $root 'launcher/PinyonShift.Launcher/PinyonShift.Launcher.csproj') `
     -c $Configuration -r win-x64 --self-contained true -o $publish `
     "-p:BaseOutputPath=$(Join-Path $artifacts 'build')/" `
@@ -70,19 +82,24 @@ $include = @(
     'config/supported-extracted-ms-2505.json', 'tools/verify-extracted-game.ps1', 'docs/EXTRACTED_GAME_INPUT.md',
     'config/supported-dlc.json', 'tools/manage-fh1-dlc.py', 'tools/manage-dlc.ps1', 'tools/prepare-fh1-rally.py', 'tools/patch-fh1-archive.py',
     'config/rexglue', 'include', 'mods_src', 'src', 'tests/config', 'tests/native_renderer',
-    'tests/save', 'tests/ui', 'tests/dlc', 'tests/mod', 'tests/telemetry',
+    'tests/save', 'tests/ui', 'tests/dlc', 'tests/mod', 'tests/modules', 'tests/telemetry',
+    'tests/head_tracking',
+    'tests/camera_tuning_tests.cpp',
     'tools/fh1_archive_extract.cpp', 'tools/fh1_texture_import.cpp', 'tools/thread_sampler.cpp', 'tools/vram_balloon.cpp',
     'tools/extract-fh1-shader-corpus.py', 'tools/build-fh1-gpu-prewarm.py',
     'tools/produce-fh1-artifacts.ps1', 'tools/prepare-fh1-shaders.ps1', 'tools/prepare-fh1-vulkan.ps1',
     'config/render-tests',
+    'config/performance/symbol-order-base.txt', 'config/performance/symbol-order-v4.txt',
     'tools/build-preview.ps1', 'tools/create-crash-report.ps1', 'tools/install-build-tools.ps1',
-    'tools/launch-preview.ps1', 'tools/prepare-rexglue.ps1',
-    'tools/build-mod-patches.py', 'tools/build-mod-archives.py', 'tools/install-sample-mod.py',
-    'tools/pinyon.py', 'tools/pinyon_android.py', 'tools/build-android.ps1',
+    'tools/launch-preview.ps1', 'tools/prepare-rexglue.ps1', 'tools/prefetch-setup.ps1',
+    'tools/build-mod-patches.py', 'tools/build-mod-archives.py', 'tools/mod_options.py', 'tools/install-sample-mod.py',
+    'tools/pinyon.py', 'tools/pinyon_android.py', 'tools/apk_sign.py', 'tools/build-android.ps1',
     # pinyon.py's other commands and the launchers' content panels: the XE mod,
-    # asset export (#446) and custom radio stations (#445).
-    'tools/pinyon_xe.py', 'tools/manage-xe.ps1', 'tools/pinyon_assets.py', 'tools/fh1_audio_decode.cpp',
+    # mod import (FB-9.2), asset export (#446), custom radio stations (#445) and the
+    # mod manager (FB-9.1).
+    'tools/pinyon_xe.py', 'tools/manage-xe.ps1', 'tools/pinyon_game_mod.py', 'tools/pinyon_assets.py', 'tools/fh1_audio_decode.cpp',
     'tools/pinyon_radio.py', 'tools/manage-radio.ps1', 'tools/build-fh1-radio.py',
+    'tools/pinyon_mods.py', 'tools/manage-mods.ps1',
     # Linux, the Steam Deck and macOS (docs/LINUX.md, docs/MACOS.md).
     'tools/pinyon_setup.py', 'tools/pinyon_steam.py', 'tools/pinyon_deck.py', 'config/steam',
     # The launcher backends of pinyon.py on every OS: DLC, title update, saves,
@@ -90,11 +107,13 @@ $include = @(
     'tools/pinyon_common.py', 'tools/pinyon_dlc.py', 'tools/pinyon_title_update.py',
     'tools/pinyon_saves.py', 'tools/import-xenia-save.ps1', 'tools/pinyon_crash.py',
     'tools/pinyon_config.py', 'tools/pinyon_hardware.py', 'tools/pinyon_shaders.py',
+    'tools/fh1_aot_pipelines.py', 'config/fh1-aot-pipelines.json',
     'config/android-toolchain.json', 'android',
     'tools/fh1-profile.py', 'tools/fh1-strings.py', 'tools/inspect-fh1-ui.py',
     'tools/native-shader-pack.py',
     'tools/provision-toolchain.ps1', 'tools/release-common.ps1',
     'tools/host-config.ps1', 'tools/set-graphics-experiment.ps1', 'tools/setup-preview.ps1',
+    'tools/copy-disc-executables.py',
     'tools/verify-codegen-log.ps1', 'tools/verify-game.ps1',
     # The optional v4 title update (docs/TITLE_UPDATE_V4_BACKLOG.md TU-2).
     'config/supported-title-updates.json', 'tools/verify-fh1-title-update.py', 'tools/title-update-profile.py',
@@ -135,6 +154,13 @@ $sourceProvenancePath = Join-Path $payloadRoot 'config/source-provenance.json'
 [IO.File]::WriteAllText($sourceProvenancePath,
     ($sourceProvenance | ConvertTo-Json) + [Environment]::NewLine,
     [Text.UTF8Encoding]::new($false))
+
+if ($PrebuiltAssets) {
+    if (-not $ReleaseBaseUrl) { throw '-PrebuiltAssets needs -ReleaseBaseUrl.' }
+    & python (Join-Path $root 'tools/apply-prebuilt-pins.py') --config (Join-Path $payloadRoot 'config/release-toolchain.json') `
+        --assets $PrebuiltAssets --base-url $ReleaseBaseUrl
+    if ($LASTEXITCODE -ne 0) { throw 'Could not pin the prebuilt assets in the payload.' }
+}
 
 Get-ChildItem -LiteralPath $payloadRoot -Recurse -File | Where-Object {
     $_.Extension -in @('.exe', '.dll', '.obj', '.lib', '.pdb', '.iso', '.xex', '.dxil', '.pnsp',

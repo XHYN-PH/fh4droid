@@ -247,34 +247,93 @@ except the resolve read-back, which is on by default.
 
 | Setting | Effect |
 | --- | --- |
-| `--fh1_native_dump_frames=N,M --fh1_native_dump_dir=<dir>` | Writes the presented front buffer of the listed swaps as PPM |
+| `--fh1_native_dump_frames=N,M --fh1_native_dump_dir=<dir>` | Legacy D3D12 only: writes the presented front buffer of the listed swaps as PPM |
 | `--fh1_resolve_dump_dir=<dir>` | Writes every resolve's output bytes (the scaled range when scaling) to numbered files, waiting for the GPU after each |
-| `--fh1_frame_census=true --fh1_frame_census_path=<file.jsonl>` | Metadata-only census of surfaces, resolves, textures and primitives per 60-frame window; see the [frame contract](NATIVE_FRAME_CONTRACT.md) |
+| `--fh1_frame_census=true --fh1_frame_census_path=<file.jsonl>` | Legacy D3D12 metadata census of surfaces, resolves, textures and primitives per 60-frame window; see the historical [frame contract](NATIVE_FRAME_CONTRACT.md). Vulkan's ordered pipeline-run census is separate; this flag does not supply its complete frame contract |
 | `--fh1_native_gpu_profile=true` | GPU time per phase in the periodic stats: executor transfers, resolves and clears, plus texture cache loads split into `texture_reloads` (data a resolve invalidated) and `texture_loads` (everything else); also the executor's CPU time per phase (target preparation and binding, transfers, resolves). On Vulkan: transfers, resolves, clears and `frame` (GPU time from the frame's first timed phase to its swap, idle gaps included) |
+| `--fh1_debug_skip_renderings=<labels>` | Comma-separated exact Vulkan draw-rendering labels from the GPU profile. With the hot `fh1_debug_skip_rendering_draws=true` toggle, suppress only their draw commands (wrong image); retain memory-export and guest-query draws. See [modern rendering measurements](../MODERN_RENDERING_RESEARCH.md) |
+| `--fh1_debug_skip_pixel_shader=<decimal hash>` | Restrict the target knock-out to a guest pixel shader; zero selects any shader. Restart required. Separates final composition from HUD draws sharing its target |
+| `--fh1_debug_skip_resolve_dispatches=true` | Hot diagnostic probe: suppress Vulkan resolve compute dispatches while retaining setup and barriers (wrong sampled data/image). Enable only after loading; count `debug_resolve_dispatch_skipped`. Default false |
+| `--fh1_frame_replay_present=false` | Offline Vulkan replays close the frame without host presentation, avoiding a swapchain pacing floor. Resolves and front-buffer readback remain; gameplay and the inspector still present. `benchmark-fh1-renderings.py` uses this for its off/on/off controls |
+| `--fh1_frame_replay_output_path=<file.ppm>` | Offline Vulkan replay: captures post-swap-effect guest output at exit, before presenter upscaling and host UI. Default empty; requires replay presentation and an existing parent directory. Capture failure returns a nonzero exit. Use this to compare scene-only FXAA; raw replay bytes precede that effect |
 | `--vulkan_diagnostic_checkpoints=true` | Vulkan on NVIDIA: marks the command stream (draw start and end, copies, texture loads and their dispatches, executor resolves, transfers and clears) and, if the device is lost, logs the last markers the GPU began and finished and the shaders of the draws around the last one begun |
 | `--vulkan_async_submission=false` | Vulkan: replays and submits command buffers on the GPU commands thread instead of the `GPU Submission` worker; `--vulkan_async_submission_split_draws=<n>` sets how many draws a submission holds before the worker gets it (default 1024, 0 splits only at swaps) |
-| `--fh1_native_readback_new_resolves=false` | Stops copying one-off resolves (such as saved car thumbnails) back to guest memory |
+| `--fh1_native_readback_new_resolves=false` | Legacy D3D12 only: stops copying one-off resolves (such as saved car thumbnails) back to guest memory; Vulkan does not consume this flag |
 | `--fh1_debug_log_draws=true` | Logs every draw (copies included) with its index in the frame, EDRAM mode, primitive, shaders, render target, blend, copy registers and the pixel shader's texture fetch constants; use it on a frame replay |
 | `--fh1_debug_skip_draws=<first>-<last>[,<first>-<last>...]` | Skips those draw indices in every frame: bisect a replayed frame for the draw that causes a fault, keeping a known contributor skipped with a second range |
 | `--fh1_debug_null_fetch=<draw>:<slot>` | That draw binds a null texture for that fetch constant (logged as "completely invalid"), to tell texture faults from shader math |
 | `--perf_critical_path_trace=true` | Correlated title/PM4/submission/present trace |
+| `--pinyon_shift_physics_trace=N` | Every N frames, every car in the world's car vector (speed, rpm, gear, throttle, brake, steer, driver type) as one `fh1.physics_trace` event; read with `tools/physics-behaviour.py` (see below) |
 
 The executor logs its skip counters, memory (`FH1 native executor memory
 MB`) and transfer statistics every 600 swaps. With
 `readback_resolve = none`, large resolves to ranges no resolve wrote in the
 last few frames are copied back to guest memory before the next command the
 guest CPU can observe; this is how the game's saved car thumbnails get real
-images. Resolves repeated every frame are not read back.
+images. Completed `32_FLOAT` resolves of at most 4 KiB also use the native
+readback queue for CPU exposure reads (`fh1_readback_small_float_resolves`).
+At scales above 1x, both paths first write the guest-size GPU copy.
+
+## Physics behaviour harness
+
+A native replacement of the car physics (issue #1071) has to drive like the
+translated code closely enough for play, not bit for bit. Run a route with
+`--game-argument=--pinyon_shift_physics_trace=6`, then:
+
+```powershell
+python tools/physics-behaviour.py summary .local/runs/accel/result.json
+python tools/physics-behaviour.py compare .local/runs/translated/result.json .local/runs/native/result.json
+```
+
+`summary` reports the player's 0-60 and 0-100 km/h times from the first
+sample with the throttle pressed at a standstill (the game ramps it to full
+over about 0.2 s), each car's distance (integrated speed) and top speed, the
+AI cars' mean distance, the order by distance, and the race time when the run
+finished one. Time comes from the route's `# clock-hz`, or from the host time
+in each sample when the route has none. Race samples (game mode 3, or 20 for
+v4 Rally) are kept when the run has any; free roam before them has the
+traffic in the same vector. `compare` fails on the player's times or race
+time moving more than 2 % or the AI mean distance more than 3 %; single cars
+and the order are listed, and gated only with `--strict`.
+
+Routes and two runs of the same Release build (multivac, RTX 4080,
+2026-11-12), which set those tolerances:
+
+| Route and seed | Run A | Run B |
+| --- | --- | --- |
+| `fh1-physics-accel` on `acc9-stock` (stock R34, free roam, full throttle) | 0-100 5.82 s | 5.79 s |
+| `fh1-race-sustained` on `appdata-2026-09-27-winwarm` (player full throttle, seven AI) | 0-100 4.99 s, AI mean 1,580.8 m | 4.98 s, 1,604.5 m (+1.5 %) |
+| `fh1-rally-stage-ai` on a `create-rally-stage-seed.py --autopilot` seed (route 1, AI drives) | 171.26 s, 0-100 5.20 s | 171.22 s, 5.18 s |
+
+In the sustained race, single AI cars moved by up to 4.1 % between the two
+runs and swapped places, and the player's distance (no steering) by 2.8 %,
+from thread timing; that is why they are not gates. #1019 measured the stock
+R34 at 5.3 s from position captures every 0.1 s timed from frame 1100; the
+speed field read here gives 5.8 s from the throttle press, so compare runs
+measured the same way only.
 
 ## Frame dumps and offline replay
 
 A frame dump records one frame's command packets, starting registers, bin
 state, shaders and every guest range it reads. Record one from a normal or
-render-test run at 1x:
+render-test run at 1x with split GPU recording disabled:
 
 ```text
---fh1_frame_dump_frame=<frame> --fh1_frame_dump_path=<file.fh1frame>
+--gpu_record_thread=false --fh1_frame_dump_frame=<frame> --fh1_frame_dump_path=<file.fh1frame>
 ```
+
+The frame is the executor's swap number, not the render-test clock. On
+Vulkan, to
+capture gameplay after verifying a route reached it, set only the path on
+the command line, then use `cvar <script-frame> fh1_frame_dump_frame -1`
+in the route. A negative request records the next complete executor frame;
+the request resets to zero when armed, so it records once. Another request
+can be armed after the previous dump completes. With `gpu_record_thread`
+enabled, the request is consumed and rejected with a warning: the packet
+recorder otherwise races the decoder. The parked-car example is
+`config/render-tests/fh1-macos-fixed-frame.fh1test`.
+These runtime requests are implemented on Vulkan; D3D12 still consumes the
+command-line request when creating its executor.
 
 `tools/replay-fh1-frame.py <dump> --state-root <seed>` replays it with the
 title suspended and compares the front buffer; `--write-golden` stores the
@@ -290,5 +349,8 @@ with the other backend's (the front buffer is tiled, little-endian
 2_10_10_10 with red in the high bits; the two backends differ only in sparse
 edge samples on the four goldens, and by at most 8 of 1023 per channel on a
 Vulkan-recorded free-roam frame replayed on D3D12). A Vulkan dump replays on
-Vulkan with no differing words; D3D12 dumps of 3D scenes differ from their
-own recorded front buffer in about 2 % of words (edge samples).
+Vulkan with no differing words on those four goldens; a 2026-10-18 Mac
+gameplay dump differed from its own MoltenVK replay in 12,338 of 942,080
+words, so a recording is not a universal bit-exact replay reference.
+Keep a replay golden for regression checks. D3D12 dumps of 3D scenes differ
+from their own recorded front buffer in about 2 % of words (edge samples).

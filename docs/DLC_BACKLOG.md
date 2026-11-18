@@ -61,6 +61,79 @@ that Marketplace packages work. Every package below remains **unqualified**.
 Online recognition, leaderboards and service-backed features must be assessed
 separately from local cars, events and progress.
 
+## Community UDLC (#595)
+
+UDLC v1.2 by Warshack4874 and the optional Traffic Car Unlocker use the
+same pinned import path as official packages. The catalog records their
+whole-package and extracted-payload SHA-256 values, file counts and sizes.
+Both import disabled with their original zero licence mask. The unlocker
+requires enabled UDLC; disabling UDLC disables the unlocker too.
+The browser helper is `python tools/pinyon.py dlc udlc --find --traffic`.
+It checks the ZIP size and MD5 before import and enables the imported packs.
+It never downloads from ModDB itself. The known v1.11 wrapper is refused
+with a link to v1.2; its inner packages are not accepted.
+
+Repository extraction and read-only inspection establish that UDLC registers
+113 `Data_Car` rows through `72900_merge.slt`, its ordinary `.puboffer` and
+localized `Data_Car`/`List_CarMake` string tables. The companion supplies
+31 car rows through `73200_merge.slt` and 15 thumbnail textures. See the
+[content finding](../site/findings/content.toml). No game assets are distributed.
+"Open" UDLC replaces the base database and is unsupported.
+
+2026-10-24–25 qualification on Windows 11, Ryzen 7 5800X / RTX 4080, Vulkan:
+the base and v4 builds buy the 2002 Acura RSX Type-S through the ordinary
+manufacturer/car/colour/confirmation screens, save it and return to free
+roam. The v4 route manoeuvres it in the festival; a fresh base launch
+reloads its saved garage car and drives it at 59 km/h. Both builds show its
+model name with English and Mexican Spanish UI (`user_language=5`,
+`user_country=71`); the proper name stays RSX Type-S.
+The base purchase creates garage car 13 and `Thumbnail_13.xdc`; the
+plaintext profile trace selects `Main/CareerCar=13` afterwards.
+
+The routes use private copies of pinned `i444-live` and `bugbash-1021-v4`,
+private test credits, and a private `udlc_autoshow_probe` asset mod that
+only enlarges `Colorado/autoshow.xml`'s `festival_01` trigger radius. It
+does not change any car, offer, licence, price or model. The initial map
+navigation attempt missed the icon and was terminated. The initial late
+merge wait missed the file-open history; the final route waits immediately
+after Start. Six-frame buy presses did not complete the purchase; 36-frame
+presses did. Those automation failures are not runtime crashes or proof of
+a pack defect. The reusable scenarios are
+[`fh1-udlc-buy-car`](../config/render-tests/fh1-udlc-buy-car.fh1test) and
+[`fh1-udlc-reload`](../config/render-tests/fh1-udlc-reload.fh1test).
+
+This is one-car driving qualification, not a full roster, upgrade or
+platform pass. On v4, the 2015 Charger F&F and 2014 Ghibli F&F were also
+bought and saved through their ordinary Autoshow flows. Both remain on
+`Please wait` after selecting Design Creator in the paint shop, including
+late captures at route frame 10000. The RSX control reaches Paint Car and
+responds to body/mirror selection with the same private paint-shop trigger
+probe. The renderer and route continue (exit 0); route completion does not
+mean the editor loaded. This matches the pack's reported upstream hang;
+no SDK or runtime workaround was attempted.
+
+With the stock purchased RSX selected, disabling UDLC (and its dependent
+unlocker) on a private base save loaded and drove the fallback Corrado.
+Native decrypted database snapshots retained all 13 garage rows, including
+the RSX's instance 13 / model 422, byte-for-byte; the complete SQLite body
+also had the same SHA-256 before and after the disabled run. Re-enabling
+UDLC left the Corrado selected, but Change Car still offered the owned
+RSX and Get In Car restored it without a purchase or save repair. This
+does not establish safe removal of purchased UDLC upgrades or every car.
+
+XE 1.01 and both community packages enabled together reached the ordinary
+Autoshow and displayed the RSX Type-S. The private fixture was copied from
+the pinned `xe-2026-10-09` seed and retained XE's separate `user-xe` profile.
+This is a startup/Autoshow coexistence check, not qualification of every
+XE/UDLC car or event. There is no evidence requiring a mutual exclusion.
+
+Android delivery review: `launcher/Shared/AndroidShareContent.cs:42` copies
+the complete imported content tree and its top-level JSON records, with no
+official/community filter. `tools/pinyon_android.py:499` packages code and
+driver assets, not DLC; `push_data` at line 534 copies only the disc. Use the
+launcher's DLC share or the manual state transfer documented in ANDROID.md.
+No APK build or phone deployment was needed for this static path check.
+
 ## Local inventory
 
 The local `Forza Horizon.zip` contains 21 distinct package filenames under
@@ -112,6 +185,23 @@ differs from the aggregate variant in 48,980 bytes, and three changed terrain
 members fail XMem decompression. The same members in the aggregate variant
 decompress successfully and match their archived CRCs. Use the Rally package
 inside `Forza Horizon.zip`; its accepted hash is pinned in the catalog.
+
+Investigated 2026-10-27 (bug bash, issue #610 and later reports): it is
+genuinely damaged, not a different valid build. The two STFS packages have the
+same size and differ in the header (licence mask `FFFFFFFF` against
+`00000001`, signature area) and in exactly one place in the data: 12
+consecutive 4 KiB blocks at package offset `0x102DC000` (48 KiB, inside
+`ColoradoDirt_pri_65.zip` at ZIP offset `0x5743000`, covering the compressed
+data of `coloradodirtout.00456`, `.06367` and `.00757.rmb.bin`). Those 12
+blocks are byte-identical to the 12 blocks that follow them, i.e. a
+duplicated run from a bad copy or read. Every other byte of the 1,083,125,760
+matches. ZIP central and local headers, sizes, CRCs and compression flags
+are the same in both, so no alternative LZX window, partition size or
+reset setting can apply; only the compressed bytes differ. The package's
+own STFS level-0 hash table is identical in both files and holds the
+aggregate copy's SHA-1 for those 12 blocks, so the standalone data fails its
+own block hashes too. The importer keeps rejecting it by whole-package
+hash; the catalog reason now says what is wrong and which package works.
 
 ## Implementation checklist
 
@@ -199,6 +289,13 @@ losing profile data. Package mounting alone does not count as DLC support.
 ### DLC-2: Horizon Rally — P1
 
 Depends on DLC-0 and DLC-1.
+
+Open-world Rally travel is tracked separately in #490. The owned database
+contains a route-zero `DirtFreeRoam` track, but there is no qualified
+destination/return or world-aware save/resume path. The private
+[initial-placement probe](RALLY_FREEROAM.md) verifies owned inputs and keeps
+its own test profile; it is not a released free-roam feature or a substitute
+for the 20-minute base/v4 acceptance gate.
 
 The base build has enumerated the verified Rally package and successfully
 opened `DLCRoot0`. This establishes mounting, not playable Rally.

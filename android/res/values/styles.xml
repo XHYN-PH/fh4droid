@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="FH4DroidTheme" parent="android:style/Theme.DeviceDefault.NoActionBar">
-        <item name="android:colorAccent">#FF2E7E</item>
-        <item name="android:windowBackground">#0A0A10</item>
+        <item name="android:colorAccent">#FF326E</item>
+        <item name="android:windowBackground">#0B1016</item>
         <item name="android:fontFamily">sans-serif</item>
+        <item name="android:alertDialogTheme">@style/FH4DroidDialog</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
+    </style>
+    <style name="FH4DroidDialog" parent="android:style/Theme.DeviceDefault.Dialog.Alert">
+        <item name="android:colorAccent">#FF326E</item>
+        <item name="android:windowBackground">@drawable/menu_dialog</item>
+        <item name="android:textColorPrimary">#F6F4F1</item>
+        <item name="android:textColorSecondary">#AEB8C5</item>
+        <item name="android:fontFamily">sans-serif</item>
     </style>
     <style name="FH4DroidGameTheme" parent="FH4DroidTheme">
         <item name="android:windowFullscreen">true</item>

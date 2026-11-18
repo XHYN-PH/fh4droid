@@ -11,6 +11,13 @@ Forza Horizon's content is mostly **rows in one SQLite database**, `media/db/gam
 
 Downloadable content extends the same database. Each package mounts as `DLCRoot<n>` and brings its own merge database, which the game merges into the base one shortly after Start, plus its archives; licence masks decide what the player may use. The Horizon Rally expansion is a package like the others, but its game code is only in title update 4.
 
+The community [UDLC pack](dlc.md#community-udlc) follows that content layout:
+a `.puboffer`, a merge database with 113 car rows, and localized car and make
+string tables. Its rows already mark the cars installed and purchased; the
+importer preserves the package's zero licence mask. This inspection describes
+how it registers content, with qualification recorded in the
+[DLC backlog](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/DLC_BACKLOG.md#community-udlc-595).
+
 The database is the fastest way to answer "where is X defined". Open it read-only with any SQLite tool; for example, each event's races and their track ids:
 
 ```sql
@@ -71,3 +78,10 @@ Which cars an event accepts comes from two places: its `EventRestrictions` row, 
 ## Title update content
 
 {{findings:content/Title update content}}
+
+## Achievements
+
+What the achievements screen and its progress bars rely on: see
+[the achievements UI backlog](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/ACHIEVEMENTS_UI_BACKLOG.md).
+
+{{findings:content/Achievements}}

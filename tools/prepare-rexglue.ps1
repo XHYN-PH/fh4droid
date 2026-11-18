@@ -10,6 +10,9 @@ if (Test-Path variable:PSNativeCommandUseErrorActionPreference) {
 . (Join-Path $PSScriptRoot 'release-common.ps1')
 $root = Get-PinyonRepoRoot
 $config = Get-PinyonReleaseToolchain
+# Setup skips Git when a prebuilt ShiftGlue kit is pinned; this is the
+# fallback when that kit could not be installed.
+Install-PinyonGit
 $git = Get-PinyonGit
 $sdkRoot = Resolve-PinyonRexGlueRoot
 $isRepositoryCheckout = Test-Path -LiteralPath (Join-Path $root '.git')
@@ -97,13 +100,26 @@ if ($isRepositoryCheckout) {
 }
 else {
     $replaceCheckout = $false
+    $head = @()
+    # Written once a managed checkout is complete. A folder without it may be
+    # an interrupted download: a --no-checkout clone whose fetch failed reads
+    # as "every file deleted", which is replaced rather than refused. A clean
+    # checkout from before the marker existed is kept.
+    $preparedMarker = "$sdkRoot.prepared"
     if (Test-Path -LiteralPath $sdkRoot) {
-        $head = @(& $git -C $sdkRoot rev-parse HEAD 2>$null | Select-Object -First 1)
+        if (Test-Path -LiteralPath (Join-Path $sdkRoot '.git')) {
+            $head = @(& $git -C $sdkRoot rev-parse HEAD 2>$null | Select-Object -First 1)
+        }
         $dirty = @(& $git -C $sdkRoot status --porcelain --ignore-submodules=dirty 2>$null).Count -ne 0
-        if ($dirty) {
+        if ($dirty -and -not (Test-Path -LiteralPath $preparedMarker)) {
+            $head = @()
+        }
+        elseif ($dirty) {
             throw "The managed ShiftGlue checkout has local changes: $sdkRoot"
         }
-        $replaceCheckout = $head.Count -ne 1 -or $head[0] -ne $config.rexglue.revision
+        # Keep a valid checkout's dependency sources and build trees across pin
+        # changes; Git and CMake invalidate only the inputs that changed.
+        $replaceCheckout = $head.Count -ne 1 -or $head[0] -notmatch '^[0-9a-fA-F]{40}$'
     }
     if ($replaceCheckout) {
         $resolved = [IO.Path]::GetFullPath($sdkRoot)
@@ -112,6 +128,7 @@ else {
                 [StringComparison]::OrdinalIgnoreCase)) {
             throw "Refusing to replace ShiftGlue outside $allowed"
         }
+        Remove-Item -LiteralPath $preparedMarker -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }
     if (-not (Test-Path -LiteralPath $sdkRoot)) {
@@ -125,6 +142,8 @@ else {
                 Remove-Item -LiteralPath $sdkRoot -Recurse -Force
             }
         }
+    }
+    if ($head.Count -ne 1 -or $head[0] -ne $config.rexglue.revision) {
         Invoke-PinyonGitWithRetry -Activity 'Fetching the pinned ShiftGlue revision' -Arguments @(
             '-c', 'http.version=HTTP/1.1', '-C', $sdkRoot, 'fetch', '--depth', '1',
             'origin', $config.rexglue.revision
@@ -152,4 +171,7 @@ if ($head[0] -ne $config.rexglue.revision) {
     Write-PinyonEvent tools 38 "Using developer ShiftGlue revision $($head[0])." -JsonEvents:$JsonEvents
 }
 Repair-MaterializedLinks -RepositoryRoot $sdkRoot
+if (-not $isRepositoryCheckout) {
+    [IO.File]::WriteAllText("$sdkRoot.prepared", $head[0] + [Environment]::NewLine)
+}
 Write-PinyonEvent tools 39 'ShiftGlue source is ready.' -JsonEvents:$JsonEvents

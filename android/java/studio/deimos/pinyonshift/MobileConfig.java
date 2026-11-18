@@ -3,6 +3,7 @@ package studio.deimos.pinyonshift;
 import android.content.Context;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.nio.channels.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.regex.*;
@@ -14,6 +15,7 @@ final class MobileConfig {
     static synchronized Map<String,String> read(Context c){return readFile(file(c));}
     static Map<String,String> readFile(File file){
         Map<String,String> values=new LinkedHashMap<>();
+        if(file.length()>2*1024*1024)return values;
         Pattern row=Pattern.compile("^\\s*([a-zA-Z0-9_]+)\\s*=\\s*(.*)$");
         try(BufferedReader r=new BufferedReader(new InputStreamReader(new FileInputStream(file),StandardCharsets.UTF_8))){
             for(String line;(line=r.readLine())!=null;){if(line.startsWith("\ufeff"))line=line.substring(1);Matcher m=row.matcher(line);
@@ -61,7 +63,15 @@ final class MobileConfig {
             try(FileOutputStream out=new FileOutputStream(log,true)){out.write((event.toString()+"\n").getBytes(StandardCharsets.UTF_8));}
         }catch(Exception error){android.util.Log.w("FH4Droid","Could not record settings change",error);}
     }
-    static void putFile(File f,Map<String,String> updates)throws IOException{
+    static synchronized void putFile(File f,Map<String,String> updates)throws IOException{
+        Files.createDirectories(f.getParentFile().toPath());
+        try(RandomAccessFile lockFile=new RandomAccessFile(new File(f.getPath()+".lock"),"rw");
+            FileChannel channel=lockFile.getChannel();FileLock lock=channel.lock()){
+            putFileLocked(f,updates);
+        }
+    }
+    private static void putFileLocked(File f,Map<String,String> updates)throws IOException{
+        if(f.length()>2*1024*1024)throw new IOException("Settings file is too large.");
         for(Map.Entry<String,String> e:updates.entrySet())if(!e.getKey().matches("[a-zA-Z0-9_]+")||e.getValue()==null||e.getValue().indexOf('\n')>=0||e.getValue().indexOf('\r')>=0)throw new IOException("Invalid setting");
         Files.createDirectories(f.getParentFile().toPath());
         String text=f.isFile()?new String(Files.readAllBytes(f.toPath()),StandardCharsets.UTF_8):defaults();
@@ -70,11 +80,24 @@ final class MobileConfig {
             String key=e.getKey(),literal=e.getValue();Pattern row=Pattern.compile("(?m)^[\\t ]*"+Pattern.quote(key)+"[\\t ]*=.*$");Matcher m=row.matcher(text);
             text=m.find()?m.replaceAll(Matcher.quoteReplacement(key+" = "+literal)):text+"\n"+key+" = "+literal+"\n";
         }
+        writeText(f,text);
+    }
+    private static void writeText(File f,String text)throws IOException{
         Path temp=Files.createTempFile(f.getParentFile().toPath(),"settings-",".android-part");
         try{
             try(FileOutputStream out=new FileOutputStream(temp.toFile())){out.write(text.getBytes(StandardCharsets.UTF_8));out.getFD().sync();}
             Files.move(temp,f.toPath(),StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING);
         }finally{Files.deleteIfExists(temp);}
+    }
+    static synchronized void restoreSetting(File f,String key,File previous)throws IOException{
+        if(!key.matches("[a-zA-Z0-9_]+"))throw new IOException("Invalid recovery setting.");
+        Files.createDirectories(f.getParentFile().toPath());
+        try(RandomAccessFile lockFile=new RandomAccessFile(new File(f.getPath()+".lock"),"rw");FileChannel channel=lockFile.getChannel();FileLock lock=channel.lock()){
+            Pattern row=Pattern.compile("(?m)^[\\t ]*"+Pattern.quote(key)+"[\\t ]*=([^\\r\\n]*)");
+            String before=previous==null?"":ContentFiles.text(previous,2*1024*1024);if(before.startsWith("\ufeff"))before=before.substring(1);Matcher match=row.matcher(before);
+            if(match.find())putFileLocked(f,Collections.singletonMap(key,match.group(1).trim()));
+            else if(f.isFile())writeText(f,row.matcher(ContentFiles.text(f,2*1024*1024)).replaceAll(""));
+        }
     }
     static String quote(String s){StringBuilder out=new StringBuilder("\"");for(int i=0;i<s.length();i++){
         char c=s.charAt(i);switch(c){case '\\':out.append("\\\\");break;case '\"':out.append("\\\"");break;
@@ -82,7 +105,7 @@ final class MobileConfig {
             case '\f':out.append("\\f");break;case '\r':out.append("\\r");break;
             default:if(c<32||c==127)out.append(String.format(Locale.ROOT,"\\u%04x",(int)c));else out.append(c);
         }}return out.append('\"').toString();}
-    static String defaults(){return "pinyon_shift_config_schema = 29\ninput_backend = \"sdl\"\nmnk_mode = true\ngpu_backend = \"vulkan\"\ngpu_record_thread = true\nvsync = true\n"
+    static String defaults(){return "fh4droid_fresh_hardware_defaults = true\npinyon_shift_config_schema = 29\ninput_backend = \"sdl\"\nmnk_mode = true\ngpu_backend = \"vulkan\"\ngpu_record_thread = true\nvsync = true\n"
         +"pinyon_shift_fh1_render_fps_limit = 30\npinyon_shift_fh1_source_presentation = true\npinyon_shift_capture_performance = false\n"
         +"present_effect = \"bilinear\"\nswap_post_effect = \"none\"\nfh1_msaa_single_sample = true\nclear_memory_page_state = false\n"
         +"draw_resolution_scale_x = 1\ndraw_resolution_scale_y = 1\ndisable_bloom = true\ndisable_motion_blur = true\ndisable_depth_of_field = true\n"

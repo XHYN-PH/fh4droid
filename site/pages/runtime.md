@@ -33,9 +33,41 @@ The runtime implements the exports the game uses and stubs the rest:
 
 Implementations include threads, events, semaphores, timers, the file system, content and profiles, and the XAudio render client.
 
+NT timestamps use 100 ns ticks from 1601. Calendar conversion keeps that precision when changing to the Unix epoch: Linux's native nanosecond `system_clock` cannot represent 1601. Both calendar directions retain a 100 ns time point; file metadata and kernel time queries already use integer NT ticks. The [clock conversion audit](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/CLOCK_CONVERSIONS.md) describes the callers and regression coverage.
+
 ## Threads
 
 Each guest thread is one host thread, named `Guest <start address>`. About 42 are alive in a race; the busy ones are the simulation and render threads, FMOD's mixer thread and 11 job workers. Guest CPU numbers rotate over six virtual hardware threads, and guest affinities are ignored by default: honouring them, with one host core per Xenon hardware thread, gave no consistent gain.
+
+A session probe (`cs_session_mode`, `cs_session_path`) in experimental builds
+(`REXGLUE_ENABLE_CS_PROBES=ON`, default OFF) records
+clock, input, wait, file and callback results in separate streams keyed by
+guest thread and sequence number. Round 2 fixed the original global-order
+capture failure. The desktop still diverges at a shared job-state poll:
+the worker's transition to completed state falls on a different side of
+the render thread's read, despite replayed per-object lock grants. The
+final repeat removes all memory observers and still expects a job lock
+where replay makes another timebase read from the poll/work-selection path.
+It verifies zero PM4 frames; an earlier iteration verified one. A useful session oracle must control execution between kernel calls,
+including these ordinary shared-memory polls. It cannot rely on external
+event playback alone. The probe changes critical-section bookkeeping and
+object allocation only while enabled; it is not a performance build.
+[The Round 2 evidence](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/CLEAN_SLATE_STAGE0.md#cs-01-per-thread-replay-and-shared-memory-order)
+records the capture gaps fixed, writer evidence and remaining limits.
+
+A Windows-only scheduling experiment in probe builds admits guest threads
+and service actors one at a time, with call budgets, explicit waits and
+logical clocks. It still fails before racing: a native shader-prewarm
+completion can deadlock schedule replay, and an unobserved repeat reaches
+a different guest boot helper. No 60-second oracle is accepted. Its
+trace-free desktop race costs 144.567 ms mean frame time versus 16.666 ms
+normally (8.67x), with 157.381 versus 22.007 CPU ms per output frame.
+Different cadence and draws/frame prevent treating the CPU ratio as pure
+scheduler overhead. Default Release compiles these hooks out: 785 active
+objects have zero probe symbols.
+[The scheduling gate and cost controls](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/CLEAN_SLATE_STAGE0.md#cs-1-deterministic-scheduling-probe)
+record the prototype's native-completion gap, unresolved guest-path split,
+CPU rate, route qualification and measurement limits.
 
 The job workers run the game's jobs on XAPI fibers. The game's five fiber functions (`ConvertThreadToFiber`, `ConvertFiberToThread`, `CreateFiber`, `DeleteFiber`, `SwitchToFiber`) are served by the runtime's host fibers (Windows fibers; a stack switch of the runtime's own on Linux and Android; `ucontext` on macOS), so a guest fiber switch never leaves the host call chain. Before that mapping the switch went through the kernel's stack-switch call, and every generated function needed an entry for each return address ([why that mattered](recompiler.md#what-the-generator-emits)).
 
@@ -64,17 +96,18 @@ Small changes in how the host waits paid off more than most code generation work
 | The XHV2 voice-chat thread's tick is skipped while no voice session exists, and the thread waits 50 ms instead | Odin race, in-run: that thread 0.121 to 0.013 ms of CPU a frame, instructions −92 % |
 | POSIX multi-object and alertable waits wake on signal instead of polling every 1 ms | Odin process CPU −6 to −9 %, audio thread −9 to −12 % |
 | Vblank timing with high-resolution waitable timers and a spin tail | vblank lateness 43 µs mean |
+| The tip loading screen's minimum time on screen (1 s from the title, 3 s into and out of events), which the main thread waited out however early loading finished, is cleared as soon as the screen is shown ([finding](game-threads.md)) | multivac: title to free roam 1.56 to 0.55 s, car select to race 4.62 to 1.66 s, retire to free roam 4.22 to 1.32 s |
 
 Two host behaviours to watch for: Windows rounds a sub-millisecond `Sleep` to a yield, and a yield that returns at once can expose races the console's scheduler hid. The game's job producer gave up after 1,000 `NtYieldExecution` calls on Android; a hook now waits in host time there.
 
 ## Files, content and audio
 
 - **File system.** Host path devices mount the extracted disc as `game:` and `d:`, the title update as `update:`, and a writable `cache:`. Lookups are case-insensitive. The tree has its own lock (the #416 fix).
-- **DLC.** STFS packages mount through a container device, with the license mask read from the package header. The game's marketplace mount appears as `DLCRoot<n>`.
+- **DLC.** Installing a package reads it through an STFS container device and extracts it to a folder; at run time each installed package mounts as a read-only host folder, with the license mask read from the header saved beside it. The game's marketplace mount appears as `DLCRoot<n>`.
 - **Mods.** An overlay device layers mod files over the disc's, so a mod never edits game files.
 - **Audio.** XMA is decoded with FFmpeg's `xmaframes` decoder. ShiftGlue added packet handles across buffers and assembly of frames split over up to four packets, ported from Xenia Canary. A context allocates its decoder state when it is first used, and decodes straight into its output instead of through a staging copy: on the Odin race the first saved 112 MB of native heap, the second 0.17 ms of the XMA thread's CPU a frame (instructions −21 to −41 %). Output goes through SDL3, or AAudio on Android. FMOD mixes in 5.1 by default and the runtime folds that to stereo; on Android the game sets FMOD's speaker mode to stereo before it starts (`pinyon_shift_fmod_stereo`), so its effects run on two channels instead of six: on the Odin the FMOD mixer thread ran 45 % fewer instructions and about 1 ms less CPU a frame. Desktop keeps 5.1 for surround setups. While FMOD's output voice is the only XAudio2 voice playing, the runtime plays FMOD's mix ring itself (`pinyon_shift_native_audio_output`, on by default): it answers FMOD's voice-state polls with its own sample count and copies each 256-frame block straight from the ring, so the guest XAudio2 pass does not run. Any other voice starting, such as a movie's, hands the voice back to the guest at a ring boundary. A shadow mode that ran both paths matched the guest's output sample for sample. On the Odin race it removed the 0.49 ms XAudio2 pass and cut the audio worker from 0.35 to 0.12 ms a frame.
 - **Input.** SDL3 gamepads, XInput, and mouse and keyboard.
-- **Saves.** Raw files under a fixed profile, written atomically and backed up after each write.
+- **Saves.** Raw files under a fixed profile, written atomically and backed up at most every 10 minutes and at exit.
 - **Game database.** The title links SQLite 3.6.19 and creates its views at every start. After each race v4 reads every restricted car through `Restrictions_Data_Car`, which that SQLite answered by rescanning three subqueries per car: 158-186 ms of one frame on multivac. When the database is opened, the runtime indexes the four columns the view joins on and recreates the view with plain joins that return the same rows (`pinyon_shift_game_db_indexes`); the frame took 49-55 ms after that ([Game content](game-content.md)).
 
 ## Hooks
@@ -90,7 +123,9 @@ Host code reaches into the game in three ways, all declared in configuration or 
 - The fence poll loop blocks on the GPU instead of spinning.
 - Xenia Canary's patch file for this game is reproduced as setting-gated hooks that skip or replace instructions, such as the motion blur and depth of field switches.
 
-**Whole-function replacement.** Defining the same `sub_` symbol in `src/guest_native/` replaces a generated function. Each replacement hashes the guest code it replaces before first use, has its own setting, and can check every Nth call against the original. The CRT's `memcpy`, `memmove` and `memset` run as host code this way; with atomic `stwcx.`, that cut 11–14 % of the simulation thread's cycles. Native `pow` and the LZX decoder are bit-identical over 10.9 million and 17,535 calls and about twice as fast. FMOD's ParamEQ effect runs as a native peaking-EQ biquad designed from the unit's parameters; it matches the translated filter within 60 dB on every call checked and takes 0.14 ± 0.05 ms a frame (5.7 %) off the Odin's FMOD mixer thread.
+**Whole-function replacement.** Defining the same `sub_` symbol in `src/guest_native/` replaces a generated function. Each replacement hashes the guest code it replaces before first use, has its own setting, and can check every Nth call against the original. The CRT's `memcpy`, `memmove` and `memset` run as host code this way; with atomic `stwcx.`, that cut 11–14 % of the simulation thread's cycles. Native `pow` and the LZX decoder are bit-identical over 10.9 million and 17,535 calls and about twice as fast. FMOD's ParamEQ effect runs as a native peaking-EQ biquad designed from the unit's parameters; it matches the translated filter within 60 dB on every call checked and takes 0.14 ± 0.05 ms a frame (5.7 %) off the Odin's FMOD mixer thread. The render thread's per-draw pass culling and the procedural models' instance culling (`pinyon_shift_native_scene_cull`, on by default on desktop Linux) are rewritten in host floats: they plan each draw's bucket pushes and depth ranges without side effects, then write them, and hand the call back to the game when a bucket would have to grow. A per-call check against the game's own code over a desktop race matched 15.7 million model calls and all but one of 10.6 million pass calls (a push decided differently on a float boundary), at 3.6 and 2.1 times the translated code's speed; on the v4 build it matched all 11.5 million calls. On the Deck LCD the render thread used 0.64 ± 0.37 and 0.35 ± 0.31 ms less a frame in two long in-run A/B races, against an A/A run of +0.18 ± 0.34 ms ([the records](game-rendering.md)).
+
+**Audio logic at the console's rate.** At 60 fps the audio thread runs the game's per-frame audio updates (the car audio models, the audio engine update and two others) twice as often as the console did. A gate at their four call thunks (`pinyon_shift_audio_update_interval`, 2 by default) runs each update on one frame in two for each object, adds the skipped frame's time to the next call, and lets one-off calls through the same thunks run. It only skips while the updates stay at 30 Hz or more, so at 30 fps nothing changes. In a race it took 0.67 ± 0.09 ms a frame off the Steam Deck LCD's audio thread and 0.44-0.63 ms off the Odin 2's (in-run A/B, seven cycles a run), with route audio captures matching in loudness and in their 30 Hz envelope component.
 
 **Symbols.** Addresses and structure offsets that host code and mods use have names in `config/mod/fh1-symbols.toml`. A generator merges them with every hook site into a header, and a test fails when the two disagree. Native mods look up symbols by name and never use literal addresses.
 

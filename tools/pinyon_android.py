@@ -36,6 +36,9 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import android_module_check
+import apk_sign
+
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS = os.name == "nt"
 CONFIG = json.loads((ROOT / "config" / "android-toolchain.json").read_text(encoding="utf-8"))
@@ -47,6 +50,7 @@ WORK = ROOT / ".local" / "android"
 LOCAL_SDK = ROOT / CONFIG["bootstrap"]["android_sdk_path"]
 LOCAL_JDK = ROOT / CONFIG["bootstrap"]["jdk"]["install_path"]
 DEVICE_FILES = f"/sdcard/Android/data/{PACKAGE}/files"
+AOT_PIPELINES = "4D5309C9.fbo.aot.xpso"
 # The libraries the package carries besides the C++ runtime, in load order.
 NATIVE_LIBRARIES = (
     "libfh4droid_android.so",
@@ -67,6 +71,18 @@ ADRENOTOOLS_HOOKS = (
 # AMD's FidelityFX library for FSR 2 and 3, built from source by ShiftGlue's
 # thirdparty/fidelityfx-vk (UP-2.1); the game loads it by name when present.
 FIDELITYFX_LIBRARY = "libamd_fidelityfx_vk.so"
+# TP-5 (docs/TIME_TO_PLAY_BACKLOG.md): the release's prebuilt APK shell, a
+# ShiftGlue kit for Android plus the app's Java code and resources. With it
+# the PC compiles only libmain.so and the facades, and needs neither the JDK
+# nor the SDK's build tools and platform.
+SHELL = WORK / "shell"
+# As the SDK compiles inside the game's Android build (android-base preset,
+# cmake/PinyonShiftRexGlue.cmake).
+SHELL_FLAGS = "-march=armv8.2-a -DREXGLUE_ENABLE_PERF_COUNTERS -DREX_PHYSICAL_HEAP_4K_PAGES=1"
+SHELL_LDFLAGS = "-Wl,-z,max-page-size=16384 -Wl,-Bsymbolic-functions"
+# The runtime libraries the shell carries; libmain.so and the facades are
+# built on the PC.
+SHELL_LIBRARIES = ("librexruntime.so", "librexgpu-fh1.so")
 
 
 class AndroidError(RuntimeError):
@@ -96,15 +112,38 @@ def sdk_root() -> Path:
     for candidate in candidates:
         if candidate and (Path(candidate) / "cmdline-tools" / "latest" / "bin").is_dir():
             return Path(candidate)
-    raise AndroidError("the Android SDK was not found; set ANDROID_HOME "
-                       "(Android Studio's SDK Manager or the command-line tools install it)")
+    # None yet: doctor --install puts the NDK and platform-tools here (TP-5),
+    # or build-android.ps1 the command-line tools.
+    return LOCAL_SDK
+
+
+def jdk_major(javac: Path | str) -> int | None:
+    """The major version a javac reports ("javac 17.0.2", or "javac 1.8.0_411"
+    for Java 8), or None when it cannot be run."""
+    try:
+        completed = subprocess.run([str(javac), "-version"], capture_output=True, text=True,
+                                   timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match = re.search(r"javac\s+(?:1\.)?(\d+)", completed.stdout + completed.stderr)
+    return int(match.group(1)) if match else None
+
+
+def _usable_jdk(home: Path) -> bool:
+    """A JDK folder with javac and keytool of at least the pinned major
+    version. sdkmanager refuses Java older than 17 (#811), and the Oracle
+    "javapath" shim on PATH has javac but no keytool (#868)."""
+    return ((home / "bin" / _exe("javac")).is_file() and (home / "bin" / _exe("keytool")).is_file()
+            and (jdk_major(home / "bin" / _exe("javac")) or 0) >= CONFIG["jdk_major"])
 
 
 def java_home() -> Path | None:
-    """JAVA_HOME, or the JDK tools/build-android.ps1 unpacked."""
-    if os.environ.get("JAVA_HOME"):
+    """JAVA_HOME when it is a usable JDK, else the JDK tools/build-android.ps1
+    unpacked. A JAVA_HOME that points at an old or partial JDK is skipped
+    rather than used to fail later."""
+    if os.environ.get("JAVA_HOME") and _usable_jdk(Path(os.environ["JAVA_HOME"])):
         return Path(os.environ["JAVA_HOME"])
-    if (LOCAL_JDK / "bin" / _exe("javac")).is_file():
+    if _usable_jdk(LOCAL_JDK):
         return LOCAL_JDK
     return None
 
@@ -130,7 +169,9 @@ def _pinned_tool(name: str) -> Path | None:
         if WINDOWS:
             entry = config[name]
         else:
-            host = "macos-arm64" if platform.system() == "Darwin" else "linux-x86_64"
+            host = "linux-x86_64"
+            if platform.system() == "Darwin":
+                host = "macos-x86_64" if platform.machine().lower() in ("x86_64", "amd64") else "macos-arm64"
             entry = config["posix"][host][name]
     except (OSError, KeyError, json.JSONDecodeError):
         return None
@@ -148,6 +189,8 @@ class Tools:
         self.adb = self.sdk / "platform-tools" / _exe("adb")
         self.aapt2 = self.build_tools / _exe("aapt2")
         self.d8 = self.build_tools / _script("d8")
+        # Explicit release keys use the Android signing tools; ordinary local
+        # builds retain upstream's pure-Python signing path.
         self.zipalign = self.build_tools / _exe("zipalign")
         self.apksigner = self.build_tools / _script("apksigner")
         # The pinned command-line tools when build-android.ps1 unpacked them:
@@ -160,6 +203,9 @@ class Tools:
         java_bin = self.java_home / "bin" if self.java_home else None
         self.javac = self._find(java_bin, "javac")
         self.keytool = self._find(java_bin, "keytool")
+        if not java_bin and self.javac and (jdk_major(self.javac) or 0) < CONFIG["jdk_major"]:
+            # Only an old JDK on PATH (Java 8 from the Oracle installer, say).
+            self.javac = self.keytool = None
         host = "windows-x86_64" if WINDOWS else f"{platform.system().lower()}-x86_64"
         self.llvm_bin = self.ndk / "toolchains" / "llvm" / "prebuilt" / host / "bin"
         self.strip = self.llvm_bin / _exe("llvm-strip")
@@ -193,18 +239,22 @@ class Tools:
                     return ninja
         return None
 
-    def missing(self) -> list[str]:
+    def missing(self, shell: bool = False) -> list[str]:
+        """What a build still needs; with the prebuilt shell only the NDK,
+        CMake and Ninja (TP-5)."""
         required = {
             "NDK " + CONFIG["android_sdk"]["ndk"]: self.ndk / "build" / "cmake"
             / "android.toolchain.cmake",
-            "build-tools " + CONFIG["android_sdk"]["build_tools"]: self.aapt2,
-            CONFIG["android_sdk"]["platform"]: self.android_jar,
-            "platform-tools (adb)": self.adb,
-            "JDK " + str(CONFIG["jdk_major"]) + " (javac)": self.javac,
-            "JDK keytool": self.keytool,
             "CMake": self.cmake,
             "Ninja": self.ninja,
         }
+        if not shell:
+            required.update({
+                "build-tools " + CONFIG["android_sdk"]["build_tools"]: self.aapt2,
+                CONFIG["android_sdk"]["platform"]: self.android_jar,
+                "platform-tools (adb)": self.adb,
+                "JDK " + str(CONFIG["jdk_major"]) + " or newer (javac)": self.javac,
+            })
         return [name for name, path in required.items() if not path or not Path(path).exists()]
 
 
@@ -213,6 +263,81 @@ def run(command: list, **kwargs) -> subprocess.CompletedProcess:
     if completed.returncode:
         raise AndroidError(f"{Path(str(command[0])).name} failed ({completed.returncode})")
     return completed
+
+
+def pinned_git() -> Path | None:
+    """The MinGit the PC build provisions (config/release-toolchain.json)."""
+    try:
+        entry = json.loads((ROOT / "config" / "release-toolchain.json").read_text(
+            encoding="utf-8"))["git"]
+    except (OSError, KeyError, json.JSONDecodeError):
+        return None
+    path = ROOT / entry["install_path"] / entry["executable"]
+    return path if path.is_file() else None
+
+
+def with_git(environment: dict) -> dict:
+    """The environment with a Git on PATH. CMake's FetchContent clones the
+    FidelityFX SDK with git and stops with "could not find git" on a player's
+    PC that has none (#810); the launcher's pinned MinGit serves."""
+    if shutil.which("git", path=environment.get("PATH")):
+        return environment
+    git = pinned_git()
+    if not git:
+        return environment
+    return dict(environment, PATH=str(git.parent) + os.pathsep + environment.get("PATH", ""))
+
+
+TRANSIENT_ATTEMPTS = 3
+
+
+def sdkmanager_install(tools: Tools, args: argparse.Namespace, environment: dict,
+                       sleep=time.sleep) -> None:
+    """Install the pinned SDK packages. The packages come from dl.google.com,
+    and players on some networks lose the connection part way (changing
+    network or using a VPN fixed it, #811 #868), so a failed attempt is
+    retried after a pause; the packages already installed are kept. A failure
+    that waiting cannot fix (Java too old, a license not accepted) stops at
+    once."""
+    packages = CONFIG["android_sdk"]["packages"]
+    command = [str(tools.sdkmanager), f"--sdk_root={tools.sdk}", "--install", *packages]
+    # The player accepted the Android SDK license (the launcher shows it
+    # before the build); otherwise sdkmanager asks here.
+    answers = "y\n" * 16 if args.accept_licenses else None
+    for attempt in range(1, TRANSIENT_ATTEMPTS + 1):
+        process = subprocess.Popen(command, stdin=subprocess.PIPE if answers else None,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   text=True, errors="replace", env=environment)
+        if answers:
+            try:
+                process.stdin.write(answers)
+                process.stdin.close()
+            except OSError:
+                pass
+        output = []
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            output.append(line)
+        code = process.wait()
+        if code == 0:
+            return
+        text = "".join(output)
+        if "Java version" in text and "required" in text:
+            raise AndroidError("sdkmanager needs Java 17 or newer, and found an older one on PATH "
+                               "(JAVA_HOME is " + str(environment.get("JAVA_HOME", "not set")) + ")")
+        if "licenses have not been accepted" in text.lower() or "accept the license" in text.lower():
+            raise AndroidError("the Android SDK license was not accepted: run "
+                               "pinyon.py android doctor --install --accept-licenses")
+        if attempt == TRANSIENT_ATTEMPTS:
+            raise AndroidError(
+                f"sdkmanager failed ({code}) installing {', '.join(packages)} after "
+                f"{attempt} attempts. It downloads from dl.google.com; if the lines above show a "
+                "connection, timeout, certificate or host error, try another network or a VPN, "
+                "and check that an antivirus, proxy or firewall is not blocking Java")
+        delay = 10 * attempt
+        print(f"sdkmanager failed ({code}); retrying in {delay} seconds "
+              f"(attempt {attempt + 1} of {TRANSIENT_ATTEMPTS}).", flush=True)
+        sleep(delay)
 
 
 def adb(tools: Tools, args: argparse.Namespace, *command: str, **kwargs):
@@ -245,29 +370,71 @@ def release_version() -> tuple[str, int]:
     release = json.loads((ROOT / "config" / "release.json").read_text(encoding="utf-8"))
     name = str(release["version"])
     major, minor, patch = (int(part) for part in name.split("-")[0].split(".")[:3])
-    return name, major * 10000 + minor * 100 + patch
+    code=release.get("android_version_code",major * 10000 + minor * 100 + patch)
+    if type(code) is not int or code<=0 or code>2100000000:
+        raise AndroidError("android_version_code must be a positive Android version code")
+    return name, code
+
+
+# doctor's exit status when the missing packages can be installed without
+# Java (the shell is ready and this host has direct downloads): the JDK and
+# the command-line tools are then skipped (build-android.ps1).
+NO_JAVA_NEEDED = 3
+
+
+def direct_downloads() -> dict | None:
+    """The pinned NDK and platform-tools archives for this host (TP-5), which
+    sdkmanager would fetch from the same place."""
+    host = "windows" if WINDOWS else ("linux" if platform.system() == "Linux" else None)
+    direct = CONFIG.get("direct", {})
+    if host and all(host in direct.get(name, {}) for name in ("ndk", "platform_tools")):
+        return {name: direct[name][host] for name in ("ndk", "platform_tools")}
+    return None
+
+
+def install_direct(tools: Tools, args: argparse.Namespace) -> None:
+    if not args.accept_licenses:
+        raise AndroidError("the Android SDK license was not accepted: run "
+                           "pinyon.py android doctor --install --accept-licenses")
+    import pinyon_setup
+    progress = pinyon_setup.Progress(False)
+    downloads = direct_downloads()
+    targets = {"ndk": tools.sdk / "ndk" / CONFIG["android_sdk"]["ndk"],
+               "platform_tools": tools.sdk / "platform-tools"}
+    for name, entry in downloads.items():
+        have = (tools.ndk / "build" / "cmake" / "android.toolchain.cmake") if name == "ndk" \
+            else tools.adb
+        if have.is_file():
+            continue
+        print(f"Downloading {entry['url']} ({entry['bytes'] // 1_000_000} MB)", flush=True)
+        archive = pinyon_setup.download(entry, progress, name)
+        pinyon_setup.unpack(archive, targets[name])
+        archive.unlink()
 
 
 def doctor(args: argparse.Namespace) -> int:
     tools = Tools()
-    missing = tools.missing()
+    # The shell holds no Android SDK files (the C++ runtime comes from the
+    # NDK), so it is fetched before any license is accepted.
+    shell = install_shell()
+    missing = tools.missing(shell=shell is not None)
+    if shell and direct_downloads() and missing and not args.install:
+        print("missing: " + ", ".join(missing) + " (no Java needed)", file=sys.stderr)
+        return NO_JAVA_NEEDED
     if missing and args.install:
-        if not tools.sdkmanager.is_file():
-            raise AndroidError("the SDK's command-line tools are needed to install packages")
-        packages = CONFIG["android_sdk"]["packages"]
-        environment = dict(os.environ)
-        if tools.java_home:
-            environment["JAVA_HOME"] = str(tools.java_home)
-        command = [tools.sdkmanager, f"--sdk_root={tools.sdk}", "--install", *packages]
-        if args.accept_licenses:
-            # The player accepted the Android SDK license (the launcher
-            # shows it before the build); otherwise sdkmanager asks here.
-            run(command, input="y\n" * 16, text=True, env=environment)
+        if shell and direct_downloads():
+            install_direct(tools, args)
         else:
-            run(command, env=environment)
-        missing = Tools().missing()
-    for line in (f"sdk: {tools.sdk}", f"ndk: {tools.ndk}", f"build-tools: {tools.build_tools}",
-                 f"javac: {tools.javac}", f"cmake: {tools.cmake}", f"ninja: {tools.ninja}"):
+            if not tools.sdkmanager.is_file():
+                raise AndroidError("the SDK's command-line tools are needed to install packages")
+            environment = dict(os.environ)
+            if tools.java_home:
+                environment["JAVA_HOME"] = str(tools.java_home)
+            sdkmanager_install(tools, args, environment)
+        missing = Tools().missing(shell=shell is not None)
+    for line in (f"sdk: {tools.sdk}", f"ndk: {tools.ndk}", f"shell: {shell}",
+                 f"build-tools: {tools.build_tools}", f"javac: {tools.javac}",
+                 f"cmake: {tools.cmake}", f"ninja: {tools.ninja}"):
         print(line)
     if missing:
         print("missing: " + ", ".join(missing), file=sys.stderr)
@@ -276,10 +443,76 @@ def doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def shell_ready() -> Path | None:
+    """The unpacked shell when it matches the current app and runtime."""
+    if PACKAGE == "ph.xhyn.fh4droid":
+        return None
+    if os.environ.get("PINYON_SHIFT_SOURCE_SDK") == "1":
+        return None
+    try:
+        kit = json.loads((SHELL / "kit.json").read_text(encoding="utf-8"))
+        pinned = json.loads((ROOT / "config" / "release-toolchain.json").read_text(
+            encoding="utf-8"))["rexglue"]["revision"]
+    except (OSError, ValueError, KeyError):
+        return None
+    if kit.get("platform") != "android-arm64" or kit.get("shiftglue_revision") != pinned \
+            or kit.get("ndk") != CONFIG["android_sdk"]["ndk"] \
+            or kit.get("version") != list(release_version()):
+        return None
+    return SHELL
+
+
+def install_shell() -> Path | None:
+    """The release's shell (tools/apply-prebuilt-pins.py pins it), unpacked
+    into .local/android/shell; None builds everything from source."""
+    if PACKAGE == "ph.xhyn.fh4droid":
+        return None
+    if shell_ready():
+        return SHELL
+    try:
+        config = json.loads((ROOT / "config" / "release-toolchain.json").read_text(
+            encoding="utf-8"))
+        entry = config.get("android_shell", {}).get("android-arm64")
+        if not entry or entry.get("revision") != config["rexglue"]["revision"]:
+            return None
+        import pinyon_setup
+        archive = pinyon_setup.download(entry, pinyon_setup.Progress(False), "the Android shell")
+        pinyon_setup.unpack(archive, SHELL)
+        archive.unlink()
+    except Exception as error:  # noqa: BLE001 - any failure falls back to source
+        print(f"warning: the prebuilt Android shell could not be installed ({error}); "
+              "building everything from source")
+        return None
+    return shell_ready()
+
+
+def host_generator() -> Path | None:
+    """The generator the PC build uses: the host kit's or the source tree's."""
+    suffix = ".exe" if WINDOWS else ""
+    kit = ROOT / ".local" / "shiftglue-kit" / "bin" / f"rexglue{suffix}"
+    if kit.is_file():
+        return kit
+    host = "win" if WINDOWS else ("mac" if platform.system() == "Darwin" else "linux")
+    arch = "amd64" if platform.machine().lower() in ("amd64", "x86_64") else "arm64"
+    source = rexsdk_dir() / "out" / f"{host}-{arch}" / "Release" / f"rexglue{suffix}"
+    return source if source.is_file() else None
+
+
+def _cached(directory: Path, name: str) -> str | None:
+    try:
+        for line in (directory / "CMakeCache.txt").read_text(encoding="utf-8").splitlines():
+            if line.startswith(name + ":"):
+                return line.split("=", 1)[1]
+    except OSError:
+        pass
+    return None
+
+
 def build(args: argparse.Namespace) -> int:
     _release_signing(args)  # Reject incomplete release credentials before compiling.
     tools = Tools()
-    missing = tools.missing()
+    shell = None if getattr(args, "debuggable", False) else install_shell()
+    missing = tools.missing(shell=shell is not None)
     if missing:
         raise AndroidError("missing " + ", ".join(missing) + " (pinyon.py android doctor --install)")
     generated = "generated-v4" if args.title_update_v4 else "generated"
@@ -288,21 +521,155 @@ def build(args: argparse.Namespace) -> int:
                            "first (the launcher, tools/build-preview.ps1 or, for v4, "
                            "tools/build-v4.ps1)")
     directory = build_directory(args)
-    environment = dict(os.environ, ANDROID_NDK_HOME=str(tools.ndk))
-    if not (directory / "CMakeCache.txt").is_file():
-        run([tools.cmake, "--preset", preset(args),
-             f"-DREXSDK_DIR={rexsdk_dir().as_posix()}",
+    environment = with_git(dict(os.environ, ANDROID_NDK_HOME=str(tools.ndk)))
+    host_objects = ""
+    if shell:
+        # TP-3 host split: the release's prebuilt host objects for Android.
+        import pinyon_setup
+        host_objects = pinyon_setup.install_host_objects(
+            pinyon_setup.Progress(False), "android-arm64",
+            "v4" if args.title_update_v4 else "base")
+        sdk = ["-DREXSDK_DIR=", f"-DPINYON_SHIFT_SHIFTGLUE_KIT={shell.as_posix()}",
+               f"-DPINYON_SHIFT_HOST_OBJECTS={Path(host_objects).as_posix() if host_objects else ''}"]
+        generator = host_generator()
+        if generator:
+            sdk.append(f"-DPINYON_SHIFT_REXGLUE_CODEGEN={generator.as_posix()}")
+    else:
+        sdk = [f"-DREXSDK_DIR={rexsdk_dir().as_posix()}", "-DPINYON_SHIFT_SHIFTGLUE_KIT=",
+               "-DPINYON_SHIFT_HOST_OBJECTS="]
+    # A folder configured against the other SDK or other host objects is
+    # configured again.
+    if not configured(directory) or (_cached(directory, "PINYON_SHIFT_SHIFTGLUE_KIT") or "") \
+            != (shell.as_posix() if shell else "") or \
+            (_cached(directory, "PINYON_SHIFT_HOST_OBJECTS") or "") != \
+            (Path(host_objects).as_posix() if host_objects else ""):
+        run([tools.cmake, "--preset", preset(args), *sdk,
              f"-DCMAKE_MAKE_PROGRAM={tools.ninja}", f"-DPYTHON_EXECUTABLE={sys.executable}",
              f"-DPython3_EXECUTABLE={sys.executable}"], cwd=ROOT, env=environment)
-    # The game, and libadrenotools' hooks, which nothing links (they are
-    # loaded from the native library folder for a custom GPU driver).
-    command = [tools.cmake, "--build", directory, "--target", "pinyon_shift",
-               *(Path(name).stem.removeprefix("lib") for name in ADRENOTOOLS_HOOKS)]
+    command = [tools.cmake, "--build", directory, "--target", "pinyon_shift"]
+    if not shell:
+        # libadrenotools' hooks, which nothing links (they are loaded from
+        # the native library folder for a custom GPU driver); the shell
+        # carries them.
+        command += [Path(name).stem.removeprefix("lib") for name in ADRENOTOOLS_HOOKS]
     if args.jobs:
         command += ["-j", str(args.jobs)]
     run(command, cwd=ROOT, env=environment)
-    build_fidelityfx(tools, args, environment)
+    if not shell:
+        build_fidelityfx(tools, args, environment)
     return package(args, tools)
+
+
+def build_shell(args: argparse.Namespace) -> int:
+    """TP-5: the prebuilt APK shell the release workflow attaches: ShiftGlue
+    built for Android and installed as a kit (with libadrenotools' hooks and
+    FidelityFX), and the app's linked manifest and resources and classes.dex.
+    Needs the full toolchain, as a source build does. Nothing game-derived."""
+    import pinyon_setup
+    tools = Tools()
+    missing = tools.missing()
+    if missing:
+        raise AndroidError("missing " + ", ".join(missing) + " (pinyon.py android doctor --install)")
+    sdk = rexsdk_dir()
+    revision = _git("rev-parse", "HEAD", cwd=sdk)
+    pinned = json.loads((ROOT / "config" / "release-toolchain.json").read_text(
+        encoding="utf-8"))["rexglue"]["revision"]
+    if revision != pinned:
+        raise AndroidError(f"ShiftGlue is at {revision}, but the config pins {pinned}")
+    work = WORK / "shell-build"
+    tree, prefix = work / "build", work / "shell"
+    if prefix.exists():
+        shutil.rmtree(prefix)
+    environment = with_git(dict(os.environ, ANDROID_NDK_HOME=str(tools.ndk), LDFLAGS=SHELL_LDFLAGS))
+    flags = f"{SHELL_FLAGS} -ffile-prefix-map={sdk.as_posix()}=shiftglue"
+    toolchain = (tools.ndk / "build" / "cmake" / "android.toolchain.cmake").as_posix()
+    android = [f"-DCMAKE_TOOLCHAIN_FILE={toolchain}", f"-DANDROID_ABI={CONFIG['abi']}",
+               f"-DANDROID_PLATFORM=android-{CONFIG['min_sdk']}"]
+    jobs = ["-j", str(args.jobs)] if args.jobs else []
+    run([tools.cmake, "-S", sdk, "-B", tree, "-G", "Ninja", f"-DCMAKE_MAKE_PROGRAM={tools.ninja}",
+         "-DCMAKE_BUILD_TYPE=Release", *android, "-DANDROID_STL=c++_shared",
+         f"-DCMAKE_C_FLAGS={flags}", f"-DCMAKE_CXX_FLAGS={flags}", "-DREXGLUE_ARM64_MARCH=armv8.2-a",
+         "-DREXGLUE_USE_VULKAN=ON", "-DREXGLUE_ENABLE_TRACY=OFF",
+         "-DREXGLUE_INSTALL_REGISTER_PACKAGE=OFF", f"-DPYTHON_EXECUTABLE={sys.executable}",
+         # Outputs stay in this tree, not the checkout's shared out/android-arm64.
+         f"-DREXGLUE_OUTPUT_DIRECTORY={(tree / 'out').as_posix()}",
+         f"-DCMAKE_INSTALL_PREFIX={prefix.as_posix()}"], cwd=ROOT, env=environment)
+    run([tools.cmake, "--build", tree, "--target", "install", *jobs], cwd=ROOT, env=environment)
+    hooks = [Path(name).stem.removeprefix("lib") for name in ADRENOTOOLS_HOOKS]
+    run([tools.cmake, "--build", tree, "--target", *hooks, *jobs], cwd=ROOT, env=environment)
+    for name in ADRENOTOOLS_HOOKS:
+        found = [path for path in tree.glob(f"**/{name}") if "CMakeFiles" not in path.parts]
+        if not found:
+            raise AndroidError(f"{name} was not built in {tree}")
+        shutil.copy2(found[0], prefix / "lib" / name)
+    # The generator in the kit is an Android program; the PC uses its own
+    # (host_generator), so it goes, with the exported targets' check for it.
+    shutil.rmtree(prefix / "bin", ignore_errors=True)
+    for targets in (prefix / "lib" / "cmake" / "rexglue").glob("rexglueTargets-*.cmake"):
+        lines = targets.read_text(encoding="utf-8").splitlines(keepends=True)
+        targets.write_text("".join(line for line in lines if not (
+            line.startswith("list(APPEND _cmake_import_check")
+            and "rex::rexglue " in line)), encoding="utf-8")
+    # FidelityFX, as a source build makes it (build_fidelityfx).
+    ffx = work / "fidelityfx-vk"
+    run([tools.cmake, "-S", sdk / "thirdparty" / "fidelityfx-vk", "-B", ffx, "-G", "Ninja",
+         f"-DCMAKE_MAKE_PROGRAM={tools.ninja}", "-DCMAKE_BUILD_TYPE=Release", *android,
+         "-DANDROID_STL=c++_static"], cwd=ROOT, env=environment)
+    run([tools.cmake, "--build", ffx, "--target", "amd_fidelityfx_vk", *jobs], cwd=ROOT,
+        env=environment)
+    upscalers = prefix / "share" / "rexglue" / "upscalers" / "fidelityfx"
+    upscalers.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ffx / "ffx-api" / FIDELITYFX_LIBRARY, upscalers / FIDELITYFX_LIBRARY)
+    shutil.copy2(sdk / "thirdparty" / "fidelityfx-vk" / "LICENSE.txt", upscalers / "LICENSE.txt")
+    for folder, pattern in pinyon_setup.KIT_SOURCES:
+        for path in sorted((sdk / folder).glob(pattern)):
+            if path.is_file():
+                target = prefix / "share" / "rexglue" / "source" / path.relative_to(sdk)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, target)
+    # The app's code and resources for this release's version.
+    staging = work / "java"
+    if staging.exists():
+        shutil.rmtree(staging)
+    version_name, version_code = release_version()
+    base, dex = _java_parts(tools, staging, version_name, version_code, debuggable=False)
+    (prefix / "android").mkdir()
+    shutil.copy2(base, prefix / "android" / "base.apk")
+    shutil.copy2(dex, prefix / "android" / "classes.dex")
+    kit = {"schema_version": 1, "platform": "android-arm64", "shiftglue_revision": revision,
+           "configuration": "Release", "flags": SHELL_FLAGS, "ndk": CONFIG["android_sdk"]["ndk"],
+           "min_sdk": CONFIG["min_sdk"], "version": [version_name, version_code]}
+    (prefix / "kit.json").write_text(json.dumps(kit, indent=2) + "\n", encoding="utf-8")
+    run([sys.executable, ROOT / "tools" / "repack-toolchain.py", "kit", "--kind", "apk-shell",
+         "--source", prefix, "--output", args.output.resolve()], cwd=ROOT)
+    return 0
+
+
+def build_host_objects(args: argparse.Namespace) -> int:
+    """TP-3 host split for Android: the base and v4 host objects a release
+    attaches, compiled against the shell build_shell just installed, with
+    the presets the player's build uses."""
+    tools = Tools()
+    shell = WORK / "shell-build" / "shell"
+    if not (shell / "kit.json").is_file():
+        raise AndroidError(f"no shell in {shell} (pinyon.py android shell first)")
+    environment = with_git(dict(os.environ, ANDROID_NDK_HOME=str(tools.ndk)))
+    for variant, name in (("base", "android-arm64-release"), ("v4", "android-arm64-v4")):
+        command = [sys.executable, ROOT / "tools" / "build-host-objects.py", "--kit", shell,
+                   "--platform", "android-arm64", "--preset", name, "--variant", variant,
+                   "--output", args.output.resolve(), "--cmake", tools.cmake,
+                   f"--define=CMAKE_MAKE_PROGRAM={tools.ninja}"]
+        if args.jobs:
+            command += ["--jobs", str(args.jobs)]
+        run(command, cwd=ROOT, env=environment)
+    return 0
+
+
+def configured(directory: Path) -> bool:
+    """Whether CMake finished configuring the build directory. A configure
+    that failed or was stopped leaves CMakeCache.txt without build.ninja,
+    and every later build then fails to load it (#763)."""
+    return (directory / "CMakeCache.txt").is_file() and (directory / "build.ninja").is_file()
 
 
 def build_fidelityfx(tools: Tools, args: argparse.Namespace, environment: dict) -> None:
@@ -312,7 +679,7 @@ def build_fidelityfx(tools: Tools, args: argparse.Namespace, environment: dict) 
     if not (source / "CMakeLists.txt").is_file():
         return
     directory = build_directory(args) / "fidelityfx-vk"
-    if not (directory / "CMakeCache.txt").is_file():
+    if not configured(directory):
         run([tools.cmake, "-S", source, "-B", directory, "-G", "Ninja",
              f"-DCMAKE_MAKE_PROGRAM={tools.ninja}", "-DCMAKE_BUILD_TYPE=Release",
              f"-DCMAKE_TOOLCHAIN_FILE={(tools.ndk / 'build' / 'cmake' / 'android.toolchain.cmake').as_posix()}",
@@ -393,17 +760,17 @@ def _dirty(status: str) -> str:
     return "unknown" if status == "unknown" else str(bool(status)).lower()
 
 
-def _cpu_baseline() -> str:
+def _cpu_baseline(build_dir: Path) -> str:
     # Read the actual configured native build, including explicit optimized builds.
-    cache = ROOT / "out" / "build" / CONFIG["configure_preset"] / "CMakeCache.txt"
+    cache = build_dir / "CMakeCache.txt"
     if cache.is_file():
         match = re.search(r"(?m)^PINYON_SHIFT_ANDROID_MARCH:STRING=([^\r\n]+)$", cache.read_text(encoding="utf-8"))
         if match:
             return match.group(1)
-    return CONFIG.get("cpu_baseline", "armv8-a")
+    return CONFIG["cpu_baseline"]
 
 
-def _build_manifest(tools: Tools, version_name: str, libraries: list[Path]) -> dict:
+def _build_manifest(build_dir: Path, version_name: str, libraries: list[Path]) -> dict:
     """The provenance the game logs at start and puts in crash reports
     (AP-6.4), as tools/build-preview.ps1 writes it beside the executable."""
     sdk = rexsdk_dir()
@@ -413,7 +780,7 @@ def _build_manifest(tools: Tools, version_name: str, libraries: list[Path]) -> d
         "configuration": "Release",
         "platform": "android-arm64",
         "version": version_name,
-        "cpu_baseline": _cpu_baseline(),
+        "cpu_baseline": _cpu_baseline(build_dir),
         "ndk": CONFIG["android_sdk"]["ndk"],
         "min_sdk": CONFIG["min_sdk"],
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -473,33 +840,12 @@ def validation_library(args: argparse.Namespace) -> Path | None:
     return path
 
 
-def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
-    signing = _release_signing(args)
-    tools = tools or Tools()
-    directory = build_directory(args)
-    libraries = []
-    for name in NATIVE_LIBRARIES + ADRENOTOOLS_HOOKS:
-        found = list(directory.glob(f"**/{name}"))
-        found = [path for path in found if "CMakeFiles" not in path.parts]
-        if not found:
-            raise AndroidError(f"{name} is not built in {directory}")
-        libraries.append(max(found, key=lambda path: path.stat().st_mtime))
-    fidelityfx = directory / "fidelityfx-vk" / "ffx-api" / FIDELITYFX_LIBRARY
-    if fidelityfx.is_file():
-        libraries.append(fidelityfx)
-    libraries.append(tools.libcxx)
-    validation = validation_library(args)
-    if validation is not None:
-        libraries.append(validation)
-
-    staging = WORK / "package"
-    if staging.exists():
-        shutil.rmtree(staging)
-    (staging / "classes").mkdir(parents=True)
-    (staging / "dex").mkdir()
-    (staging / "lib").mkdir()
-
-    version_name, version_code = release_version()
+def _java_parts(tools: Tools, staging: Path, version_name: str, version_code: int,
+                debuggable: bool) -> tuple[Path, Path]:
+    """The linked manifest and resources (an APK without code) and
+    classes.dex, made with aapt2, javac and d8."""
+    (staging / "classes").mkdir(parents=True, exist_ok=True)
+    (staging / "dex").mkdir(exist_ok=True)
     manifest = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
     manifest = manifest.replace("<manifest ", f'<manifest package="{PACKAGE}" ', 1)
     (staging / "AndroidManifest.xml").write_text(manifest, encoding="utf-8")
@@ -512,7 +858,7 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
          "--min-sdk-version", str(CONFIG["min_sdk"]),
          "--target-sdk-version", str(CONFIG["target_sdk"]),
          "--version-name", version_name, "--version-code", str(version_code),
-         *(["--debug-mode"] if getattr(args, "debuggable", False) else [])])
+         *(["--debug-mode"] if debuggable else [])])
 
     sdl_java = rexsdk_dir() / "thirdparty" / "sdl3" / "android-project" / "app" / "src" / "main" \
         / "java"
@@ -530,6 +876,48 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
             jar.write(path, path.relative_to(staging / "classes").as_posix())
     run([tools.d8, "--release", "--min-api", str(CONFIG["min_sdk"]), "--lib", tools.android_jar,
          "--output", staging / "dex", classes])
+    return unsigned, staging / "dex" / "classes.dex"
+
+
+def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
+    signing = _release_signing(args)
+    tools = tools or Tools()
+    directory = build_directory(args)
+    debuggable = getattr(args, "debuggable", False)
+    shell = None if debuggable else shell_ready()
+    libraries = []
+    for name in NATIVE_LIBRARIES + ADRENOTOOLS_HOOKS:
+        # The shell's prebuilt runtime and hooks (TP-5), never a copy an
+        # earlier source build left in the build folder.
+        prebuilt = shell and (name in SHELL_LIBRARIES or name in ADRENOTOOLS_HOOKS)
+        for place in [shell / "lib"] if prebuilt else [directory]:
+            found = [path for path in place.glob(f"**/{name}") if "CMakeFiles" not in path.parts]
+            if found:
+                libraries.append(max(found, key=lambda path: path.stat().st_mtime))
+                break
+        else:
+            raise AndroidError(f"{name} is not built in {directory}")
+    fidelityfx = (shell / "share" / "rexglue" / "upscalers" / "fidelityfx" if shell
+                  else directory / "fidelityfx-vk" / "ffx-api") / FIDELITYFX_LIBRARY
+    if fidelityfx.is_file():
+        libraries.append(fidelityfx)
+    libraries.append(tools.libcxx)
+    validation = validation_library(args)
+    if validation is not None:
+        libraries.append(validation)
+
+    staging = WORK / "package"
+    if staging.exists():
+        shutil.rmtree(staging)
+    (staging / "lib").mkdir(parents=True)
+
+    version_name, version_code = release_version()
+    unsigned = staging / "unsigned.apk"
+    if shell:
+        shutil.copy2(shell / "android" / "base.apk", unsigned)
+        dex = shell / "android" / "classes.dex"
+    else:
+        unsigned, dex = _java_parts(tools, staging, version_name, version_code, debuggable)
 
     # The device gets libraries without debug sections; the PC keeps the
     # originals for symbolizing crash reports.
@@ -539,8 +927,14 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
         run([tools.strip, "--strip-debug", "-o", target, library])
         stripped.append(target)
 
+    try:
+        android_module_check.verify(stripped, tools.llvm_bin / _exe("llvm-readelf"),
+                                    tools.llvm_bin / _exe("llvm-nm"))
+    except ValueError as error:
+        raise AndroidError(str(error)) from error
+
     # Reports must identify the bytes shipped in the APK, after stripping.
-    manifest = _build_manifest(tools, version_name, stripped)
+    manifest = _build_manifest(directory, version_name, stripped)
     manifest["validation_layer"] = validation is not None
     if validation is not None:
         manifest["validation_layer_sha256"] = hashlib.sha256(validation.read_bytes()).hexdigest()
@@ -557,8 +951,11 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
         if not aligns or min(aligns) < 0x4000:
             raise AndroidError(f"{library.name} has load segments aligned below 16 KiB")
 
-    with zipfile.ZipFile(unsigned, "a", compression=zipfile.ZIP_DEFLATED) as apk:
-        apk.write(staging / "dex" / "classes.dex", "classes.dex")
+    # The shell's files carry the reproducible archive's 1970 times, before
+    # ZIP's 1980 epoch: those are written as 1980.
+    with zipfile.ZipFile(unsigned, "a", compression=zipfile.ZIP_DEFLATED,
+                         strict_timestamps=False) as apk:
+        apk.write(dex, "classes.dex")
         apk.write(staging / "pinyon_shift_build.json", "assets/pinyon_shift_build.json")
         if validation is not None:
             for name in ("LICENSE.txt", "NOTICE.txt"):
@@ -572,19 +969,30 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
                 apk.write(path, "assets/" + path.relative_to(ROOT / "android" / "art").as_posix())
         apk.write(ROOT / "config" / "supported-extracted-ms-2505.json",
                   "assets/supported-game.json")
+        apk.write(ROOT / "config" / "supported-dlc.json", "assets/supported-dlc.json")
+        apk.write(ROOT / "config" / "supported-dumps.json", "assets/supported-dumps.json")
+        for mod in ("festival_pacing", "hidden_cars"):
+            source = ROOT / "mods_src" / "builtin" / mod
+            for path in sorted(source.rglob("*")):
+                if path.is_file():
+                    apk.write(path, "assets/builtin-mods/" + mod + "/" + path.relative_to(source).as_posix())
 
-    aligned = staging / "aligned.apk"
-    run([tools.zipalign, "-P", "16", "-f", "4", unsigned, aligned])
     output = WORK / "pinyon-shift.apk"
-    signed = staging / "signed.apk"
-    if signing is None:
-        signing = ["--ks", str(_keystore(tools)), "--ks-pass", "pass:pinyon-local",
-                   "--key-pass", "pass:pinyon-local"]
-    run([tools.apksigner, "sign", *signing, "--out", signed, aligned])
-    run([tools.apksigner, "verify", "--verbose", signed])
-    run([tools.zipalign, "-c", "-P", "16", "4", signed])
-    # A signing/verification error must leave the previous good APK intact.
-    signed.replace(output)
+    if signing is not None:
+        aligned = staging / "aligned.apk"
+        signed = staging / "signed.apk"
+        run([tools.zipalign, "-f", "-P", "16", "4", unsigned, aligned])
+        run([tools.apksigner, "sign", *signing, "--out", signed, aligned])
+        run([tools.apksigner, "verify", "--verbose", signed])
+        run([tools.zipalign, "-c", "-P", "16", "4", signed])
+        signed.replace(output)
+    else:
+        signing_dir = WORK / "signing"
+        key, certificate = apk_sign.signing_key(signing_dir, signing_dir / "pinyon-shift-local.keystore")
+        signed = staging / "signed.apk"
+        signed.write_bytes(apk_sign.sign(unsigned.read_bytes(), key, certificate))
+        signed.replace(output)
+    output.with_name(output.name + ".idsig").unlink(missing_ok=True)
     size = output.stat().st_size
     # What the package holds, for the launchers' Android panels (the same
     # record tools/build-android.ps1 writes after the build).
@@ -615,6 +1023,21 @@ def push_data(args: argparse.Namespace) -> int:
         raise AndroidError(f"the extracted game is not at {game}")
     adb(tools, args, "shell", "mkdir", "-p", f"{DEVICE_FILES}/game/base", f"{DEVICE_FILES}/state")
     adb(tools, args, "push", "--sync", f"{game}{os.sep}.", f"{DEVICE_FILES}/game/base")
+    # Free roam's pipelines, rebuilt from this disc by the PC's setup (AOT-4).
+    # Without them every pipeline the device has not drawn before compiles
+    # mid-frame, so a state that has no list yet gets one written here.
+    import pinyon_common as common
+    import pinyon_shaders
+    state = common.state_root(args.state_root)
+    pipelines = state / "cache" / "shaders" / "shareable" / AOT_PIPELINES
+    extractor = common.find_extractor()
+    if not pipelines.is_file() and extractor:
+        print(f"Ahead-of-time pipelines: "
+              f"{pinyon_shaders.prepare_aot(state, game, extractor.parent, False)}")
+    if pipelines.is_file():
+        shareable = f"{DEVICE_FILES}/state/cache/shaders/shareable"
+        adb(tools, args, "shell", "mkdir", "-p", shareable)
+        adb(tools, args, "push", pipelines, f"{shareable}/{AOT_PIPELINES}", stdout=subprocess.DEVNULL)
     share_with_app(tools, args, f"{DEVICE_FILES}/game", f"{DEVICE_FILES}/state")
     return 0
 
@@ -951,9 +1374,20 @@ def add_parser(commands) -> None:
                         help="let adb attach (thread dumps with debuggerd, run-as)")
     parser.add_argument("--validation-layer", type=Path,
                         help="package the ARM64 Khronos validation library in an opt-in debuggable diagnostic APK")
+    parser = command("shell", build_shell,
+                     "build the prebuilt APK shell a release attaches (TP-5)")
+    parser.add_argument("--output", type=Path, required=True, help="the shell archive to write")
+    parser.add_argument("--jobs", type=int)
+    parser = command("host-objects", build_host_objects,
+                     "build the prebuilt Android host objects a release attaches (TP-3)")
+    parser.add_argument("--output", type=Path, required=True, help="the folder to write them to")
+    parser.add_argument("--jobs", type=int)
     command("install", install, "install the APK on the device")
     parser = command("push-data", push_data, "copy the extracted game files to the device")
     parser.add_argument("--game-root", type=Path)
+    parser.add_argument("--state-root", type=Path,
+                        help="the PC state whose ahead-of-time pipeline list goes too "
+                             "(default: .local/preview; the list is written there if missing)")
     parser = command("push-driver", push_driver,
                      "copy a custom Vulkan driver package (Mesa Turnip) to the device")
     parser.add_argument("driver", type=Path, help="an adrenotools driver .zip or folder")

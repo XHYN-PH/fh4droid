@@ -48,6 +48,23 @@ function Find-PinyonAndroidSdk {
     $null
 }
 
+function Test-PinyonJdk {
+    param(
+        [Parameter(Mandatory)] [string]$JavaHome,
+        [Parameter(Mandatory)] [int]$MinimumMajor
+    )
+    $javac = Join-Path $JavaHome 'bin\javac.exe'
+    if (-not (Test-Path -LiteralPath $javac -PathType Leaf)) { return $false }
+    if (-not (Test-Path -LiteralPath (Join-Path $JavaHome 'bin\keytool.exe') -PathType Leaf)) { return $false }
+    try {
+        # javac prints its version on stdout (newer) or stderr (older).
+        $text = (& $javac -version 2>&1 | Out-String)
+    }
+    catch { return $false }
+    if ($text -notmatch 'javac\s+(?:1\.)?(\d+)') { return $false }
+    [int]$Matches[1] -ge $MinimumMajor
+}
+
 try {
     $android = Get-Content -LiteralPath (Join-Path $root 'config/android-toolchain.json') -Raw |
         ConvertFrom-Json
@@ -65,35 +82,66 @@ try {
     $python = Get-PinyonPython
     $pinyon = Join-Path $PSScriptRoot 'pinyon.py'
     $env:PINYON_REXSDK_DIR = Resolve-PinyonRexGlueRoot
+    # CMake clones the FidelityFX SDK with git (#810), and most players have
+    # none: use the pinned MinGit. A PC build from the prebuilt kit does not
+    # install it, so download it here when it is missing.
+    if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
+        Install-PinyonGit
+        $git = Get-PinyonGit
+        $env:PATH = "$(Split-Path $git -Parent);$env:PATH"
+    }
 
     Write-PinyonEvent android 5 'Checking the Android SDK, NDK and JDK.' -JsonEvents:$JsonEvents
     $doctorLog = Join-Path $logs 'android-doctor.log'
     Invoke-PinyonLoggedCommand -FilePath $python -Arguments @($pinyon, 'android', 'doctor') `
         -LogPath $doctorLog | Out-Host
-    if ($LASTEXITCODE -ne 0) {
+    if ($LASTEXITCODE -eq 3) {
+        # TP-5: the release's prebuilt shell is ready, so only the NDK (and
+        # adb) are missing; they come straight from dl.google.com by SHA-256,
+        # without the JDK or the SDK's command-line tools.
+        Assert-PinyonDownloadHosts -Uris @('https://dl.google.com/')
+        if (-not $AcceptAndroidLicenses) {
+            $failure = [Exception]::new('Installing the Android NDK needs the Android SDK license to be accepted.')
+            $failure.Data['step'] = 'Install the Android NDK'
+            $failure.Data['hint'] = "Accept the Android SDK license ($($android.direct.license_url)) when the launcher asks, or run: python tools/pinyon.py android doctor --install --accept-licenses"
+            throw $failure
+        }
+        Write-PinyonEvent android 18 'Installing the Android NDK (about 830 MB, once).' -JsonEvents:$JsonEvents
+        Invoke-PinyonBuildCommand $python @($pinyon, 'android', 'doctor', '--install', '--accept-licenses') `
+            (Join-Path $logs 'android-sdk-install.log') 'Installing the Android NDK failed.' `
+            -Step 'Install the Android NDK'
+    }
+    elseif ($LASTEXITCODE -ne 0) {
         # The SDK packages come from Google; the JDK and command-line tools
         # too when this PC has none. Named up front if a site is blocked.
         Assert-PinyonDownloadHosts -Uris @($bootstrap.jdk.url, $bootstrap.cmdline_tools.url, 'https://dl.google.com/')
-        # A JDK for sdkmanager, javac and keytool.
+        # A JDK 17 or newer for sdkmanager, javac and keytool. One that is
+        # too old (Oracle's Java 8 on PATH: "Java version 17 or higher is
+        # required", #811) or that lacks keytool (Oracle's javapath shim, #868)
+        # does not count.
         $localJdk = Resolve-PinyonLocalPath -RelativePath $bootstrap.jdk.install_path
-        $haveJdk = ($env:JAVA_HOME -and (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin\javac.exe'))) -or
-            (Test-Path -LiteralPath (Join-Path $localJdk 'bin\javac.exe'))
-        if (-not $haveJdk -and -not $env:JAVA_HOME -and (Get-Command javac.exe -ErrorAction SilentlyContinue)) {
-            $haveJdk = $true
+        $jdkHome = $null
+        $onPath = Get-Command javac.exe -ErrorAction SilentlyContinue
+        $pathHome = if ($onPath) { Split-Path (Split-Path $onPath.Source -Parent) -Parent } else { $null }
+        foreach ($candidate in @($env:JAVA_HOME, $localJdk, $pathHome)) {
+            if ($candidate -and (Test-PinyonJdk -JavaHome $candidate -MinimumMajor $android.jdk_major)) {
+                $jdkHome = $candidate
+                break
+            }
         }
-        if (-not $haveJdk) {
+        if (-not $jdkHome) {
             Write-PinyonEvent android 8 "Downloading the Temurin JDK $($bootstrap.jdk.version) (about 190 MB)." -JsonEvents:$JsonEvents
             $archive = Resolve-PinyonLocalPath -RelativePath ".local/downloads/$(Split-Path $bootstrap.jdk.url -Leaf)"
             Invoke-PinyonDownload -Uri $bootstrap.jdk.url -Destination $archive -Sha256 $bootstrap.jdk.sha256
             $toolchain = Split-Path $localJdk -Parent
             Expand-PinyonZip -Archive $archive -Destination $toolchain
-            if (-not (Test-Path -LiteralPath (Join-Path $localJdk 'bin\javac.exe'))) {
-                throw "The JDK archive did not unpack to $localJdk."
+            if (-not (Test-PinyonJdk -JavaHome $localJdk -MinimumMajor $android.jdk_major)) {
+                throw "The JDK archive did not unpack to a working JDK in $localJdk."
             }
+            $jdkHome = $localJdk
         }
-        if (Test-Path -LiteralPath (Join-Path $localJdk 'bin\javac.exe')) {
-            if (-not $env:JAVA_HOME) { $env:JAVA_HOME = $localJdk }
-        }
+        # Replaces an old or partial JAVA_HOME for this build only.
+        $env:JAVA_HOME = $jdkHome
 
         # The pinned sdkmanager installs the pinned NDK, build tools and
         # platform, into the PC's existing SDK when it has one. Android
@@ -109,12 +157,13 @@ try {
             Invoke-PinyonDownload -Uri $bootstrap.cmdline_tools.url -Destination $archive `
                 -Sha256 $bootstrap.cmdline_tools.sha256
             $unpack = Join-Path $localSdk 'cmdline-tools\unpack'
-            if (Test-Path -LiteralPath $unpack) { Remove-Item -LiteralPath $unpack -Recurse -Force }
+            Remove-PinyonTree -Path $unpack
             Expand-PinyonZip -Archive $archive -Destination $unpack
             $latest = Join-Path $localSdk 'cmdline-tools\latest'
-            if (Test-Path -LiteralPath $latest) { Remove-Item -LiteralPath $latest -Recurse -Force }
-            Move-Item -LiteralPath (Join-Path $unpack 'cmdline-tools') -Destination $latest
-            Remove-Item -LiteralPath $unpack -Recurse -Force
+            Remove-PinyonTree -Path $latest
+            # One rename of a short path, whatever depth lies below it.
+            [IO.Directory]::Move((Join-Path $unpack 'cmdline-tools'), $latest)
+            Remove-PinyonTree -Path $unpack
         }
         $env:ANDROID_HOME = $sdk
         $env:ANDROID_SDK_ROOT = $sdk

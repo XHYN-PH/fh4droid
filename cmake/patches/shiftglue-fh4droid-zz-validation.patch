@@ -1,7 +1,8 @@
 diff --git a/src/ui/vulkan/vulkan_instance.cpp b/src/ui/vulkan/vulkan_instance.cpp
+index 23e715b..2553bc6 100644
 --- a/src/ui/vulkan/vulkan_instance.cpp
 +++ b/src/ui/vulkan/vulkan_instance.cpp
-@@ -155,6 +155,9 @@
+@@ -155,6 +155,9 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
    // Name pointers from `requested_extensions` will be used in the enabled
    // extensions vector.
    std::unordered_map<std::string, bool*> requested_extensions;
@@ -11,7 +12,7 @@ diff --git a/src/ui/vulkan/vulkan_instance.cpp b/src/ui/vulkan/vulkan_instance.c
    if (vulkan_instance->api_version_ >= VK_MAKE_API_VERSION(0, 1, 1, 0)) {
      vulkan_instance->extensions_.ext_1_1_KHR_get_physical_device_properties2 = true;
    } else {
-@@ -316,7 +319,7 @@
+@@ -316,7 +319,7 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
          while (true) {
            uint32_t supported_layer_extension_count = 0;
            const VkResult get_supported_layer_extension_count_result =
@@ -20,7 +21,7 @@ diff --git a/src/ui/vulkan/vulkan_instance.cpp b/src/ui/vulkan/vulkan_instance.c
                                                           nullptr);
            if (get_supported_layer_extension_count_result != VK_SUCCESS &&
                get_supported_layer_extension_count_result != VK_INCOMPLETE) {
-@@ -356,7 +359,7 @@
+@@ -356,7 +359,7 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
            // provided by the implementation itself or by another layer.
            if (!*requested_extension_it->second) {
              enabled_extensions.emplace_back(requested_extension_it->first.c_str());
@@ -29,7 +30,16 @@ diff --git a/src/ui/vulkan/vulkan_instance.cpp b/src/ui/vulkan/vulkan_instance.c
              *requested_extension_it->second = true;
            }
          }
-@@ -408,7 +411,7 @@
+@@ -384,7 +387,7 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
+   // "Vulkan 1.0 implementations were required to return
+   // VK_ERROR_INCOMPATIBLE_DRIVER if apiVersion was larger than 1.0."
+   application_info.apiVersion = vulkan_instance->api_version_ >= VK_MAKE_API_VERSION(0, 1, 1, 0)
+-                                    ? VulkanDevice::kHighestUsedApiMinorVersion
++                                    ? std::min(vulkan_instance->api_version_, VulkanDevice::kHighestUsedApiMinorVersion)
+                                     : VK_MAKE_API_VERSION(0, 1, 0, 0);
+ 
+   VkInstanceCreateInfo instance_create_info;
+@@ -408,7 +411,7 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
    validation_features.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
    validation_features.enabledValidationFeatureCount = 1;
    validation_features.pEnabledValidationFeatures = &sync_validation;
@@ -38,7 +48,7 @@ diff --git a/src/ui/vulkan/vulkan_instance.cpp b/src/ui/vulkan/vulkan_instance.c
      instance_create_info.pNext = &validation_features;
      REXLOG_INFO("Vulkan validation: synchronization validation enabled");
    }
-@@ -424,6 +427,7 @@
+@@ -424,6 +427,7 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
      for (const std::pair<std::string, bool*>& requested_layer : requested_layers) {
        *requested_layer.second = false;
      }

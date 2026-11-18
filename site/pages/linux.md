@@ -23,7 +23,7 @@ You need your ISO of the USA retail disc (`MS-2505`), about 45 GB free and a cha
 
 Everything installs under `~/.local/share/PinyonShift`. SteamOS needs no unlocking, password or developer mode.
 
-The race and free roam hold 60 fps at 1x within the Deck's default 15 W limit. Leave **Manual GPU Clock** off in the Performance settings: with it on, Steam can pin the GPU at 200 MHz and the game drops to about 10 fps.
+The race and free roam hold 60 fps at 1x within the Deck's default 15 W limit. Linux draws the scene's three tiles in one pass (**SINGLE-PASS SCENE** in the graphics settings, on in every preset but PERFORMANCE 120), which takes 2.5-3 ms of CPU a frame off the Deck in a race. Leave **Manual GPU Clock** off in the Performance settings: with it on, Steam can pin the GPU at 200 MHz and the game drops to about 10 fps.
 
 ## Linux PCs
 
@@ -40,6 +40,15 @@ python3 tools/pinyon.py setup --iso ~/Downloads/forza-horizon.iso
 python3 tools/pinyon.py launch
 python3 tools/pinyon.py shortcuts add
 ```
+
+The game and its FidelityFX library (FSR 2 and FSR 3) build with the pinned
+LLVM compiler and Steam Runtime SDK; SteamOS needs no system GCC. The
+FidelityFX build inherits the game's toolchain and flags, including when an
+existing build is updated. If 0.6.0 stopped there with `crtbeginS.o` or
+`-lgcc` missing, update to source containing the fix for #681 and retry
+`python3 tools/pinyon.py setup --build-only`. A clean FidelityFX build and
+retry passed on the Steam Deck LCD with SteamOS 3.7.19, LLVM 20.1.8 and Steam
+Runtime SDK 3.0.20260805.254768. See [Linux troubleshooting](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/LINUX.md#troubleshooting).
 
 ## DLC, title update and saves
 

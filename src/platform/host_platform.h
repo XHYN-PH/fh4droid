@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -20,6 +21,11 @@ namespace pinyon_shift::platform {
 // is left as it was.
 bool ReplaceFileAtomically(const std::filesystem::path& temporary,
                            const std::filesystem::path& destination);
+// A unique, exclusively created sibling, flushed before replacement.
+bool WriteFileAtomically(const std::filesystem::path& destination, std::string_view bytes);
+// Uses the same byte-range lock as Java FileChannel.lock(). The callback
+// must not acquire another settings lock. Readers may use atomic snapshots.
+bool WithFileLock(const std::filesystem::path& path, const std::function<bool()>& work);
 
 // An environment variable's value (UTF-8), or nothing when it is not set.
 std::optional<std::string> EnvironmentVariable(const char* name);

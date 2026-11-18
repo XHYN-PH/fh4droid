@@ -46,12 +46,14 @@ foreach(_pinyon_lang C CXX ASM)
   set(CMAKE_${_pinyon_lang}_COMPILER_EXTERNAL_TOOLCHAIN "${CMAKE_SYSROOT}/usr/lib/gcc-14")
 endforeach()
 
-set(_pinyon_link "-fuse-ld=lld -L${PINYON_LINUX_TOOLCHAIN}/sniper-libgcc -static-libstdc++")
+# Paths are quoted: an install folder with spaces ("Non-Steam Games" on an
+# SD card) split them into separate arguments (#727).
+set(_pinyon_link "-fuse-ld=lld \"-L${PINYON_LINUX_TOOLCHAIN}/sniper-libgcc\" -static-libstdc++")
 # On a Linux host, setup's bin/ wrappers run ld.lld and wayland-scanner with
 # the sysroot's libxml2.so.2, which current distributions no longer ship.
 set(_pinyon_wrappers "${PINYON_LINUX_TOOLCHAIN}/bin")
 if(NOT CMAKE_HOST_WIN32 AND EXISTS "${_pinyon_wrappers}/ld.lld")
-  string(APPEND _pinyon_link " --ld-path=${_pinyon_wrappers}/ld.lld")
+  string(APPEND _pinyon_link " \"--ld-path=${_pinyon_wrappers}/ld.lld\"")
 endif()
 set(CMAKE_EXE_LINKER_FLAGS_INIT "${_pinyon_link}")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "${_pinyon_link}")
@@ -63,9 +65,39 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
 # pkg-config reads only the sysroot's .pc files.
-set(ENV{PKG_CONFIG_SYSROOT_DIR} "${CMAKE_SYSROOT}")
+#
+# CMake splits pkg-config's -I/-L output at spaces, so a sysroot under a
+# folder with spaces ("Non-Steam Games" on an SD card) turns into relative
+# include directories and SDL3's configure fails (#727, #805). pkg-config
+# is given a space-free symlink to the sysroot instead; the compiler still
+# gets CMAKE_SYSROOT itself and reaches the same files through the link.
+set(_pinyon_pc_sysroot "${CMAKE_SYSROOT}")
+if(_pinyon_pc_sysroot MATCHES "[ \t]")
+  string(MD5 _pinyon_pc_hash "${_pinyon_pc_sysroot}")
+  string(SUBSTRING "${_pinyon_pc_hash}" 0 12 _pinyon_pc_hash)
+  if(DEFINED ENV{XDG_CACHE_HOME} AND NOT "$ENV{XDG_CACHE_HOME}" MATCHES "[ \t]")
+    set(_pinyon_pc_base "$ENV{XDG_CACHE_HOME}")
+  elseif(DEFINED ENV{HOME} AND NOT "$ENV{HOME}" MATCHES "[ \t]")
+    set(_pinyon_pc_base "$ENV{HOME}/.cache")
+  else()
+    set(_pinyon_pc_base "/tmp")
+  endif()
+  set(_pinyon_pc_link "${_pinyon_pc_base}/pinyon-shift/sysroot-${_pinyon_pc_hash}")
+  if(NOT IS_SYMLINK "${_pinyon_pc_link}")
+    file(MAKE_DIRECTORY "${_pinyon_pc_base}/pinyon-shift")
+    file(CREATE_LINK "${CMAKE_SYSROOT}" "${_pinyon_pc_link}" SYMBOLIC)
+  endif()
+  if(IS_SYMLINK "${_pinyon_pc_link}")
+    set(_pinyon_pc_sysroot "${_pinyon_pc_link}")
+  else()
+    message(WARNING "Could not link ${_pinyon_pc_link} to the sysroot; "
+            "pkg-config paths with spaces will fail. Install to a folder "
+            "without spaces.")
+  endif()
+endif()
+set(ENV{PKG_CONFIG_SYSROOT_DIR} "${_pinyon_pc_sysroot}")
 set(ENV{PKG_CONFIG_LIBDIR}
-    "${CMAKE_SYSROOT}/usr/lib/x86_64-linux-gnu/pkgconfig:${CMAKE_SYSROOT}/usr/share/pkgconfig")
+    "${_pinyon_pc_sysroot}/usr/lib/x86_64-linux-gnu/pkgconfig:${_pinyon_pc_sysroot}/usr/share/pkgconfig")
 set(ENV{PKG_CONFIG_PATH} "")
 # SteamOS has no pkg-config of its own; the sysroot's runs on any host with
 # GLib, which every Linux desktop has.

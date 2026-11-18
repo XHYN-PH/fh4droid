@@ -125,6 +125,78 @@ function Invoke-PinyonDownload {
     }
 }
 
+# Paths past the 260-character limit. A zip with deep entries (the Android
+# command-line tools' guava jars) unpacked under a long install folder
+# stopped with "Could not find a part of the path" (#799). Windows
+# PowerShell 5.1's .NET rejects the \?\ prefix that lifts the limit, so the
+# few calls needed go to Win32 directly.
+function Initialize-PinyonLongPath {
+    if ('PinyonLongPath' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class PinyonLongPath
+{
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CreateDirectoryW(string path, IntPtr security);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern uint GetFileAttributesW(string path);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern SafeFileHandle CreateFileW(string path, uint access, uint share, IntPtr security,
+        uint disposition, uint flags, IntPtr template);
+
+    public static string Prefix(string path)
+    {
+        string full = Path.GetFullPath(path);
+        if (full.StartsWith(@"\\?\")) return full;
+        if (full.StartsWith(@"\\")) return @"\\?\UNC\" + full.Substring(2);
+        return @"\\?\" + full;
+    }
+
+    public static bool DirectoryExists(string path)
+    {
+        uint attributes = GetFileAttributesW(Prefix(path));
+        return attributes != 0xFFFFFFFF && (attributes & 0x10) != 0;
+    }
+
+    public static void CreateDirectories(string path)
+    {
+        string full = Path.GetFullPath(path);
+        if (full.Length <= Path.GetPathRoot(full).Length) return;
+        full = full.TrimEnd((char)92);
+        if (DirectoryExists(full)) return;
+        string parent = Path.GetDirectoryName(full);
+        if (!string.IsNullOrEmpty(parent)) CreateDirectories(parent);
+        if (!CreateDirectoryW(Prefix(full), IntPtr.Zero) && Marshal.GetLastWin32Error() != 183)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot create " + full);
+    }
+
+    public static FileStream Create(string path)
+    {
+        // GENERIC_WRITE, no sharing, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL
+        SafeFileHandle handle = CreateFileW(Prefix(path), 0x40000000, 0, IntPtr.Zero, 2, 0x80, IntPtr.Zero);
+        if (handle.IsInvalid)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot create " + path);
+        return new FileStream(handle, FileAccess.Write);
+    }
+}
+'@
+}
+
+# Deletes a folder tree that may hold paths past the 260-character limit,
+# which Remove-Item in Windows PowerShell 5.1 cannot.
+function Remove-PinyonTree {
+    param([Parameter(Mandatory)] [string]$Path)
+    Initialize-PinyonLongPath
+    if (-not [PinyonLongPath]::DirectoryExists($Path)) { return }
+    & "$env:SystemRoot\System32\cmd.exe" /d /c rd /s /q ('"' + [PinyonLongPath]::Prefix($Path) + '"') | Out-Null
+    if ([PinyonLongPath]::DirectoryExists($Path)) { throw "Could not delete $Path." }
+}
+
 function Expand-PinyonZip {
     param(
         [Parameter(Mandatory)] [string]$Archive,
@@ -142,6 +214,22 @@ function Expand-PinyonZip {
             $target = [IO.Path]::GetFullPath((Join-Path $root $entry.FullName))
             if (-not $target.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) {
                 throw "The archive entry $($entry.FullName) is outside the destination."
+            }
+            if ($target.Length -ge 240) {
+                # Past what .NET's file calls accept (#799).
+                Initialize-PinyonLongPath
+                if ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) {
+                    [PinyonLongPath]::CreateDirectories($target)
+                    continue
+                }
+                [PinyonLongPath]::CreateDirectories((Split-Path $target -Parent))
+                $source = $entry.Open()
+                try {
+                    $output = [PinyonLongPath]::Create($target)
+                    try { $source.CopyTo($output) } finally { $output.Dispose() }
+                }
+                finally { $source.Dispose() }
+                continue
             }
             if ($entry.FullName.EndsWith('/') -or $entry.FullName.EndsWith('\')) {
                 [void](New-Item -ItemType Directory -Force -Path $target)
@@ -210,6 +298,112 @@ function Get-PinyonVisualStudioRoot {
     $root
 }
 
+# TP-4 (docs/TIME_TO_PLAY_BACKLOG.md): the Microsoft C++ libraries (CRT and
+# STL) and the Windows SDK headers and import libraries, fetched by xwin from
+# Microsoft's own Visual Studio packages after the player accepts Microsoft's
+# license. A build from the prebuilt ShiftGlue kit needs nothing else from the
+# Build Tools: clang reads INCLUDE, lld-link reads LIB, llvm-rc replaces rc.exe
+# and the link step embeds manifests in place of mt.exe.
+function Get-PinyonMsvcSysroot {
+    $config = Get-PinyonReleaseToolchain
+    if (-not ($config.PSObject.Properties.Name -contains 'msvc_sysroot')) { return $null }
+    $root = Resolve-PinyonLocalPath -RelativePath $config.msvc_sysroot.install_path
+    $record = Join-Path $root 'pinyon-sysroot.json'
+    if (-not (Test-Path -LiteralPath $record -PathType Leaf)) { return $null }
+    $data = Get-Content -LiteralPath $record -Raw | ConvertFrom-Json
+    [pscustomobject]@{
+        Root = $root
+        # VC/Tools/MSVC/<version>/include
+        MsvcVersion = (@($data.include)[0] -split '/')[3]
+        Include = @($data.include | ForEach-Object { [IO.Path]::Combine($root, $_) })
+        Lib = @($data.lib | ForEach-Object { [IO.Path]::Combine($root, $_) })
+    }
+}
+
+# Whether this build uses the fetched sysroot instead of Visual Studio. It is
+# the default for builds from the prebuilt kit, which carries the C++ runtime
+# DLLs the sysroot lacks, once the player accepted Microsoft's license (the
+# launcher asks), and it is preferred over an installed Visual Studio so every
+# install compiles against the same pinned C++ library. Declining falls back
+# to the Build Tools. Source builds opt in with PINYON_SHIFT_MSVC_SYSROOT=1;
+# PINYON_SHIFT_MSVC_SYSROOT=0 always uses Visual Studio.
+function Test-PinyonUseMsvcSysroot {
+    if ($env:PINYON_SHIFT_MSVC_SYSROOT -eq '0') { return $false }
+    if ($env:PINYON_SHIFT_MSVC_SYSROOT -eq '1') { return $true }
+    if ($null -eq (Get-PinyonShiftGlueKitEntry)) { return $false }
+    $env:PINYON_SHIFT_ACCEPT_MICROSOFT_LICENSE -eq '1' -or $null -ne (Get-PinyonMsvcSysroot)
+}
+
+# The pinned CLI uses narrow argv and file APIs. A UTF-8 process code page
+# keeps Unicode installation paths intact on Windows 10 1903 and newer. The
+# manifest goes in at link time: mt.exe comes only with the Build Tools, and
+# llvm-mt ignores -inputresource and -outputresource.
+function Get-PinyonCodegenManifestLinkFlag {
+    $manifest = (Join-Path (Get-PinyonRepoRoot) 'config/rexglue/codegen-windows.manifest') -replace '\\', '/'
+    "-Xlinker `"/MANIFESTINPUT:$manifest`""
+}
+
+function Install-PinyonMsvcSysroot {
+    param([switch]$AcceptMicrosoftLicense)
+    if (Get-PinyonMsvcSysroot) { return }
+    $sysroot = (Get-PinyonReleaseToolchain).msvc_sysroot
+    if (-not $AcceptMicrosoftLicense) {
+        $failure = [Exception]::new("Fetching the Microsoft C++ libraries and the Windows SDK needs Microsoft's license to be accepted: $($sysroot.license_url)")
+        $failure.Data['step'] = 'Fetch the Microsoft C++ libraries'
+        $failure.Data['hint'] = "Tick the launcher's Microsoft license box, or leave it unticked to install the Microsoft C++ Build Tools instead."
+        throw $failure
+    }
+    $xwinRoot = Resolve-PinyonLocalPath -RelativePath $sysroot.xwin.install_path
+    $xwin = Join-Path $xwinRoot $sysroot.xwin.executable
+    if (-not (Test-Path -LiteralPath $xwin -PathType Leaf)) {
+        $archive = Resolve-PinyonLocalPath -RelativePath ".local/downloads/$(Split-Path $sysroot.xwin.url -Leaf)"
+        Invoke-PinyonDownload -Uri $sysroot.xwin.url -Destination $archive -Sha256 $sysroot.xwin.sha256
+        $staging = "$xwinRoot.staging"
+        Remove-PinyonTree -Path $staging
+        [void](New-Item -ItemType Directory -Force -Path $staging)
+        # Windows 10 1803 and newer ship bsdtar.
+        & (Join-Path ([Environment]::SystemDirectory) 'tar.exe') -xzf $archive -C $staging
+        if ($LASTEXITCODE -ne 0) { throw "Could not unpack $archive." }
+        Remove-PinyonTree -Path $xwinRoot
+        $inner = @(Get-ChildItem -LiteralPath $staging -Directory)
+        [IO.Directory]::Move($inner[0].FullName, $xwinRoot)
+        Remove-PinyonTree -Path $staging
+    }
+    # xwin needs the Visual C++ runtime, which only the kit brings to a PC
+    # without Visual Studio.
+    $kit = Install-PinyonShiftGlueKit
+    if ($kit) { Copy-PinyonKitRuntime -KitRoot $kit -Destination $xwinRoot }
+    $root = Resolve-PinyonLocalPath -RelativePath $sysroot.install_path
+    # xwin renames unpacked files into the output, which fails across drives
+    # (os error 17), so the cache sits beside the sysroot, not in downloads.
+    $cache = "$root.xwin-cache"
+    Remove-PinyonTree -Path $root
+    # xwin's default layout links `sdk/include/<version>` to `.` even with
+    # --disable-symlinks, and Windows refuses that without Developer Mode
+    # (os error 1314). The winsysroot layout has real version folders.
+    # CMake's compiler check links Debug (msvcrtd.lib) in every configure.
+    & $xwin --accept-license --cache-dir $cache --http-retry 3 --arch x86_64 --variant desktop `
+        --sdk-version $sysroot.sdk_version splat --disable-symlinks --use-winsysroot-style --include-debug-libs `
+        --preserve-ms-arch-notation --output $root
+    if ($LASTEXITCODE -ne 0) { throw "xwin could not fetch the Microsoft C++ libraries (exit $LASTEXITCODE)." }
+    Remove-PinyonTree -Path $cache
+    $msvc = @(Get-ChildItem -LiteralPath (Join-Path $root 'VC/Tools/MSVC') -Directory)
+    $sdk = @(Get-ChildItem -LiteralPath (Join-Path $root 'Windows Kits/10/Include') -Directory)
+    if ($msvc.Count -ne 1 -or $sdk.Count -ne 1) { throw "xwin wrote an unexpected layout under $root." }
+    $crt = "VC/Tools/MSVC/$($msvc[0].Name)"
+    $kit = "Windows Kits/10"
+    $kitVersion = $sdk[0].Name
+    $record = [ordered]@{
+        schema_version = 2
+        xwin = $sysroot.xwin.version
+        sdk_version = $sysroot.sdk_version
+        include = @("$crt/include") + @('ucrt', 'um', 'shared', 'winrt' | ForEach-Object { "$kit/Include/$kitVersion/$_" })
+        lib = @("$crt/lib/x64") + @('ucrt', 'um' | ForEach-Object { "$kit/Lib/$kitVersion/$_/x64" })
+    }
+    [IO.File]::WriteAllText((Join-Path $root 'pinyon-sysroot.json'),
+        ($record | ConvertTo-Json) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+}
+
 function ConvertTo-PinyonCommandPath {
     param([AllowEmptyString()] [string]$PathValue)
 
@@ -224,10 +418,10 @@ function ConvertTo-PinyonCommandPath {
 }
 
 function Get-PinyonCMake {
-    param([Parameter(Mandatory)] [string]$VisualStudioRoot)
+    param([AllowEmptyString()] [string]$VisualStudioRoot = '')
     $config = Get-PinyonReleaseToolchain
     $candidate = Join-Path (Resolve-PinyonLocalPath $config.cmake.install_path) $config.cmake.executable
-    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf) -and $VisualStudioRoot) {
         $candidate = Join-Path $VisualStudioRoot 'Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe'
     }
     if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
@@ -329,6 +523,13 @@ function Get-PinyonFailureHint {
     }
     if ($text -match '(?i)No CMAKE_(C|CXX)_COMPILER could be found|is not a full path to an existing compiler|Could not find any instance of Visual Studio|Unable to initialize the Microsoft x64 build environment|vcvarsall|The C(XX)? compiler identification is unknown') {
         return 'The C++ build tools are missing or incomplete. Restart Windows after installing the Microsoft C++ Build Tools, then run setup again.'
+    }
+    # Ninja runs link steps through cmd.exe /C, so this message comes from the
+    # command shell, not from the compiler (#769: a link test failed this way
+    # in "D:\Games\Forza Horizon\..."). The cause is not established; these
+    # are the usual suspects.
+    if ($text -match 'FAILED:' -and $text -match '(?i)The system cannot find the path specified') {
+        return 'Windows'' command shell stopped a link step with "The system cannot find the path specified". Install Pinyon Shift in a folder without spaces (for example D:\PinyonShift), and check that no AutoRun command is set under HKCU\Software\Microsoft\Command Processor or HKLM\Software\Microsoft\Command Processor (some shell add-ons set one), then run setup again.'
     }
     $null
 }
@@ -552,6 +753,99 @@ function Get-PinyonBuildJobCount {
     $jobs
 }
 
+function Test-PinyonCpuFma {
+    # Windows reports AVX2 only when it also saves the AVX register state, and
+    # every CPU with AVX2 has FMA3.
+    if (-not ('PinyonShift.CpuFeatures' -as [type])) {
+        Add-Type -Namespace PinyonShift -Name CpuFeatures -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("kernel32.dll")]
+public static extern bool IsProcessorFeaturePresent(uint feature);
+'@
+    }
+    return [PinyonShift.CpuFeatures]::IsProcessorFeaturePresent(40)
+}
+
+# NP-3.5: 'auto' builds with FMA3 when this CPU has it (a faster build of the
+# same results); the build only runs on CPUs with the chosen baseline. 'v3'
+# (NEXT_LEVEL_RESEARCH.md NL-1.8) adds AVX2, BMI and MOVBE on top, for Haswell,
+# Zen and later CPUs; same results again. Every Windows game build, base and
+# v4, configures with what this returns (#744).
+function Select-PinyonCpuBaseline {
+    param([ValidateSet('auto', 'sse4.1', 'fma', 'v3')] [string]$CpuBaseline = 'auto')
+    $baseline = if ($CpuBaseline -ne 'auto') { $CpuBaseline }
+        elseif (Test-PinyonCpuFma) { 'fma' } else { 'sse4.1' }
+    $flags = switch ($baseline) {
+        'v3' { '-msse4.1 -mfma -ffp-contract=off -march=x86-64-v3' }
+        'fma' { '-msse4.1 -mfma -ffp-contract=off' }
+        default { '-msse4.1' }
+    }
+    [pscustomobject]@{
+        Baseline = $baseline
+        Flags = $flags
+        CMakeArguments = @("-DPINYON_SHIFT_CPU_BASELINE=$baseline", "-DCMAKE_C_FLAGS=$flags",
+            "-DCMAKE_CXX_FLAGS=$flags")
+    }
+}
+
+# Effective-build record beside a built executable, pinyon_shift_build.json
+# (#746): the same fields build-preview.ps1 writes for the base build, which
+# the game's diagnostics and tools/pinyon_title_update.py read, plus what a
+# measurement needs to name its exact build: the variant, the CPU flags and
+# the hash of every analysis file the generator read. Missing Git metadata (a
+# release install) reads as unknown instead of failing the build.
+function Write-PinyonBuildInfo {
+    param(
+        [Parameter(Mandatory)] [string]$BuildDirectory,
+        [Parameter(Mandatory)] [string]$Variant,
+        [Parameter(Mandatory)] $Cpu,
+        [Parameter(Mandatory)] [string]$AnalysisDirectory,
+        [string]$Configuration = 'Release'
+    )
+    $root = Get-PinyonRepoRoot
+    $git = Get-PinyonGit
+    $source = Get-PinyonSourceProvenance -Root $root -Git $git
+    $sdkRoot = Resolve-PinyonRexGlueRoot
+    $sdkCommit = 'unknown'
+    $sdkDirty = 'unknown'
+    if (Test-Path -LiteralPath (Join-Path $sdkRoot '.git')) {
+        $line = @(& $git -C $sdkRoot rev-parse HEAD 2>$null | Select-Object -First 1)
+        if ($line.Count -eq 1 -and $line[0] -match '^[0-9a-fA-F]{40}$') {
+            $sdkCommit = $line[0].ToLowerInvariant()
+            $sdkDirty = (@(& $git -C $sdkRoot status --porcelain --ignore-submodules=dirty).Count -ne 0).
+                ToString().ToLowerInvariant()
+        }
+    }
+    $payloadMarker = Join-Path $root '.pinyon-source-sha256'
+    $payload = if (Test-Path -LiteralPath $payloadMarker -PathType Leaf) {
+        (Get-Content -LiteralPath $payloadMarker -Raw).Trim().ToUpperInvariant()
+    } else { '' }
+    $analysis = [ordered]@{}
+    foreach ($file in Get-ChildItem -LiteralPath $AnalysisDirectory -Filter '*.toml' | Sort-Object Name) {
+        $analysis[$file.Name] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+    }
+    $executable = Join-Path $BuildDirectory 'pinyon_shift.exe'
+    $info = [ordered]@{
+        schema_version = 3
+        variant = $Variant
+        configuration = $Configuration
+        cpu_baseline = $Cpu.Baseline
+        cpu_flags = $Cpu.Flags
+        created_utc = [DateTime]::UtcNow.ToString('o')
+        executable_sha256 = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
+        generated_locally = $true
+        pinyon_shift_commit = $source.Commit
+        pinyon_shift_dirty = $source.Dirty.ToString().ToLowerInvariant()
+        pinyon_shift_source_payload_sha256 = $payload
+        rexglue_commit = $sdkCommit
+        rexglue_dirty = $sdkDirty
+        analysis_sha256 = $analysis
+    }
+    $path = Join-Path $BuildDirectory 'pinyon_shift_build.json'
+    [IO.File]::WriteAllText($path, ($info | ConvertTo-Json -Depth 4) + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false))
+    $path
+}
+
 # Machine facts that explain most setup failures (memory, disk, threads).
 function Get-PinyonSystemSummary {
     param([Parameter(Mandatory)] [string]$Root)
@@ -666,20 +960,39 @@ function Assert-PinyonFreeSpace {
     )
     $space = (Get-PinyonReleaseToolchain).disk_space_gb
     $needs = [ordered]@{}
+    $parts = @{}
     $install = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Root)).ToUpperInvariant()
     $system = ([Environment]::GetFolderPath('Windows') | ForEach-Object { [IO.Path]::GetPathRoot($_) }).ToUpperInvariant()
-    $needs[$install] = [double]$(if ($Android) { $space.android } elseif ($FirstBuild) { $space.first_build } else { $space.rebuild })
+    $buildNeed = [double]$(if ($Android) { $space.android } elseif ($FirstBuild) { $space.first_build } else { $space.rebuild })
+    $needs[$install] = $buildNeed
+    $parts[$install] = @("$buildNeed GB for the build, the game files and the tools")
     $systemNeed = [double]$space.system_drive + $(if ($BuildToolsMissing) { [double]$space.build_tools } else { 0 })
-    if ($needs.Contains($system)) { $needs[$system] += $systemNeed } else { $needs[$system] = $systemNeed }
+    $systemParts = @("$([double]$space.system_drive) GB for temporary files")
+    if ($BuildToolsMissing) { $systemParts += "$([double]$space.build_tools) GB for the Microsoft C++ Build Tools" }
+    if ($needs.Contains($system)) {
+        $needs[$system] += $systemNeed
+        $parts[$system] += $systemParts
+    }
+    else {
+        $needs[$system] = $systemNeed
+        $parts[$system] = $systemParts
+    }
     $short = foreach ($drive in $needs.Keys) {
         try { $free = [IO.DriveInfo]::new($drive).AvailableFreeSpace / 1GB } catch { continue }
         if ($free -lt $needs[$drive]) {
-            "$($drive.TrimEnd('')) has $([Math]::Round($free, 1)) GB free and needs $($needs[$drive]) GB"
+            "$($drive.TrimEnd('')) has $([Math]::Round($free, 1)) GB free and needs $($needs[$drive]) GB ($($parts[$drive] -join ' + '))"
         }
     }
     if (@($short).Count -gt 0) {
-        $hint = "Free up space ($(@($short) -join '; ')), then start setup again. " +
-            'The install drive holds the build; the Windows drive holds the build tools and temporary files.'
+        # Only the Build Tools and the compilers' scratch files go to the Windows
+        # drive; everything else follows the install folder (#725).
+        $where = if ($install -eq $system) {
+            "Pinyon Shift is installing to $Root, on the Windows drive. Choose Change next to Installs to in the launcher " +
+            "to install on a drive with $buildNeed GB free; the Windows drive then needs only $systemNeed GB."
+        } else {
+            "The install drive ($install) holds the build; the Windows drive ($system) holds the build tools and temporary files."
+        }
+        $hint = "Free up space ($(@($short) -join '; ')), then start setup again. $where"
         $failure = [Exception]::new("Not enough free disk space for the build. $hint")
         $failure.Data['step'] = 'Check free disk space'
         $failure.Data['error_kind'] = 'disk-space'
@@ -691,6 +1004,185 @@ function Assert-PinyonFreeSpace {
 # Reachability of the hosts the remaining downloads need, checked once before
 # the first download so a proxy, firewall or offline PC is named up front
 # instead of failing one tool at a time (#393).
+# TP-2/TP-3: the prebuilt ShiftGlue kit for the pinned revision, when the
+# toolchain config names one (config/release-toolchain.json shiftglue_kit).
+# A kit for another revision is ignored: the build then uses the source tree.
+# PINYON_SHIFT_SOURCE_SDK=1 forces the source tree.
+function Get-PinyonShiftGlueKitEntry {
+    $config = Get-PinyonReleaseToolchain
+    if ($env:PINYON_SHIFT_SOURCE_SDK -eq '1') { return $null }
+    $kits = $config.PSObject.Properties['shiftglue_kit']
+    if ($null -eq $kits) { return $null }
+    $entry = $kits.Value.PSObject.Properties['windows-x64']
+    if ($null -eq $entry -or $entry.Value.revision -ne $config.rexglue.revision) { return $null }
+    $entry.Value
+}
+# The unpacked kit's folder when it holds the pinned revision, else $null.
+function Get-PinyonShiftGlueKitRoot {
+    if ($env:PINYON_SHIFT_SOURCE_SDK -eq '1') { return $null }
+    $config = Get-PinyonReleaseToolchain
+    $kitRoot = Resolve-PinyonLocalPath -RelativePath '.local/shiftglue-kit'
+    $manifest = Join-Path $kitRoot 'kit.json'
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { return $null }
+    $kit = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+    if ($kit.shiftglue_revision -ne $config.rexglue.revision -or $kit.platform -ne 'windows-x64') { return $null }
+    $kitRoot
+}
+# Copies the kit's Microsoft C++ runtime DLLs (redist/) beside the programs
+# in a folder that need it, without replacing any. A PC without the Visual C++
+# redistributable has no VCRUNTIME140.dll: the kit's rexglue.exe and xwin.exe
+# fail to start there (0xC0000135) without app-local copies.
+function Copy-PinyonKitRuntime {
+    param([Parameter(Mandatory)] [string]$KitRoot, [Parameter(Mandatory)] [string]$Destination)
+    $redist = Join-Path $KitRoot 'redist'
+    if (-not (Test-Path -LiteralPath $redist)) { return }
+    foreach ($dll in Get-ChildItem -LiteralPath $redist -Filter '*.dll') {
+        $target = Join-Path $Destination $dll.Name
+        if (-not (Test-Path -LiteralPath $target)) { Copy-Item -LiteralPath $dll.FullName -Destination $target }
+    }
+}
+# Gives an unpacked release archive the current time, once per key. The
+# archives store a fixed 1980 date so they are reproducible, and unpacked files
+# keep it: a kit header that changed with an update then looks older than the
+# objects and precompiled headers built from the old one, Ninja rebuilds none
+# of them, and clang stops with "has been modified since the precompiled header
+# was built" (#1097, #1098).
+function Update-PinyonUnpackedTimes {
+    param([Parameter(Mandatory)] [string]$Root, [Parameter(Mandatory)] [string]$Key)
+    $stamp = Join-Path $Root '.pinyon-fresh'
+    if ((Test-Path -LiteralPath $stamp -PathType Leaf) -and
+        (Get-Content -LiteralPath $stamp -Raw).Trim() -eq $Key) {
+        return
+    }
+    $now = [DateTime]::UtcNow
+    foreach ($file in [IO.Directory]::EnumerateFiles($Root, '*', [IO.SearchOption]::AllDirectories)) {
+        try { [IO.File]::SetLastWriteTimeUtc($file, $now) } catch { }
+    }
+    Set-Content -LiteralPath $stamp -Value $Key -Encoding ascii
+}
+# Removes a build tree's precompiled headers when the compiler setup they were
+# made with changed: the kit or pinned revision, the LLVM or the MSVC headers
+# (the xwin sysroot's version). Clang refuses a PCH from another MSVC version
+# (#1096) or whose headers changed size (#1097), and Ninja sees neither. A tree
+# without the record (built before it existed) loses its PCHs once.
+function Remove-PinyonStalePch {
+    param([Parameter(Mandatory)] [string]$BuildDirectory)
+    if (-not (Test-Path -LiteralPath $BuildDirectory -PathType Container)) { return }
+    $config = Get-PinyonReleaseToolchain
+    $kit = ''
+    $manifest = Join-Path (Resolve-PinyonLocalPath -RelativePath '.local/shiftglue-kit') 'kit.json'
+    if (Test-Path -LiteralPath $manifest -PathType Leaf) {
+        $kit = [string](Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json).shiftglue_revision
+    }
+    $key = "kit=$kit;revision=$($config.rexglue.revision);llvm=$($config.llvm.version);msvc=$env:VCToolsVersion"
+    $record = Join-Path $BuildDirectory '.pinyon-pch-key'
+    if ((Test-Path -LiteralPath $record -PathType Leaf) -and
+        (Get-Content -LiteralPath $record -Raw).Trim() -eq $key) {
+        return
+    }
+    foreach ($pch in [IO.Directory]::EnumerateFiles($BuildDirectory, 'cmake_pch*.pch', [IO.SearchOption]::AllDirectories)) {
+        try { [IO.File]::Delete($pch) } catch { }
+    }
+    Set-Content -LiteralPath $record -Value $key -Encoding ascii
+}
+# Downloads and unpacks the pinned kit. Returns its folder, or $null (with the
+# reason on the warning stream) so setup can fall back to the source tree.
+function Install-PinyonShiftGlueKit {
+    $existing = Get-PinyonShiftGlueKitRoot
+    if ($existing) {
+        Update-PinyonUnpackedTimes -Root $existing -Key (Get-PinyonReleaseToolchain).rexglue.revision
+        Copy-PinyonKitRuntime -KitRoot $existing -Destination (Join-Path $existing 'bin')
+        return $existing
+    }
+    $entry = Get-PinyonShiftGlueKitEntry
+    if ($null -eq $entry) { return $null }
+    $kitRoot = Resolve-PinyonLocalPath -RelativePath '.local/shiftglue-kit'
+    $staging = "$kitRoot-staging"
+    try {
+        $archive = Resolve-PinyonLocalPath -RelativePath ".local/downloads/shiftglue-kit-$($entry.revision.Substring(0, 12))-windows-x64.zip"
+        Invoke-PinyonDownload -Uri $entry.url -Destination $archive -Sha256 $entry.sha256
+        if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+        Expand-PinyonZip -Archive $archive -Destination $staging
+        $children = @(Get-ChildItem -LiteralPath $staging -Directory)
+        if ($children.Count -ne 1) { throw 'The ShiftGlue kit archive layout is not recognized.' }
+        if (Test-Path -LiteralPath $kitRoot) { Remove-Item -LiteralPath $kitRoot -Recurse -Force }
+        Move-Item -LiteralPath $children[0].FullName -Destination $kitRoot
+        Remove-Item -LiteralPath $staging -Recurse -Force
+    }
+    catch {
+        Write-Warning "The prebuilt ShiftGlue kit could not be installed; building ShiftGlue from source instead. $($_.Exception.Message)"
+        return $null
+    }
+    $installed = Get-PinyonShiftGlueKitRoot
+    if ($installed) {
+        Update-PinyonUnpackedTimes -Root $installed -Key (Get-PinyonReleaseToolchain).rexglue.revision
+        Copy-PinyonKitRuntime -KitRoot $installed -Destination (Join-Path $installed 'bin')
+    }
+    $installed
+}
+# TP-3 host split: the release's prebuilt host objects for a variant (base or
+# v4), pinned like the kit by tools/apply-prebuilt-pins.py.
+function Get-PinyonHostObjectsEntry {
+    param([Parameter(Mandatory)] [ValidateSet('base', 'v4')] [string]$Variant)
+    $config = Get-PinyonReleaseToolchain
+    $all = $config.PSObject.Properties['host_objects']
+    if ($null -eq $all) { return $null }
+    $platform = $all.Value.PSObject.Properties['windows-x64']
+    if ($null -eq $platform) { return $null }
+    $entry = $platform.Value.PSObject.Properties[$Variant]
+    if ($null -eq $entry -or $entry.Value.revision -ne $config.rexglue.revision) { return $null }
+    $entry.Value
+}
+# Downloads and unpacks them for a build from the kit. Returns the folder to
+# pass as PINYON_SHIFT_HOST_OBJECTS, or '' to compile the host code here: the
+# game build also checks their fingerprint and falls back on its own.
+function Install-PinyonHostObjects {
+    param([Parameter(Mandatory)] [ValidateSet('base', 'v4')] [string]$Variant)
+    $entry = Get-PinyonHostObjectsEntry -Variant $Variant
+    if ($null -eq $entry -or $null -eq (Get-PinyonShiftGlueKitRoot)) { return '' }
+    $target = Resolve-PinyonLocalPath -RelativePath ".local/host-objects/$Variant"
+    $stamp = Join-Path $target '.asset-sha256'
+    if ((Test-Path -LiteralPath $stamp -PathType Leaf) -and
+        (Get-Content -LiteralPath $stamp -Raw).Trim() -eq $entry.sha256) {
+        return $target
+    }
+    $staging = "$target-staging"
+    try {
+        $archive = Resolve-PinyonLocalPath -RelativePath ".local/downloads/$(Split-Path ([Uri]$entry.url).AbsolutePath -Leaf)"
+        Invoke-PinyonDownload -Uri $entry.url -Destination $archive -Sha256 $entry.sha256
+        Remove-PinyonTree -Path $staging
+        Expand-PinyonZip -Archive $archive -Destination $staging
+        $children = @(Get-ChildItem -LiteralPath $staging -Directory)
+        if ($children.Count -ne 1) { throw 'The host objects archive layout is not recognized.' }
+        Remove-PinyonTree -Path $target
+        Move-Item -LiteralPath $children[0].FullName -Destination $target
+        Remove-PinyonTree -Path $staging
+        Update-PinyonUnpackedTimes -Root $target -Key $entry.sha256
+        Set-Content -LiteralPath $stamp -Value $entry.sha256 -Encoding ascii
+    }
+    catch {
+        Write-Warning "The prebuilt host objects could not be installed; compiling the host code instead. $($_.Exception.Message)"
+        return ''
+    }
+    $target
+}
+
+# A repacked tool archive (tools/repack-toolchain.py) holds each binary once and
+# lists its other names in pinyon-links.json; make those names hard links (no
+# extra disk), or copies where the volume has none.
+function Install-PinyonToolLinks {
+    param([Parameter(Mandatory)] [string]$Root)
+    $list = Join-Path $Root 'pinyon-links.json'
+    if (-not (Test-Path -LiteralPath $list -PathType Leaf)) { return }
+    $links = Get-Content -LiteralPath $list -Raw | ConvertFrom-Json
+    foreach ($property in $links.PSObject.Properties) {
+        $link = Join-Path $Root $property.Name
+        $target = Join-Path (Split-Path $link -Parent) $property.Value
+        if (Test-Path -LiteralPath $link) { Remove-Item -LiteralPath $link -Force }
+        try { [void](New-Item -ItemType HardLink -Path $link -Target $target -ErrorAction Stop) }
+        catch { Copy-Item -LiteralPath $target -Destination $link -Force }
+    }
+}
 function Assert-PinyonDownloadHosts {
     param([Parameter(Mandatory)] [AllowEmptyCollection()] [string[]]$Uris)
     $hosts = @($Uris | Where-Object { $_ } | ForEach-Object { ([Uri]$_).GetLeftPart([UriPartial]::Authority) } |
@@ -734,58 +1226,71 @@ function Enter-PinyonBuildEnvironment {
     }
     $root = Get-PinyonRepoRoot
     $config = Get-PinyonReleaseToolchain
-    $vsRoot = Get-PinyonVisualStudioRoot
-    $devCmd = Join-Path $vsRoot 'Common7/Tools/VsDevCmd.bat'
-    $inheritedPath = $env:PATH
-    $inheritedTemp = $env:TEMP
-    $inheritedTmp = $env:TMP
-    try {
-        # Quoted PATH entries containing parentheses break VsDevCmd's batch parser.
-        $env:PATH = ConvertTo-PinyonCommandPath -PathValue $inheritedPath
-        # VsDevCmd expands TEMP unquoted inside a parenthesized block even
-        # when debug logging is disabled. Portable install paths can break it.
-        $buildTemp = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'PinyonShift\build-temp'
-        New-Item -ItemType Directory -Path $buildTemp -Force | Out-Null
-        $env:TEMP = $buildTemp
-        $env:TMP = $buildTemp
-        $marker = '::pinyon-environment::'
-        # Merged stderr arrives as ErrorRecords; under 'Stop' the first one
-        # would end the function before the exit code is known.
-        $previousPreference = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $output = @(& $env:ComSpec /d /s /c "`"$devCmd`" -arch=x64 -host_arch=x64 && echo $marker&& set" 2>&1 |
-            ForEach-Object { $_.ToString() })
-        $devCmdExit = $LASTEXITCODE
-        $ErrorActionPreference = $previousPreference
+    $sysroot = if (Test-PinyonUseMsvcSysroot) { Get-PinyonMsvcSysroot } else { $null }
+    if ($sysroot) {
+        # TP-4: no Build Tools; the fetched CRT and Windows SDK instead.
+        $vsRoot = ''
+        $env:INCLUDE = $sysroot.Include -join ';'
+        $env:LIB = $sysroot.Lib -join ';'
+        # What the developer prompt would say: the game build compares it with
+        # the kit's runtime and fingerprints the host objects with it.
+        $env:VCToolsVersion = $sysroot.MsvcVersion
+        Remove-Item Env:VCToolsRedistDir -ErrorAction SilentlyContinue
     }
-    finally {
-        $env:PATH = $inheritedPath
-        $env:TEMP = $inheritedTemp
-        $env:TMP = $inheritedTmp
-    }
-    $markerIndex = -1
-    for ($i = 0; $i -lt $output.Count; $i++) {
-        if ($output[$i].Trim() -eq $marker) { $markerIndex = $i; break }
-    }
-    if ($devCmdExit -ne 0 -or $markerIndex -lt 0) {
-        # VsDevCmd prints its own [ERROR:...] lines; keep them in the report.
-        $devCmdOutput = @($output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last 20)
-        $failure = [Exception]::new('Unable to initialize the Microsoft x64 build environment. Restart Windows after installing the Microsoft C++ Build Tools, then run setup again. ' +
-            "VsDevCmd: $devCmd")
-        $failure.Data['step'] = 'Initialize the Microsoft x64 build environment'
-        $failure.Data['exit_code'] = $devCmdExit
-        $failure.Data['command'] = "`"$devCmd`" -arch=x64 -host_arch=x64"
-        $failure.Data['error_excerpt'] = [string[]]$devCmdOutput
-        throw $failure
-    }
-    $lines = if ($markerIndex + 1 -lt $output.Count) { $output[($markerIndex + 1)..($output.Count - 1)] } else { @() }
-    foreach ($line in $lines) {
-        $separator = $line.IndexOf('=')
-        if ($separator -gt 0) {
-            $name = $line.Substring(0, $separator)
-            if ($name -in @('TEMP', 'TMP')) { continue }
-            [Environment]::SetEnvironmentVariable($name,
-                $line.Substring($separator + 1), 'Process')
+    else {
+        $vsRoot = Get-PinyonVisualStudioRoot
+        $devCmd = Join-Path $vsRoot 'Common7/Tools/VsDevCmd.bat'
+        $inheritedPath = $env:PATH
+        $inheritedTemp = $env:TEMP
+        $inheritedTmp = $env:TMP
+        try {
+            # Quoted PATH entries containing parentheses break VsDevCmd's batch parser.
+            $env:PATH = ConvertTo-PinyonCommandPath -PathValue $inheritedPath
+            # VsDevCmd expands TEMP unquoted inside a parenthesized block even
+            # when debug logging is disabled. Portable install paths can break it.
+            $buildTemp = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'PinyonShift\build-temp'
+            New-Item -ItemType Directory -Path $buildTemp -Force | Out-Null
+            $env:TEMP = $buildTemp
+            $env:TMP = $buildTemp
+            $marker = '::pinyon-environment::'
+            # Merged stderr arrives as ErrorRecords; under 'Stop' the first one
+            # would end the function before the exit code is known.
+            $previousPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $output = @(& $env:ComSpec /d /s /c "`"$devCmd`" -arch=x64 -host_arch=x64 && echo $marker&& set" 2>&1 |
+                ForEach-Object { $_.ToString() })
+            $devCmdExit = $LASTEXITCODE
+            $ErrorActionPreference = $previousPreference
+        }
+        finally {
+            $env:PATH = $inheritedPath
+            $env:TEMP = $inheritedTemp
+            $env:TMP = $inheritedTmp
+        }
+        $markerIndex = -1
+        for ($i = 0; $i -lt $output.Count; $i++) {
+            if ($output[$i].Trim() -eq $marker) { $markerIndex = $i; break }
+        }
+        if ($devCmdExit -ne 0 -or $markerIndex -lt 0) {
+            # VsDevCmd prints its own [ERROR:...] lines; keep them in the report.
+            $devCmdOutput = @($output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Last 20)
+            $failure = [Exception]::new('Unable to initialize the Microsoft x64 build environment. Restart Windows after installing the Microsoft C++ Build Tools, then run setup again. ' +
+                "VsDevCmd: $devCmd")
+            $failure.Data['step'] = 'Initialize the Microsoft x64 build environment'
+            $failure.Data['exit_code'] = $devCmdExit
+            $failure.Data['command'] = "`"$devCmd`" -arch=x64 -host_arch=x64"
+            $failure.Data['error_excerpt'] = [string[]]$devCmdOutput
+            throw $failure
+        }
+        $lines = if ($markerIndex + 1 -lt $output.Count) { $output[($markerIndex + 1)..($output.Count - 1)] } else { @() }
+        foreach ($line in $lines) {
+            $separator = $line.IndexOf('=')
+            if ($separator -gt 0) {
+                $name = $line.Substring(0, $separator)
+                if ($name -in @('TEMP', 'TMP')) { continue }
+                [Environment]::SetEnvironmentVariable($name,
+                    $line.Substring($separator + 1), 'Process')
+            }
         }
     }
     $llvm = [IO.Path]::GetFullPath((Join-Path $root $config.llvm.install_path))
@@ -796,7 +1301,7 @@ function Enter-PinyonBuildEnvironment {
     if (Test-Path -LiteralPath $ninja -PathType Leaf) {
         $env:PATH = "$(Split-Path $ninja -Parent);$env:PATH"
     }
-    else {
+    elseif ($vsRoot) {
         $ninja = Join-Path $vsRoot 'Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe'
     }
     Assert-PinyonBuildCapabilities -LlvmRoot $llvm
@@ -831,7 +1336,7 @@ function Reset-PinyonRelocatedCMakeCache {
 function Set-PinyonGitEnvironment {
     param(
         [Parameter(Mandatory)] [string]$Root,
-        [Parameter(Mandatory)] [string]$Git
+        [AllowEmptyString()] [string]$Git = ''
     )
 
     # Settings for this process and every git it starts, passed as command
@@ -841,15 +1346,20 @@ function Set-PinyonGitEnvironment {
     #   dubious ownership", #599), as on drives formatted on another PC.
     #   The checkout and its nested SDK repositories are the player's own.
     # - A global http.sslCAInfo left by a removed or broken Git for Windows
-    #   failed every clone with "error adding trust anchors" (#604); the
-    #   pinned MinGit uses its own certificate bundle.
+    #   failed every clone with "error adding trust anchors" (#604). The
+    #   pinned MinGit uses Windows' certificate store through schannel and
+    #   ignores any CA file. Pointing it at its own bundle instead failed
+    #   under a user folder with a non-ASCII name ("schannel: failed to open
+    #   CA file", an accented C:\Users\Theo); git only skips the file when
+    #   the backend is set explicitly.
     $trusted = $Root.Replace('\', '/').TrimEnd('/')
     $settings = [Collections.Generic.List[string[]]]::new()
     $settings.Add(@('safe.directory', $trusted))
     $settings.Add(@('safe.directory', "$trusted/*"))
     $bundle = Join-Path (Split-Path (Split-Path $Git -Parent) -Parent) 'mingw64\etc\ssl\certs\ca-bundle.crt'
     if (Test-Path -LiteralPath $bundle -PathType Leaf) {
-        $settings.Add(@('http.sslCAInfo', $bundle.Replace('\', '/')))
+        $settings.Add(@('http.sslBackend', 'schannel'))
+        $settings.Add(@('http.schannelUseSSLCAInfo', 'false'))
     }
     $count = 0
     $existing = [Environment]::GetEnvironmentVariable('GIT_CONFIG_COUNT')
@@ -868,6 +1378,17 @@ function Set-PinyonGitEnvironment {
     [Environment]::SetEnvironmentVariable('GIT_CONFIG_COUNT', [string]$count)
 }
 
+# The pinned MinGit, downloaded once.
+function Install-PinyonGit {
+    $root = Get-PinyonRepoRoot
+    $config = Get-PinyonReleaseToolchain
+    $gitRoot = [IO.Path]::GetFullPath((Join-Path $root $config.git.install_path))
+    if (Test-Path -LiteralPath (Join-Path $gitRoot $config.git.executable) -PathType Leaf) { return }
+    $archive = Resolve-PinyonLocalPath -RelativePath ".local/downloads/mingit-$($config.git.version).zip"
+    Invoke-PinyonDownload -Uri $config.git.url -Destination $archive -Sha256 $config.git.sha256
+    [void](New-Item -ItemType Directory -Force -Path $gitRoot)
+    Expand-PinyonZip -Archive $archive -Destination $gitRoot
+}
 function Get-PinyonGit {
     $root = Get-PinyonRepoRoot
     $config = Get-PinyonReleaseToolchain
@@ -882,7 +1403,7 @@ function Get-PinyonGit {
 function Get-PinyonSourceProvenance {
     param(
         [Parameter(Mandatory)] [string]$Root,
-        [Parameter(Mandatory)] [string]$Git
+        [AllowEmptyString()] [string]$Git = ''
     )
 
     $sourceCommit = $null
@@ -890,7 +1411,7 @@ function Get-PinyonSourceProvenance {
     # Launcher payloads are source archives, not Git working trees. Avoid
     # invoking Git there because Windows PowerShell promotes native stderr to a
     # terminating error before the packaged provenance fallback can run.
-    if (Test-Path -LiteralPath (Join-Path $Root '.git')) {
+    if ($Git -and (Test-Path -LiteralPath (Join-Path $Root '.git'))) {
         $gitCommit = @(& $Git -C $Root rev-parse HEAD 2>$null | Select-Object -First 1)
         if ($gitCommit.Count -eq 1 -and $gitCommit[0] -match '^[0-9a-fA-F]{40}$') {
             $sourceCommit = $gitCommit[0].ToLowerInvariant()

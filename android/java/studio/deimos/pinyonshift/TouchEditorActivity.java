@@ -20,15 +20,16 @@ public final class TouchEditorActivity extends Activity {
     private Button propertyButton,testButton,reveal;
     private int active,page;
     private boolean propertyMode,testMode,toolsHidden,picker;
+    private boolean showGrid=true,snapGrid=true;private int gridDp=24;
     private Rect safe=new Rect();
     private Bitmap artwork;
     private LayoutHistory history;private String savedLayout;private boolean changingHistory,gesture;
     @Override public void onCreate(Bundle saved){
-        super.onCreate(saved);UiPreferences.load(this);layout.load(this);savedLayout=layout.serialize();history=new LayoutHistory(savedLayout);artwork=TouchArtwork.bitmap(this);
+        super.onCreate(saved);UiPreferences.load(this);showGrid=getPreferences(0).getBoolean("grid",true);snapGrid=getPreferences(0).getBoolean("snap",true);gridDp=getPreferences(0).getInt("grid_dp",24);if(gridDp!=16&&gridDp!=24&&gridDp!=32)gridDp=24;layout.load(this);savedLayout=layout.serialize();history=new LayoutHistory(savedLayout);artwork=TouchArtwork.bitmap(this);
         if(saved!=null){layout.parse(saved.getString("draft",""));active=Math.max(0,Math.min(TouchLayout.LABELS.length-1,saved.getInt("active")));page=Math.max(0,Math.min(3,saved.getInt("page")));savedLayout=saved.getString("baseline",savedLayout);history.record(layout.serialize());propertyMode=saved.getBoolean("properties");toolsHidden=saved.getBoolean("tools_hidden");}
         root=new FrameLayout(this);root.addView(new FestivalUi.Artwork(this),new FrameLayout.LayoutParams(-1,-1));
         editor=new Editor();root.addView(editor,new FrameLayout.LayoutParams(-1,-1));
-        properties=new ScrollView(this);properties.setBackgroundColor(FestivalUi.PANEL);root.addView(properties,new FrameLayout.LayoutParams(-1,-1));
+        properties=new ScrollView(this);properties.setBackground(FestivalUi.surface(this,FestivalUi.PANEL,16));boolean wide=getResources().getConfiguration().screenWidthDp>=650&&getResources().getConfiguration().fontScale<1.5f;root.addView(properties,new FrameLayout.LayoutParams(-1,-1,Gravity.RIGHT));
         header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);header.setBackgroundColor(0xf514181f);
         TextView title=FestivalUi.text(this,"Touch layout",18,FestivalUi.TEXT);title.setPadding(FestivalUi.dp(this,12),0,FestivalUi.dp(this,8),0);header.addView(title,new LinearLayout.LayoutParams(0,-2,1));
         propertyButton=headerAction("Properties",()->{propertyMode=!propertyMode;testMode=false;fingers.clear();showMode();});
@@ -46,8 +47,9 @@ public final class TouchEditorActivity extends Activity {
     }
     private void editTools(){
         history.record(layout.serialize());
-        String[] labels={"Undo last edit","Redo last edit","Check touch areas","Hide tools"};
+        String[] labels={"Undo last edit","Redo last edit","Check touch areas","Hide tools","Gridlines: "+(showGrid?"On":"Off"),"Snapping: "+(snapGrid?"On":"Off"),"Grid spacing: "+gridDp+" dp"};
         FestivalUi.choose(this,"Layout tools",labels,-1,index->{
+            if(index>=4){if(index==4)showGrid=!showGrid;else if(index==5)snapGrid=!snapGrid;else gridDp=gridDp==16?24:gridDp==24?32:16;getPreferences(0).edit().putBoolean("grid",showGrid).putBoolean("snap",snapGrid).putInt("grid_dp",gridDp).apply();editor.invalidate();return;}
             if(index==3){toolsHidden=true;propertyMode=false;showMode();return;}
             if(index==2){java.util.List<String> warnings=LayoutWarnings.check(layout,editor.getWidth(),editor.getHeight(),safe.left,safe.top,safe.right,safe.bottom,FestivalUi.dp(this,48));
                 FestivalUi.explain(this,"Touch areas",warnings.isEmpty()?"No overlapping or small targets found. Test simultaneous presses before saving.":String.join("\n",warnings)+"\n\nWarnings do not move your controls.");return;}
@@ -107,10 +109,10 @@ public final class TouchEditorActivity extends Activity {
             FestivalUi.toggle(this,body,"Hide with controller","",layout.autoHide,on->{layout.autoHide=on;changed();});
             FestivalUi.toggle(this,body,"Touch vibration","Follows Android haptic settings.",layout.haptics,on->{layout.haptics=on;changed();});
         }else{
-            FestivalUi.toggle(this,body,"Modern driving icons","Turn off for controller letters.",layout.drivingLabels,on->{layout.drivingLabels=on;changed();});
-            FestivalUi.toggle(this,body,"Button names","Button codes above each icon and action names below.",layout.buttonHints,on->{layout.buttonHints=on;changed();});
+            FestivalUi.toggle(this,body,"Driving action names","Turn off for controller button codes.",layout.drivingLabels,on->{layout.drivingLabels=on;changed();});
+            FestivalUi.toggle(this,body,"Button codes","Small controller codes above the action names.",layout.buttonHints,on->{layout.buttonHints=on;changed();});
             FestivalUi.slider(this,body,"Button background","",20,100,1,Math.round(layout.opacity*100),n->n+"%",n->{layout.opacity=n/100f;changed();});
-            FestivalUi.slider(this,body,"Icon and label opacity","",30,100,1,Math.round(layout.iconOpacity*100),n->n+"%",n->{layout.iconOpacity=n/100f;changed();});
+            FestivalUi.slider(this,body,"Text label opacity","",30,100,1,Math.round(layout.iconOpacity*100),n->n+"%",n->{layout.iconOpacity=n/100f;changed();});
             FestivalUi.toggle(this,body,"High contrast","Raises backing opacity to at least 85%.",layout.highContrast,on->{layout.highContrast=on;changed();});
             FestivalUi.slider(this,body,"Global fade timer","",0,120,1,Math.round(layout.idleSeconds),n->n==0?"Always visible":n+" seconds",n->{layout.idleSeconds=n;changed();});
         }
@@ -135,7 +137,8 @@ public final class TouchEditorActivity extends Activity {
             int stick=x<safe.left+width()*.45f?10:x>safe.left+width()*.55f?13:-1;
             if(stick>=0&&!layout.hidden[stick]&&layout.enabled(stick)&&(stick==10?layout.leftMode:layout.rightMode)==2)found=stick;
         }return found;}
-        @Override protected void onDraw(Canvas canvas){for(int i=0;i<layout.values.length;i++){if(!shown(i)&&!(i==active&&!testMode))continue;boolean stick=TouchLayout.LABELS[i].equals("LS")||TouchLayout.LABELS[i].equals("RS");float opacity=layout.highContrast?Math.max(.85f,layout.opacity):layout.opacity;
+        @Override protected void onDraw(Canvas canvas){if(showGrid&&!testMode){paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(1);paint.setColor(0x35ffffff);float step=FestivalUi.dp(TouchEditorActivity.this,gridDp);for(float x=safe.left;x<=getWidth()-safe.right;x+=step)canvas.drawLine(x,safe.top,x,getHeight()-safe.bottom,paint);for(float y=safe.top;y<=getHeight()-safe.bottom;y+=step)canvas.drawLine(safe.left,y,getWidth()-safe.right,y,paint);paint.setColor(0x70ff326e);canvas.drawLine(safe.left+width()/2,safe.top,safe.left+width()/2,getHeight()-safe.bottom,paint);canvas.drawLine(safe.left,safe.top+height()/2,getWidth()-safe.right,safe.top+height()/2,paint);}
+          for(int i=0;i<layout.values.length;i++){if(!shown(i)&&!(i==active&&!testMode))continue;boolean stick=TouchLayout.LABELS[i].equals("LS")||TouchLayout.LABELS[i].equals("RS");float opacity=layout.highContrast?Math.max(.85f,layout.opacity):layout.opacity;
             TouchIconPainter.draw(canvas,paint,artwork,layout.mapping[i],x(i),y(i),radius(i),opacity,layout.iconOpacity,fingers.containsValue(i)&&!stick,!shown(i),layout.drivingLabels,layout.buttonHints,!testMode&&i==active);
             if(stick)TouchIconPainter.draw(canvas,paint,artwork,layout.mapping[i],x(i),y(i),radius(i)*.55f,opacity,layout.iconOpacity,fingers.containsValue(i),!shown(i),layout.drivingLabels,layout.buttonHints,false,true);}}
         @Override public boolean onTouchEvent(MotionEvent event){
@@ -145,7 +148,7 @@ public final class TouchEditorActivity extends Activity {
                 if(found>=0)fingers.put(id,found);else fingers.remove(id);}changed();return true;}
             pinch.onTouchEvent(event);if(event.getPointerCount()>1){dragging=false;return true;}
             if(event.getActionMasked()==MotionEvent.ACTION_DOWN){int found=hit(event.getX(),event.getY());dragging=found>=0;if(dragging){history.record(layout.serialize());gesture=true;active=found;dx=event.getX()-x(active);dy=event.getY()-y(active);changed();}return true;}
-            if(event.getActionMasked()==MotionEvent.ACTION_MOVE&&dragging&&!pinch.isInProgress()){float rx=radius(active)*Math.max(1,TouchIcons.BOUNDS[layout.mapping[active]][0]),ry=radius(active)*Math.max(1,TouchIcons.BOUNDS[layout.mapping[active]][1]);layout.values[active][0]=Math.max(rx,Math.min(width()-rx,event.getX()-dx-safe.left))/width();layout.values[active][1]=Math.max(ry,Math.min(height()-ry,event.getY()-dy-safe.top))/height();changed();}
+            if(event.getActionMasked()==MotionEvent.ACTION_MOVE&&dragging&&!pinch.isInProgress()){float rx=radius(active)*Math.max(1,TouchIcons.BOUNDS[layout.mapping[active]][0]),ry=radius(active)*Math.max(1,TouchIcons.BOUNDS[layout.mapping[active]][1]);layout.values[active][0]=LayoutGrid.position(event.getX()-dx-safe.left,rx,width()-rx,FestivalUi.dp(TouchEditorActivity.this,gridDp),snapGrid)/width();layout.values[active][1]=LayoutGrid.position(event.getY()-dy-safe.top,ry,height()-ry,FestivalUi.dp(TouchEditorActivity.this,gridDp),snapGrid)/height();changed();}
             else if(event.getActionMasked()==MotionEvent.ACTION_UP||event.getActionMasked()==MotionEvent.ACTION_CANCEL){dragging=false;gesture=false;changed();}
             return true;
         }

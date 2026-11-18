@@ -28,6 +28,7 @@
 #include <rex/ui/vulkan/presenter.h>
 
 #include "cheats.h"
+#include "cheats_travel.h"
 #include "config/default_keys.h"
 #include "mod/mod_host.h"
 #include "pinyon_shift_diagnostics.h"
@@ -119,6 +120,25 @@ std::string Upper(std::string text) {
   return text;
 }
 
+std::string Lower(std::string text) {
+  std::transform(text.begin(), text.end(), text.begin(),
+                 [](unsigned char c) { return char(std::tolower(c)); });
+  return text;
+}
+
+// present_effect values the presenter runs through a temporal upscaler
+// provider; it falls back to FSR 1 when the provider can't run.
+bool IsTemporalEffect(std::string_view effect) {
+  return SameValue(effect, "fsr2") || SameValue(effect, "fsr3") || SameValue(effect, "dlss");
+}
+
+std::string TemporalUpscalerLabel(std::string_view id) {
+  return SameValue(id, "fsr2")   ? "FSR 2"
+         : SameValue(id, "fsr3") ? "FSR 3"
+         : SameValue(id, "dlss") ? "DLSS"
+                                 : Upper(std::string(id));
+}
+
 // Screens of one opening of the menu. The root screen's rows own the pages
 // (every other screen sits above the root on the host UI's stack), so each
 // function here may capture `this`.
@@ -157,6 +177,14 @@ class SettingsPages : public std::enable_shared_from_this<SettingsPages> {
   // What the renderer draws and what reaches the window, for the display
   // and graphics pages' notes.
   std::string ResolutionLine() const;
+  // Whether the presenter lists this temporal upscaler as able to run.
+  bool TemporalUpscalerAvailable(std::string_view id) const {
+    if (!services_.upscalers) return false;
+    for (const rex::ui::UpscalerInfo& info : services_.upscalers()) {
+      if (SameValue(info.id, id)) return info.available;
+    }
+    return false;
+  }
   MenuRow Page(std::string label, std::unique_ptr<MenuScreen> (SettingsPages::*page)());
   std::function<std::string()> RestartNote(std::vector<MenuRow>& rows);
   void Save();
@@ -168,11 +196,13 @@ class SettingsPages : public std::enable_shared_from_this<SettingsPages> {
   bool BuiltinModInstalled(const std::string& name) const;
 
   std::unique_ptr<MenuScreen> Display();
+  std::unique_ptr<MenuScreen> CameraEditor();
   std::unique_ptr<MenuScreen> HdrCalibration();
   std::unique_ptr<MenuScreen> Graphics();
   std::unique_ptr<MenuScreen> Audio();
   std::unique_ptr<MenuScreen> Controls();
   std::unique_ptr<MenuScreen> Wheel();
+  std::unique_ptr<MenuScreen> HeadTracking();
   std::unique_ptr<MenuScreen> DualSense();
   std::unique_ptr<MenuScreen> Hud();
   std::unique_ptr<MenuScreen> Gameplay();
@@ -199,6 +229,8 @@ class SettingsPages : public std::enable_shared_from_this<SettingsPages> {
   std::unique_ptr<MenuScreen> TrainerGraphics();
   std::unique_ptr<MenuScreen> TrainerDebug();
   std::unique_ptr<MenuScreen> ConfirmRestore(std::string slot);
+  std::unique_ptr<MenuScreen> Sync();
+  std::unique_ptr<MenuScreen> ConfirmSync(SaveSync::Remote remote);
   static constexpr size_t kMaxGamertag = 15;
 
   hostui::HostUi& host_ui_;
@@ -322,17 +354,29 @@ std::string SettingsPages::ResolutionLine() const {
     return line;
   }
   const auto [output_width, output_height] = *output;
+  const std::string effect = Unquote(Saved("present_effect"));
   if (output_width == render_width && output_height == render_height) {
+    // A temporal upscaler still runs at 1:1 as native anti-aliasing (DLAA
+    // for DLSS, #804).
+    if (IsTemporalEffect(effect) && TemporalUpscalerAvailable(effect)) {
+      return line + ", " + TemporalUpscalerLabel(effect) + " ANTI-ALIASES AT THAT SIZE";
+    }
     return line + ", SHOWN AT THAT SIZE";
   }
-  const std::string effect = Unquote(Saved("present_effect"));
   const char* upscaler = SameValue(effect, "fsr")    ? ", FSR 1 UPSCALES TO "
                          : SameValue(effect, "fsr2") ? ", FSR 2 UPSCALES TO "
                          : SameValue(effect, "fsr3") ? ", FSR 3 UPSCALES TO "
                          : SameValue(effect, "dlss") ? ", DLSS UPSCALES TO "
                                                      : ", STRETCHED TO ";
+  // A temporal upscaler the build lacks or whose runtime didn't load runs
+  // as FSR 1 (#762): say so instead of naming the one that was chosen.
+  std::string unavailable;
+  if (IsTemporalEffect(effect) && !TemporalUpscalerAvailable(effect)) {
+    upscaler = ", FSR 1 UPSCALES TO ";
+    unavailable = " (" + TemporalUpscalerLabel(effect) + " UNAVAILABLE)";
+  }
   if (output_width * output_height > render_width * render_height) {
-    return line + upscaler + size(output_width, output_height);
+    return line + upscaler + size(output_width, output_height) + unavailable;
   }
   return line + ", DOWNSCALED TO " + size(output_width, output_height);
 }
@@ -382,12 +426,13 @@ std::unique_ptr<MenuScreen> SettingsPages::Display() {
   // Every camera's vertical field of view, applied at once (NP-4.4).
   {
     std::vector<Choice> fov;
-    for (const char* value : {"0.9", "1.0", "1.1", "1.2", "1.3"}) {
+    for (const char* value : {"0.9", "1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9", "2.0"}) {
       const int percent = int(std::lround(std::stod(value) * 100));
       fov.push_back({std::to_string(percent) + "%", {{"pinyon_shift_fov_scale", value}}});
     }
     rows.push_back(Setting("FIELD OF VIEW", std::move(fov)));
   }
+  rows.push_back(Page("CAMERA EDITOR", &SettingsPages::CameraEditor));
   // G-forces, lean, speed shake and head motion layered on the game's own
   // camera physics (#419), from the built-in immersive_camera mod, which
   // always loads. Its effect groups scale while the game runs (#443): a
@@ -417,12 +462,6 @@ std::unique_ptr<MenuScreen> SettingsPages::Display() {
     }
   }
   rows.push_back(Toggle("VSYNC", "vsync"));
-  rows.push_back(Setting("FRAME RATE LIMIT",
-                         {{"OFF", {{"host_present_fps_limit", "0"}}},
-                          {"30", {{"host_present_fps_limit", "30"}}},
-                          {"60", {{"host_present_fps_limit", "60"}}},
-                          {"120", {{"host_present_fps_limit", "120"}}},
-                          {"240", {{"host_present_fps_limit", "240"}}}}));
   // How the rendered image is scaled to the window: FSR 1 and CAS keep 2x
   // on a 4K display and 3x on 1440p sharp where bilinear blurs. The page's
   // note gives both sizes. Temporal upscalers (UP-8.1) are offered when
@@ -439,17 +478,22 @@ std::unique_ptr<MenuScreen> SettingsPages::Display() {
     // version order (FSR 2 before FSR 3).
     std::stable_sort(upscalers.begin(), upscalers.end(),
                      [](const auto& a, const auto& b) { return a.id < b.id; });
+    bool saved_listed = false;
     for (const rex::ui::UpscalerInfo& info : upscalers) {
       if (info.kind != rex::ui::UpscalerKind::kTemporal ||
           (!info.available && !SameValue(saved_effect, info.id))) {
         continue;
       }
-      std::string label = info.id == "fsr2"   ? "FSR 2"
-                          : info.id == "fsr3" ? "FSR 3"
-                          : info.id == "dlss" ? "DLSS"
-                                              : Upper(info.id);
+      saved_listed = saved_listed || SameValue(saved_effect, info.id);
+      std::string label = TemporalUpscalerLabel(info.id);
       if (!info.available) label += " (UNAVAILABLE)";
       scaling.push_back({label, {{"present_effect", "\"" + info.id + "\""}}});
+    }
+    // Set in the launcher or the config for a build without it (DLSS on
+    // Linux and macOS): still show the setting, as unavailable.
+    if (IsTemporalEffect(saved_effect) && !saved_listed) {
+      scaling.push_back({TemporalUpscalerLabel(saved_effect) + " (UNAVAILABLE)",
+                         {{"present_effect", "\"" + Lower(saved_effect) + "\""}}});
     }
     rows.push_back(Setting("OUTPUT SCALING", std::move(scaling)));
   }
@@ -465,6 +509,14 @@ std::unique_ptr<MenuScreen> SettingsPages::Display() {
   // scene's highlights (not the HUD or menus) expanded towards the display's
   // peak. All of it applies at once. Offered when the display has HDR on, or
   // while it is set.
+#if defined(_WIN32)
+  // Windows HDR on for the game's display while it runs and back off when it
+  // closes; ON also turns the game's HDR output on (a display already in HDR
+  // stays on).
+  rows.push_back(Setting("WINDOWS HDR", {{"OFF", {{"pinyon_shift_windows_hdr", "false"}}},
+                                         {"ON", {{"pinyon_shift_windows_hdr", "true"},
+                                                 {"present_hdr", "true"}}}}));
+#endif
   const rex::ui::vulkan::HdrOutputState hdr = rex::ui::vulkan::GetHdrOutputState();
   if (hdr.offered || hdr.active || SameValue(Unquote(Saved("present_hdr")), "true")) {
     rows.push_back(Toggle("HDR", "present_hdr"));
@@ -502,34 +554,121 @@ std::unique_ptr<MenuScreen> SettingsPages::Display() {
     }
     rows.push_back(Page("HDR CALIBRATION", &SettingsPages::HdrCalibration));
   }
-  // The rate the game simulates and renders at, which sets every CPU cost
-  // (LS-1.4). DISPLAY follows the refresh rate: 144 Hz and faster displays
-  // then render that many frames. 40 is an even third of 120 Hz (LS-1.6).
-  rows.push_back(Setting("GAME FRAME RATE LIMIT",
-                         {{"DISPLAY", {{"pinyon_shift_fh1_render_fps_limit", "0"}}},
-                          {"30", {{"pinyon_shift_fh1_render_fps_limit", "30"}}},
-                          {"40", {{"pinyon_shift_fh1_render_fps_limit", "40"}}},
-                          {"60", {{"pinyon_shift_fh1_render_fps_limit", "60"}}},
-                          {"120", {{"pinyon_shift_fh1_render_fps_limit", "120"}}}}));
+  // The one frame rate: the rate the game simulates and renders at, which
+  // sets every CPU cost (LS-1.4). DISPLAY follows the refresh rate: 144 Hz
+  // and faster displays then render that many frames. 40 is an even third
+  // of 120 Hz (LS-1.6). The host's own presentation limit stays off (as in
+  // Lavender Shift), so no second limiter drops frames the game rendered;
+  // VSYNC only decides whether presents wait for the display.
+  {
+    std::vector<Choice> rates = {{"DISPLAY", {{"pinyon_shift_fh1_render_fps_limit", "0"},
+                                              {"host_present_fps_limit", "0"}}}};
+    for (const char* rate : {"30", "40", "60", "120", "144", "240"}) {
+      rates.push_back({rate, {{"pinyon_shift_fh1_render_fps_limit", rate},
+                              {"host_present_fps_limit", "0"}}});
+    }
+    rows.push_back(Setting("FRAME RATE", std::move(rates)));
+  }
+  // UP-8.2: a generated frame after each real one. The game then renders at
+  // most half the refresh (UP-4.2), so a 60 Hz display shows 30 real frames
+  // and 30 generated ones. Offered only where it has run (Windows, Linux and
+  // the Steam Deck); elsewhere present_frame_generation still takes it.
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+  const bool frame_generation_tested = true;
+#else
+  const bool frame_generation_tested = false;
+#endif
+  if (services_.frame_generators && frame_generation_tested) {
+    std::vector<Choice> generators = {{"OFF", {{"present_frame_generation", "\"off\""}}}};
+    const std::string saved = Unquote(Saved("present_frame_generation"));
+    for (const rex::ui::UpscalerInfo& info : services_.frame_generators()) {
+      if (info.available || SameValue(saved, info.id)) {
+        generators.push_back({SameValue(info.id, "fsr3") ? std::string("FSR 3") : Upper(info.id),
+                              {{"present_frame_generation", "\"" + info.id + "\""}}});
+      }
+    }
+    if (generators.size() > 1) {
+      rows.push_back(Setting("FRAME GENERATION", std::move(generators)));
+    }
+  }
   rows.push_back(Page("HUD", &SettingsPages::Hud));
   auto note = [this, restart = RestartNote(rows)] {
     const std::string pending = restart ? restart() : std::string();
     if (!pending.empty()) {
       return pending;
     }
-    // A presentation limit below the game's drops frames the game rendered.
+    // A presentation limit below the game's (set outside this menu) drops
+    // frames the game rendered.
     const auto present = Number(Unquote(Saved("host_present_fps_limit")));
     const auto game = Number(Unquote(Saved("pinyon_shift_fh1_render_fps_limit")));
     if (present && *present > 0 && game && (*game == 0 || *game > *present)) {
-      return std::string("THE GAME RENDERS FRAMES THE FRAME RATE LIMIT DROPS");
+      return std::string("THE GAME RENDERS FRAMES THE PRESENTATION LIMIT DROPS");
     }
     if (SameValue(Unquote(Saved("present_hdr")), "true") &&
         !rex::ui::vulkan::GetHdrOutputState().offered) {
       return std::string("HDR NEEDS HDR TURNED ON FOR THIS DISPLAY");
     }
+    if (!SameValue(Unquote(Saved("present_frame_generation")), "off")) {
+      // Below about 50 real frames a second the generated ones show their
+      // errors and the input lag grows (AMD's and NVIDIA's guidance).
+      const auto refresh = Number(Unquote(Saved("video_mode_refresh_rate")));
+      if (refresh && *refresh > 0 && *refresh < 100) {
+        return "FRAME GENERATION: THE GAME RENDERS " + std::to_string(int(*refresh / 2 + 0.5)) +
+               " FPS, BEST ON 100 HZ AND FASTER";
+      }
+    }
     return ResolutionLine();
   };
   return std::make_unique<MenuScreen>("DISPLAY", std::move(rows), std::move(note));
+}
+
+std::unique_ptr<MenuScreen> SettingsPages::CameraEditor() {
+  std::vector<MenuRow> rows;
+  for (const auto& [label, key, first, last] : {
+           std::tuple{"CHASE HEIGHT", "pinyon_shift_chase_height", -2, 6},
+           std::tuple{"CHASE DISTANCE", "pinyon_shift_chase_distance", -4, 12}}) {
+    std::vector<Choice> choices;
+    for (int step = first; step <= last; ++step) {
+      char value[16], text[24];
+      std::snprintf(value, sizeof(value), "%.2f", step * 0.25);
+      std::snprintf(text, sizeof(text), "%+.2f M", step * 0.25);
+      choices.push_back({step == 0 ? "DEFAULT" : text, {{key, value}}});
+    }
+    rows.push_back(Setting(label, std::move(choices)));
+  }
+  for (const auto& [label, key, first, last, increment] : {
+           std::tuple{"CHASE FIELD OF VIEW", "pinyon_shift_chase_fov", 80, 130, 5},
+           std::tuple{"CHASE STIFFNESS", "pinyon_shift_chase_stiffness", 50, 200, 25}}) {
+    std::vector<Choice> choices;
+    for (int percent = first; percent <= last; percent += increment) {
+      char value[16];
+      std::snprintf(value, sizeof(value), "%.2f", percent / 100.0);
+      choices.push_back({percent == 100 ? "DEFAULT" : std::to_string(percent) + "%", {{key, value}}});
+    }
+    rows.push_back(Setting(label, std::move(choices)));
+  }
+  rows.push_back(Setting("DRIVING VIEW",
+      {{"NORMAL", {{"pinyon_shift_drive_camera", "0"}}},
+       {"WHEEL", {{"pinyon_shift_drive_camera", "10"}}},
+       {"REPLAY", {{"pinyon_shift_drive_camera", "15"}}}}));
+  MenuRow reset;
+  reset.label = "RESET CAMERA EDITOR";
+  reset.activate = [this] {
+    for (const auto& [key, value] : {
+             std::pair{"pinyon_shift_chase_height", "0.0"},
+             std::pair{"pinyon_shift_chase_distance", "0.0"},
+             std::pair{"pinyon_shift_chase_fov", "1.0"},
+             std::pair{"pinyon_shift_chase_stiffness", "1.0"},
+             std::pair{"pinyon_shift_drive_camera", "0"}}) {
+      config_.Set(key, value);
+      rex::cvar::SetFlagByName(key, value);
+    }
+    Save();
+  };
+  rows.push_back(std::move(reset));
+  return std::make_unique<MenuScreen>("CAMERA EDITOR", std::move(rows), [] {
+    return std::string("APPLIES LIVE TO BOTH CHASE VIEWS. OFFSETS ARE RELATIVE TO CAMERA DATA.");
+  });
 }
 
 std::unique_ptr<MenuScreen> SettingsPages::HdrCalibration() {
@@ -583,7 +722,11 @@ std::unique_ptr<MenuScreen> SettingsPages::HdrCalibration() {
       case 2:
         return std::string("THE WHITE SQUARE SHOULD LOOK LIKE WHITE PAPER");
       default:
+#if defined(__ANDROID__)
+        return std::string("RAISE UNTIL SQUARE DISAPPEARS; IF IT STAYS VISIBLE, KEEP YOUR PEAK");
+#else
         return std::string("RAISE THE PEAK UNTIL THE SQUARE DISAPPEARS");
+#endif
     }
   };
   auto screen = std::make_unique<MenuScreen>("HDR CALIBRATION", std::move(rows), std::move(note));
@@ -731,6 +874,16 @@ std::unique_ptr<MenuScreen> SettingsPages::Graphics() {
   // memory), and 30 fps, the console's own rate and half the CPU work of 60.
   // The other presets set those four back to the desktop defaults, so
   // leaving ULTRA LOW does not keep them.
+  // The scene's tiles in one pass cost the RTX 4080 about 1.1 ms a frame at
+  // a 240 limit, where the GPU decoder sets the frame (so PERFORMANCE 120
+  // keeps them tiled), but took 2.5-3 ms of CPU a frame off the Steam
+  // Deck's GPU recorder and submission threads at 60 (#1071), so the other
+  // presets keep it on on Linux.
+#if defined(__linux__)
+  static constexpr const char* kSinglePassScene = "true";
+#else
+  static constexpr const char* kSinglePassScene = "false";
+#endif
   const auto preset = [](const char* scale, const char* effect, const char* msaa_off,
                          const char* fps,
                          std::vector<std::pair<std::string, std::string>> extra = {}) {
@@ -746,8 +899,9 @@ std::unique_ptr<MenuScreen> SettingsPages::Graphics() {
         {"pinyon_shift_fh1_render_fps_limit", fps},
         {"pinyon_shift_fh1_shadows", "true"},
         {"pinyon_shift_fh1_env_map_rate", "1"},
-        {"fh1_untile_predicated_tiling", "false"},
-        {"vulkan_texture_max_size", "0"}};
+        {"fh1_untile_predicated_tiling", kSinglePassScene},
+        {"vulkan_texture_max_size", "0"},
+        {"pinyon_shift_lod_distance_scale", "1"}};
     for (auto& [name, value] : extra) {
       const auto it = std::find_if(values.begin(), values.end(),
                                    [&](const auto& setting) { return setting.first == name; });
@@ -759,8 +913,13 @@ std::unique_ptr<MenuScreen> SettingsPages::Graphics() {
     }
     return values;
   };
+  // The cheap presets pick coarser model LODs at half the distance (with
+  // native scene culling): on the Deck race 4-15 % fewer draws and up to
+  // 0.45 ms less recorder time, with no visible change in captures.
   const std::vector<std::pair<std::string, std::string>> cheapest = {
-      {"anisotropic_override", "-1"}, {"swap_post_effect", "\"none\""}};
+      {"anisotropic_override", "-1"},
+      {"swap_post_effect", "\"none\""},
+      {"pinyon_shift_lod_distance_scale", "2"}};
   auto ultra_low = cheapest;
   ultra_low.insert(ultra_low.end(), {{"pinyon_shift_fh1_shadows", "false"},
                                      {"pinyon_shift_fh1_env_map_rate", "0.25"},
@@ -773,8 +932,16 @@ std::unique_ptr<MenuScreen> SettingsPages::Graphics() {
        {"BALANCED 40", preset("1", "\"bilinear\"", "true", "40", cheapest)},
        // The reference desktop (Ryzen 7 5800X, RTX 4080) holds the 120 limit
        // in the race at 1x (8.3 ms median) and runs it at 9.5 ms at 3x.
-       {"PERFORMANCE 120", preset("1", "\"fsr\"", "true", "120")},
+       {"PERFORMANCE 120",
+        preset("1", "\"fsr\"", "true", "120", {{"fh1_untile_predicated_tiling", "false"}})},
+#if defined(__APPLE__)
+       // 2x with 4X MSAA averaged 51 fps on an M4 Pro (19.5 ms of GPU a
+       // frame), so a Mac stores the game's 4x surfaces with two samples:
+       // 59.6-60.0 fps at the 60 limit, 16.7 ms of GPU.
+       {"QUALITY 60", preset("2", "\"bilinear\"", "false", "60", {{"fh1_msaa_2x", "true"}})}}));
+#else
        {"QUALITY 60", preset("2", "\"bilinear\"", "false", "60")}}));
+#endif
   // The game's 4x MSAA, apart from the post-process FXAA row below: off,
   // edges are harder and targets take a quarter of the memory.
   // 2X stores the game's 4x surfaces with two samples each (Vulkan): on the
@@ -831,6 +998,15 @@ std::unique_ptr<MenuScreen> SettingsPages::Graphics() {
       {{"50% (640 X 360)", {{"fh1_render_scale_percent", "50"}}},
        {"75% (960 X 540)", {{"fh1_render_scale_percent", "75"}}},
        {"100% (1280 X 720)", {{"fh1_render_scale_percent", "100"}}}}));
+#else
+  // The game's own scene at 960x540 instead of 1280x720 (its tiling bands
+  // scaled, the decoder rewriting the static world's window registers); the
+  // presenter scales the frame up, and RESOLUTION SCALE multiplies either.
+  // UHD 620: 15.6 % less GPU time than tiled 720p (#1070). Exposure and sun
+  // glare still differ a little from 720p. Applies at the next start.
+  rows.push_back(Setting("SCENE RESOLUTION",
+                         {{"720P", {{"pinyon_shift_fh1_scene_size", "\"\""}}},
+                          {"540P", {{"pinyon_shift_fh1_scene_size", "\"960x540\""}}}}));
 #endif
   // anisotropic_override holds the Xenos filter: 3, 4 and 5 are 4x, 8x, 16x;
   // -1 keeps what each of the game's textures asks for.
@@ -860,12 +1036,22 @@ std::unique_ptr<MenuScreen> SettingsPages::Graphics() {
                           {"FXAA EXTREME", {{"swap_post_effect", "\"fxaa_extreme\""}}}}));
   // The sun's shadows: off drops the shadow maps, a depth pre-pass and the
   // screen's shadow mask (about 6 ms a frame on the Odin 2 Portal) and
-  // lights everything. Applies on the next frame.
-  rows.push_back(Toggle("SHADOWS", "pinyon_shift_fh1_shadows"));
+  // lights everything. Applies on the next frame, and only by day: from
+  // 18:50 to 08:02 the same passes light the road for the headlights, so
+  // the choice says so (#733).
+  rows.push_back(Setting("SHADOWS", {{"OFF BY DAY", {{"pinyon_shift_fh1_shadows", "false"}}},
+                                     {"ON", {{"pinyon_shift_fh1_shadows", "true"}}}}));
   // How often the dynamic cubemap that cars reflect is redrawn.
   rows.push_back(Setting("REFLECTION UPDATES",
                          {{"FULL", {{"pinyon_shift_fh1_env_map_rate", "1"}}},
                           {"QUARTER", {{"pinyon_shift_fh1_env_map_rate", "0.25"}}}}));
+  // How often the HUD and the rest of the interface update (#1071): HALF
+  // runs the interface's update on every other frame, which took 0.5-0.7 ms
+  // of CPU a frame off the simulation thread on the Steam Deck; the minimap
+  // still draws every frame.
+  rows.push_back(Setting("HUD UPDATES",
+                         {{"FULL", {{"pinyon_shift_ui_update_interval", "1"}}},
+                          {"HALF", {{"pinyon_shift_ui_update_interval", "2"}}}}));
   // FH1's three predicated tiles drawn as one pass (the same image, about
   // 3 ms a frame cheaper on the Odin); a change rebuilds the renderer
   // between frames.
@@ -876,6 +1062,18 @@ std::unique_ptr<MenuScreen> SettingsPages::Graphics() {
   // POST-PROCESS AA covers the scene only, so HUD text stays sharp; ON also
   // smooths the HUD, as it did before. Menus without a scene get none.
   rows.push_back(Toggle("AA ON THE HUD", "swap_post_effect_scene_only", true));
+  // FH1 has no ambient occlusion pass; ShiftGlue adds one at swap from the
+  // scene depth (from Lavender Shift's SR-3): contact shade under cars and
+  // along kerbs, darker cockpits, the sky and HUD untouched. Applies on the
+  // next frame; off by default.
+  rows.push_back(Setting("AMBIENT OCCLUSION",
+                         {{"OFF", {{"swap_ambient_occlusion", "false"}}},
+                          {"LOW", {{"swap_ambient_occlusion", "true"},
+                                   {"swap_ambient_occlusion_strength", "40"}}},
+                          {"MEDIUM", {{"swap_ambient_occlusion", "true"},
+                                      {"swap_ambient_occlusion_strength", "70"}}},
+                          {"HIGH", {{"swap_ambient_occlusion", "true"},
+                                    {"swap_ambient_occlusion_strength", "100"}}}}));
   // A .cube colour LUT from state/luts on the scene; the HUD keeps its
   // colours. Applies on the next frame.
   {
@@ -1599,11 +1797,14 @@ std::unique_ptr<MenuScreen> SettingsPages::TrainerPlayer() {
   // Any scalar profile field goes through cheat_set_profile_fields; the
   // wristband level also unlocks the events it gates.
   std::vector<Choice> wristbands;
-  wristbands.push_back({"UNCHANGED", {{"cheat_set_profile_fields", ""}}});
+  // The value is a TOML string: bare, it made the whole file invalid and
+  // every setting fell back to its default at the next start.
+  wristbands.push_back({"UNCHANGED", {{"cheat_set_profile_fields", config::Quote("")}}});
   for (const char* level : {"1", "2", "3", "4", "5", "6", "7", "8"}) {
     wristbands.push_back(
         {std::string("LEVEL ") + level,
-         {{"cheat_set_profile_fields", std::string("Main/WristbandLevel=") + level}}});
+         {{"cheat_set_profile_fields",
+           config::Quote(std::string("Main/WristbandLevel=") + level)}}});
   }
   rows.push_back(Setting("SET WRISTBAND", std::move(wristbands)));
   return std::make_unique<MenuScreen>("PLAYER", std::move(rows), [] {
@@ -1648,17 +1849,62 @@ std::unique_ptr<MenuScreen> SettingsPages::TrainerWorld() {
 }
 
 std::unique_ptr<MenuScreen> SettingsPages::TrainerVehicle() {
-  // The pose the project hooks is the car's presentation transform; freezing
-  // or moving the car needs the physics body, which is still to be located.
-  std::vector<MenuRow> rows(2);
+  std::vector<MenuRow> rows(1);
   rows[0].label = "FREEZE POSITION";
   rows[0].value = [] { return std::string("NOT YET"); };
   rows[0].enabled = [] { return false; };
-  rows[1].label = "TELEPORT";
-  rows[1].value = [] { return std::string("NOT YET"); };
-  rows[1].enabled = [] { return false; };
+  rows.push_back(Toggle("FAST TRAVEL ANYWHERE", "cheat_fast_travel_anywhere"));
+  MenuRow teleport;
+  teleport.label = "TELEPORT TO LAST MAP ROAD";
+  teleport.enabled = [] { return cheats::MapDestination().has_value(); };
+  teleport.activate = [this] {
+    if (const auto point = cheats::MapDestination(); point && cheats::RequestTeleportDestination(*point))
+      host_ui_.Close();
+  };
+  rows.push_back(std::move(teleport));
+  MenuRow gps;
+  gps.label = "GPS TO LAST MAP ROAD";
+  gps.enabled = [] { return cheats::MapDestination().has_value(); };
+  gps.activate = [this] {
+    if (const auto point = cheats::MapDestination(); point && cheats::RequestGpsDestination(*point))
+      host_ui_.Close();
+  };
+  rows.push_back(std::move(gps));
+  MenuRow remember;
+  remember.label = "SAVE LAST MAP ROAD";
+  remember.enabled = [] { return cheats::MapDestination().has_value(); };
+  remember.activate = [this] {
+    if (const auto point = cheats::MapDestination()) {
+      const std::string text = std::to_string((*point)[0]) + "," +
+          std::to_string((*point)[1]) + "," + std::to_string((*point)[2]);
+      config_.Set("cheat_saved_destination", "\"" + text + "\"");
+      rex::cvar::SetFlagByName("cheat_saved_destination", text);
+      Save();
+    }
+  };
+  rows.push_back(std::move(remember));
+  MenuRow saved;
+  saved.label = "GPS TO SAVED ROAD";
+  saved.enabled = [] {
+    return cheats::ParseDestination(rex::cvar::GetFlagByName("cheat_saved_destination")).has_value();
+  };
+  saved.activate = [this] {
+    const auto point = cheats::ParseDestination(rex::cvar::GetFlagByName("cheat_saved_destination"));
+    if (point && cheats::RequestGpsDestination(*point)) host_ui_.Close();
+  };
+  rows.push_back(std::move(saved));
+  MenuRow saved_travel;
+  saved_travel.label = "TELEPORT TO SAVED ROAD";
+  saved_travel.enabled = [] {
+    return cheats::ParseDestination(rex::cvar::GetFlagByName("cheat_saved_destination")).has_value();
+  };
+  saved_travel.activate = [this] {
+    const auto point = cheats::ParseDestination(rex::cvar::GetFlagByName("cheat_saved_destination"));
+    if (point && cheats::RequestTeleportDestination(*point)) host_ui_.Close();
+  };
+  rows.push_back(std::move(saved_travel));
   return std::make_unique<MenuScreen>("VEHICLE", std::move(rows), [] {
-    return std::string("NEEDS THE CAR'S PHYSICS BODY, STILL TO BE FOUND");
+    return std::string("TELEPORT: OPEN THE GAME MAP FIRST; THE TITLE STREAMS THE ROAD");
   });
 }
 
@@ -1710,6 +1956,17 @@ std::unique_ptr<MenuScreen> SettingsPages::Wheel() {
   map.label = "MAP A WHEEL";
   map.activate = [this] { host_ui_.Push(MapController()); };
   rows.push_back(std::move(map));
+  // The raw wheel path (wheel_enabled): the base, pedals and buttons each
+  // from their own USB device, bound by the launcher's Wheel screen into the wheel_*
+  // cvars, and the game's own Xbox 360 force feedback effects played on the
+  // base. The rows below apply to that path only.
+  rows.push_back(Toggle("SEPARATE DEVICES", "wheel_enabled"));
+  rows.push_back(Setting("FORCE FEEDBACK", {{"OFF", {{"wheel_ffb_mode", "\"off\""}}},
+                                            {"ON", {{"wheel_ffb_mode", "\"difference\""}}},
+                                            {"RUMBLE ONLY", {{"wheel_ffb_mode", "\"rumble\""}}}}));
+  rows.push_back(Setting("FFB STRENGTH", percents("wheel_ffb_strength", {10, 25, 50, 75, 100})));
+  rows.push_back(Toggle("REVERSE FORCES", "wheel_ffb_invert"));
+  rows.push_back(Toggle("RECORD FFB TRACE", "wheel_ffb_trace"));
   auto screen = std::make_unique<MenuScreen>("RACING WHEEL", std::move(rows), [] {
     int wheels = 0;
     for (const auto& joystick : rex::input::sdl::ListJoysticks()) {
@@ -1722,8 +1979,35 @@ std::unique_ptr<MenuScreen> SettingsPages::Wheel() {
   screen->set_body(
       "A wheel drives through its controller mapping: steering on the left stick, throttle on "
       "the right trigger and brake on the left trigger. If the game does not see it, choose MAP "
-      "A WHEEL, then the wheel, and mark it as a racing wheel. Force feedback is not supported "
-      "yet.");
+      "A WHEEL, then the wheel, and mark it as a racing wheel. SEPARATE DEVICES reads the "
+      "wheel, pedals and buttons from the devices bound in the launcher's Wheel screen instead, and "
+      "plays the game's own force feedback; keep its strength low on a direct-drive base.");
+  return screen;
+}
+
+// Head tracking (#489): the cockpit and hood cameras follow OpenTrack's UDP
+// output through the immersive camera mod's head layers. All apply at once.
+std::unique_ptr<MenuScreen> SettingsPages::HeadTracking() {
+  std::vector<MenuRow> rows;
+  rows.push_back(Toggle("HEAD TRACKING", "head_tracking"));
+  std::vector<Choice> ports;
+  for (int port : {4242, 4243, 5555}) {
+    ports.push_back({std::to_string(port), {{"head_tracking_port", std::to_string(port)}}});
+  }
+  rows.push_back(Setting("UDP PORT", std::move(ports)));
+  rows.push_back(Setting("REVERSE", {{"NONE", {{"head_tracking_invert", "\"\""}}},
+                                     {"YAW", {{"head_tracking_invert", "\"yaw\""}}},
+                                     {"PITCH", {{"head_tracking_invert", "\"pitch\""}}},
+                                     {"YAW AND PITCH", {{"head_tracking_invert", "\"yaw,pitch\""}}},
+                                     {"ROLL", {{"head_tracking_invert", "\"roll\""}}}}));
+  const bool installed = BuiltinModInstalled("immersive_camera");
+  auto screen = std::make_unique<MenuScreen>("HEAD TRACKING", std::move(rows));
+  screen->set_body(
+      installed
+          ? "Turns and moves the cockpit and hood cameras with your head. In OpenTrack, choose "
+            "the output UDP over network, address 127.0.0.1 and the port here, and any tracker "
+            "(TrackIR, a webcam, a phone or a VR headset). Its curves set how far the view turns."
+          : "Needs the built-in immersive camera mod, which the launcher installs.");
   return screen;
 }
 
@@ -1753,6 +2037,15 @@ std::unique_ptr<MenuScreen> SettingsPages::DualSense() {
         {std::to_string(value) + "%", {{"pad_gyro_sensitivity", std::to_string(value)}}});
   }
   rows.push_back(Setting("TILT SENSITIVITY", std::move(sensitivities)));
+  // Greyed until a DualSense is connected (the status line below says why).
+  for (auto& row : rows) {
+    row.enabled = [] {
+      for (const auto& joystick : rex::input::sdl::ListJoysticks()) {
+        if (joystick.dualsense) return true;
+      }
+      return false;
+    };
+  }
   auto screen = std::make_unique<MenuScreen>("DUALSENSE", std::move(rows), [] {
     bool dualsense = false;
     bool wireless = false;
@@ -1793,19 +2086,13 @@ std::unique_ptr<MenuScreen> SettingsPages::Controls() {
   map.activate = [this] { host_ui_.Push(MapController()); };
   rows.push_back(std::move(map));
   rows.push_back(Page("RACING WHEEL", &SettingsPages::Wheel));
-  // Only when a DualSense (or Steam's stand-in for one) is here, or its
-  // settings were changed, so other players never see it.
-  {
-    bool show = rex::input::sdl::SteamInputHidesDualSense() ||
-                REXCVAR_GET(pad_ds_triggers) != "off" || REXCVAR_GET(pad_ds_lightbar) != "player" ||
-                REXCVAR_GET(pad_gyro_steering);
-    for (const auto& joystick : rex::input::sdl::ListJoysticks()) {
-      show |= joystick.playstation || joystick.steam_virtual;
-    }
-    if (show) {
-      rows.push_back(Page("DUALSENSE", &SettingsPages::DualSense));
-    }
-  }
+  // OpenTrack runs on the same PC, so not on Android.
+#if !defined(__ANDROID__)
+  rows.push_back(Page("HEAD TRACKING", &SettingsPages::HeadTracking));
+#endif
+  // Always listed so players can find it; the page greys its options out while no
+  // DualSense is connected and says why in its status line.
+  rows.push_back(Page("DUALSENSE", &SettingsPages::DualSense));
   rows.push_back(Setting("RUMBLE",
                          {{"OFF", {{"pad_rumble_strength", "0"}}},
                           {"25%", {{"pad_rumble_strength", "25"}}},
@@ -1994,6 +2281,12 @@ std::unique_ptr<MenuScreen> SettingsPages::Profile() {
     backups.activate = [this] { host_ui_.Push(Backups()); };
     rows.push_back(std::move(backups));
   }
+  if (services_.save_sync) {
+    MenuRow sync;
+    sync.label = "SAVE SYNC";
+    sync.activate = [this] { host_ui_.Push(Sync()); };
+    rows.push_back(std::move(sync));
+  }
   return std::make_unique<MenuScreen>("PROFILE", std::move(rows));
 }
 
@@ -2004,13 +2297,111 @@ std::string SlotLabel(const std::string& name) {
   }
   std::string label = name.substr(0, 4) + "-" + name.substr(4, 2) + "-" + name.substr(6, 2) +
                       " " + name.substr(9, 2) + ":" + name.substr(11, 2);
-  const std::string reason = name.size() > 17 ? name.substr(17) : std::string();
+  std::string reason = name.size() > 17 ? name.substr(17) : std::string();
+  // "-2": a second slot in the same second.
+  if (const size_t dash = reason.rfind('-'); dash != std::string::npos &&
+      reason.find_first_not_of("0123456789", dash + 1) == std::string::npos) {
+    reason.resize(dash);
+  }
   if (reason == "session") {
     label += " SESSION START";
   } else if (reason == "before-restore") {
     label += " BEFORE RESTORE";
+  } else if (reason == "sync") {
+    label += " FROM SAVE SYNC";
   }
   return label;
+}
+
+// "2026-11-14T18:02:11Z" as "2026-11-14 18:02".
+std::string SyncTime(const std::string& utc) {
+  if (utc.size() < 16) return utc.empty() ? std::string("NEVER") : Upper(utc);
+  return utc.substr(0, 10) + " " + utc.substr(11, 5);
+}
+
+const char* RelationLabel(const SaveSync::Remote& remote) {
+  if (!remote.loadable) return "NEEDS THE V4 BUILD";
+  switch (remote.relation) {
+    case SaveSync::Relation::kSame: return "SAME SAVE";
+    case SaveSync::Relation::kRemoteAhead: return "NEWER";
+    case SaveSync::Relation::kLocalAhead: return "OLDER";
+    case SaveSync::Relation::kDiverged: return "DIFFERENT";
+  }
+  return "";
+}
+
+// The other devices sharing the sync folder and how their saves compare to
+// this one's; a newer or different save can be chosen for the next start,
+// or this device's kept over it.
+std::unique_ptr<MenuScreen> SettingsPages::Sync() {
+  SaveSync* sync = services_.save_sync;
+  const auto remotes = sync->Remotes();
+  std::vector<MenuRow> rows;
+  if (sync->ImportPending()) {
+    MenuRow cancel;
+    cancel.label = "CANCEL LOADING THE CHOSEN SAVE";
+    cancel.activate = [sync] { sync->CancelImport(); };
+    rows.push_back(std::move(cancel));
+  }
+  for (const auto& remote : remotes) {
+    MenuRow row;
+    row.label = Upper(remote.device_name.empty() ? remote.device_id.substr(0, 8)
+                                                 : remote.device_name);
+    row.value = [label = std::string(RelationLabel(remote))] { return label; };
+    if (remote.loadable && (remote.relation == SaveSync::Relation::kRemoteAhead ||
+                            remote.relation == SaveSync::Relation::kDiverged)) {
+      row.activate = [this, remote] { host_ui_.Push(ConfirmSync(remote)); };
+    } else {
+      row.enabled = [] { return false; };
+    }
+    rows.push_back(std::move(row));
+  }
+  const bool empty = remotes.empty();
+  auto screen = std::make_unique<MenuScreen>("SAVE SYNC", std::move(rows), [sync, empty] {
+    if (sync->ImportPending()) return std::string("RESTART THE GAME TO LOAD THE CHOSEN SAVE");
+    return std::string(empty ? "NO OTHER DEVICE HAS SHARED A SAVE IN THIS FOLDER YET"
+                             : "UTC TIMES");
+  });
+  // The folder's name only: a whole path does not wrap.
+  const std::string last = sync->LastExportUtc();
+  screen->set_body("This device, " + sync->device_name() + ", shares its save through the folder " +
+                   rex::path_to_utf8(sync->folder().filename()) + ". " +
+                   (last.empty() ? std::string("It hasn't shared a save yet.")
+                                 : "Last shared " + SyncTime(last) + " UTC."));
+  return screen;
+}
+
+std::unique_ptr<MenuScreen> SettingsPages::ConfirmSync(SaveSync::Remote remote) {
+  SaveSync* sync = services_.save_sync;
+  auto self = std::make_shared<const MenuScreen*>(nullptr);
+  const std::string name = Upper(remote.device_name);
+  std::vector<MenuRow> rows(3);
+  rows[0].label = "LOAD " + name + "'S SAVE AT NEXT START";
+  rows[0].activate = [this, sync, id = remote.device_id, self] {
+    sync->ScheduleImport(id);
+    host_ui_.Finish(*self);
+  };
+  rows[1].label = "KEEP THIS DEVICE'S SAVE";
+  rows[1].activate = [this, sync, id = remote.device_id, self] {
+    sync->KeepLocal(id);
+    host_ui_.Finish(*self);
+  };
+  rows[2].label = "CANCEL";
+  rows[2].activate = [this, self] { host_ui_.Finish(*self); };
+  auto screen = std::make_unique<MenuScreen>("CHOOSE A SAVE", std::move(rows));
+  const bool diverged = remote.relation == SaveSync::Relation::kDiverged;
+  screen->set_body(
+      std::string(diverged ? "The save changed both here and on " + remote.device_name +
+                                 " since they last had the same one."
+                           : remote.device_name + " has a newer save that continued from this "
+                                                  "one.") +
+      " " + remote.device_name + "'s save is from " + SyncTime(remote.written_utc) + " UTC, with " +
+      std::to_string(remote.achievements) +
+      " achievements. Loading it backs up this device's save first (SAVE BACKUPS). Keeping "
+      "this device's makes " + remote.device_name + " load it instead, next time it starts.");
+  screen->SetFocus(2);
+  *self = screen.get();
+  return screen;
 }
 
 std::unique_ptr<MenuScreen> SettingsPages::Backups() {
@@ -2108,6 +2499,15 @@ std::unique_ptr<MenuScreen> SettingsPages::Root() {
   if (PinyonShiftUseBuiltinRallyAdapter()) rows.push_back(Page("HORIZON RALLY", &SettingsPages::Rally));
   // Last, so the rows above keep their places for scripted routes.
   rows.push_back(Page("GAMEPLAY", &SettingsPages::Gameplay));
+  if (services_.quit) {
+    MenuRow row;
+    row.label = "QUIT GAME";
+    row.activate = [self = shared_from_this()] {
+      self->host_ui_.Close();
+      self->services_.quit();
+    };
+    rows.push_back(std::move(row));
+  }
   return std::make_unique<MenuScreen>("SETTINGS", std::move(rows));
 }
 

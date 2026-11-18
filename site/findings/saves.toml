@@ -8,17 +8,17 @@ group = """Save files"""
 base = """ForzaProfile, PlayerDatabase, VersionFlags"""
 v4 = """same"""
 name = """profile directory files"""
-what = """A profile directory holds `ForzaProfile` plus companion `PlayerDatabase`, `VersionFlags`, livery and thumbnail files (12 files in the reference save). `PlayerDatabase` is an encrypted, deflated SQLite database: each car is a `Career_Garage` row naming its livery file and holding its tune in 36 `Tuning_*` columns, and purchased parts are separate rows (122 in the reference save). Without the companions the title loads a fallback Corrado instead of the saved car and does not offer the expected Gauntlet activity."""
-how = """Experiment: a profile-only fixture against a complete profile copy; save audits; reading a seed save."""
+what = """A profile directory holds `ForzaProfile` plus companion `PlayerDatabase`, `VersionFlags`, livery and thumbnail files (12 files in the reference save). `PlayerDatabase` is an encrypted, deflated SQLite database: on the pinned base bus profile its decrypted body has a 12-byte prefix followed by raw DEFLATE (window bits -15), and the three big-endian words are uncompressed size, compressed size, uncompressed size (83,968, 8,202, 83,968). Each car is a `Career_Garage` row naming its livery file and holding its tune in 36 `Tuning_*` columns, and purchased parts are separate rows (122 in the reference save). Without the companions the title loads a fallback Corrado instead of the saved car and does not offer the expected Gauntlet activity."""
+how = """Experiment: a profile-only fixture against a complete profile copy; save audits; reading a seed save. Native save snapshots before and after an ordinary UDLC RSX purchase confirm that Career_Garage.Id is the garage instance ID and CarId is the Data_Car model ID (instance 13, model 422 in that private fixture)."""
 confidence = """confirmed"""
-source = """docs/DLC_BACKLOG.md Complete saved garage fixture; Selected Rally car disable, save and restoration; docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
+source = """docs/DLC_BACKLOG.md Complete saved garage fixture; Selected Rally car disable, save and restoration; Community UDLC (#595); docs/REVERSE_ENGINEERING.md@a72a92a5f215 Custom content"""
 
 [[finding]]
 group = """Save files"""
 base = """sub_82555C88, sub_82546460, sub_82546168"""
 name = """car card thumbnails"""
 what = """Each car-select card is the profile's `Thumbnails/Thumbnail_N.xdc`: a big-endian `cxds` header (version 2, uncompressed size 884,788, compressed size) over a deflated 768x288 tiled 8888 Xenos texture. When a car is bought, a car-save task (`sub_82555C88`: car at +76, render flag +84, save flag +85) calls `sub_82546460(&job, car, 1, 0)`, which loads the `uithumbig` and `uithumbnail` studio tracks, renders the car, resolves it and compresses the result on the CPU (to 3-4 %); `sub_82546168` builds the file name from the car ID at +652. The screen opens only cards that exist and shows an empty card for a missing one."""
-how = """Reading the code path and saves; the buy-car route decoding the saved card; file-open logging; captures of car select with and without cards."""
+how = """Reading the code path and saves; the buy-car route decoding the saved card; file-open logging; captures of car select with and without cards. All four hidden player variants purchased on the base build have a repeated uncompressed-size word at cxds byte 16, followed by raw DEFLATE at byte 20 (window bits -15); inflating to 884,788 bytes and using hostui::DecodeXds yields 768x288 images visibly containing the expected cars without stripes (docs/HIDDEN_CARS.md)."""
 confidence = """confirmed"""
 note = """A purchase re-saves a card (confirmed); paint and upgrades probably do. How the CPU reads the resolved image is not settled: a later trace saw no guest read of the resolved ranges."""
 source = """docs/NATIVE_PORT_BACKLOG.md NP-0.6; src/save/car_cards.h; docs/native-renderer/XENOS_RETIREMENT_BACKLOG.md XR-04, XR-00"""
@@ -36,10 +36,10 @@ source = """docs/TITLE_UPDATE_V4_BACKLOG.md TU-4, TU-5"""
 [[finding]]
 group = """Save files"""
 name = """missing DLC car falls back to Corrado"""
-what = """When the selected saved car belongs to a disabled DLC (the stock Rally Escort), the base game falls back to the original Corrado and keeps every garage record, purchased part and the credit balance. Re-enabling the DLC restores the car without a repurchase."""
-how = """Experiment: disable Rally with the Escort selected, play and save, re-enable and reload; save audit."""
+what = """With the stock Rally Escort or stock UDLC RSX selected, disabling its DLC on the tested base saves loads the original Corrado and preserves the owned garage. The Rally experiment also retained purchased parts and credits. In the UDLC experiment all 13 garage rows and the complete decrypted SQLite body were byte-identical before and after the disabled run. Re-enabling UDLC leaves the Corrado selected; Change Car offers the still-owned RSX and Get In Car restores it without repurchasing or repairing the save. This does not establish safe removal of purchased UDLC upgrades or every model."""
+how = """Experiment: disable Rally with the Escort selected, play and save, re-enable and reload; save audit. Repeat with an ordinarily purchased UDLC RSX on private base copies, audit native save snapshots, then re-enable and select its original garage instance through the ordinary workshop menu."""
 confidence = """confirmed"""
-source = """docs/DLC_BACKLOG.md Selected Rally car disable, save and restoration"""
+source = """docs/DLC_BACKLOG.md Selected Rally car disable, save and restoration; Community UDLC (#595)"""
 
 [[finding]]
 group = """Save files"""
@@ -51,6 +51,15 @@ how = """Experiment: disable Rally after a Mustang Rally tyre purchase; crash re
 confidence = """confirmed"""
 negative = true
 source = """docs/DLC_BACKLOG.md Missing saved Rally tyre recovery"""
+
+[[finding]]
+group = "Save files"
+base = "ForzaProfile Main/CareerCar; 0x82C66594"
+name = "invalid selected garage ID invokes starter-car recovery"
+what = """Main/CareerCar is a garage instance ID, not a Data_Car model ID: it was 7 on the pinned seven-car bus profile. Setting it to zero after decryption through the existing cheat_set_profile_fields hook invokes the title's missing-car path. On that base profile it supplied a starter Corrado as garage ID 8, wrote ordinary saves and returned to free roam. Decrypted snapshots preserved all seven original garage rows, all 122 original purchased-part rows and 67,700 credits; the fallback added 20 part rows. This is selection recovery, not removal of the unsupported purchased car. The integrated Windows base and v4 builds both passed recovery and reload on separate private copies of this base fixture, with the v4 copy upgraded by the title. Every individual hidden model's garage/paint path still requires separate qualification."""
+how = """Pinned i484-bus-owned seed copied by run-fh1-render-test.py; Main/CareerCar=0 on load, cheat.applied and save.upgrade_views.initialized diagnostics, normal save events and decrypted profile/database comparison. A fresh reload without a pending edit on the private Windows Release build reached free roam and car select with garage ID 8; the unmodded tree's 19 hashes matched the seed. Repeated with the trainer disabled and dormant credit, time-scale, free-camera and event flags preserved; credits remained 67,700. The recovery tool backs up the selected modded profile before queuing the existing load hook. Integration repeated the trainer-off recovery/save/reload on base and v4, checked all 20 backup-manifest entries and retained all 19 unmodded file hashes, the original seven cars, 122 parts and credits in each run."""
+confidence = "confirmed"
+source = "tools/fh1-profile.py recover-car; docs/HIDDEN_CARS.md"
 
 # --- Encryption and loading -----------------------------------------------
 
@@ -92,9 +101,10 @@ group = """Profile values"""
 v4 = """same"""
 name = """ForzaProfile body layout"""
 what = """The decrypted `ForzaProfile` body opens with a self-describing section: a big-endian field count, then per field `[u32 name length][name][u32 0x20][u32 0][u8 type][value]`. Types are 0x00 bool, 0x01 u8, 0x03 u32, 0x04 u64, 0x07 i32, 0x09 float and 0x0F struct (its own count and fields). Player values are under `Main`: `Main/Credits` (u32), `Main/XP`, `Main/Level`, `Main/WristbandLevel` and `Main/TotalWinnings`. Class-serialised states and 0xBB padding follow."""
+note = """The archived 20,419-byte achievement-survey loaded profile also contains Main/TractionControl and Main/StabilityControl, both type 0x01 (u8) with value 1. MR-0 private-state Windows runs set both to 1 versus both to 0 through the after-decrypt hook, with per-field applied-value logs. Neither stationary five-second brake/throttle run produces visible tyre smoke. This establishes their encoding and the failed particle recipe, not each field's driving effect or why smoke is absent."""
 how = """Decoding decrypted bodies at the save hooks; `tools/fh1-profile.py` decodes, edits and round-trips every captured profile byte for byte, and field edits survive the title's later saves."""
 confidence = """confirmed"""
-source = """src/save/profile_body.h; docs/NATIVE_PORT_BACKLOG.md NP-8.3; docs/MODDING.md The profile body"""
+source = """src/save/profile_body.h; docs/NATIVE_PORT_BACKLOG.md NP-8.3; docs/MODDING.md The profile body; docs/MODERN_RENDERING_RESEARCH.md Night lights and missing particle scope"""
 
 [[finding]]
 group = """Profile values"""
@@ -138,10 +148,20 @@ source = """src/pinyon_shift_runtime_hooks.cpp QueueRallyRaceTrace"""
 [[finding]]
 group = """Profile values"""
 name = """wristband and XP fields gate events"""
-what = """Setting `Main/WristbandLevel` to 8 and `Main/XP` to 450000 at load is kept in the title's own later saves, and the event card's goal changes from COLLECT BLUE WRISTBAND to GET TO THE HORIZON FINAL, opening the events the wristbands gate."""
-how = """Load-time field edit on the buy-car route."""
+what = """Setting `Main/WristbandLevel` to 8 and `Main/XP` to 450000 at load is kept in the title's own later saves, and the event card's goal changes from COLLECT BLUE WRISTBAND to GET TO THE HORIZON FINAL, opening the events the wristbands gate. `Main/XP` is the only XP field under `Main` (124 fields; `OnlineXP` is separate), and the wristband meter reads it: with `Main/WristbandLevel` 0, raising `Main/XP` from 0 to 100000 turns the pause menu's "Nxt Lvl 220 PTS" (the Green threshold in `CareerWristbandLevels`) into COLLECT GREEN WRISTBAND."""
+how = """Load-time field edit on the buy-car route; a local test native mod (not in the repository) setting `Main/XP` at load, with the pause menu captured from a pinned seed (#491)."""
 confidence = """confirmed"""
-source = """docs/NATIVE_PORT_BACKLOG.md NP-8.5"""
+source = """docs/NATIVE_PORT_BACKLOG.md NP-8.5; docs/MODDING.md Built-in mods"""
+
+[[finding]]
+group = """Profile values"""
+name = """the stored driver level is not recomputed from XP"""
+what = """`Main/Level` is kept as saved, not derived from `Main/XP` and `PlayerLevelDef` when the profile loads or saves. A profile edited at load to XP 100000 at level 11 (stock `PlayerLevelDef`: level 11 from 95,000) was saved twice as level 11 in about two minutes of free roam, both with the stock table and with `festival_pacing`'s default halved one, where 100,000 XP is level 18. Whether the next XP gain moves it to the new curve's level is not tested."""
+how = """A local test native mod (not in the repository) setting `Main/XP`, `Main/Level` and `Main/LastRewardedLevel` at the after-decrypt hook and logging them at every before-encrypt save, from pinned stock and paced seeds; a burnout meant to earn skill XP stalled in reverse against a wall and earned none."""
+confidence = """confirmed"""
+negative = true
+issue = """#491"""
+source = """docs/MODDING.md Built-in mods; docs/FEATURE_BACKLOG.md FB-12.16"""
 
 [[finding]]
 group = """Profile values"""
@@ -159,8 +179,25 @@ name = """upgrade discount on the reference save"""
 what = """Upgrade prices on the reference save show an 85% discount: a 10,000-credit Rally tyre costs 1,500, and the Rally suspension and transmission cost 930 each. Race winnings are recorded per car as well as added to credits."""
 how = """Purchases and save audits on the reference save."""
 confidence = """confirmed"""
-note = """Confirmed for the observed prices; attributing the 85% to the save's discount-sign progress is a guess, not traced in code."""
+note = """Confirmed for the observed prices. `Main/UpgradeDiscount` holds the percentage (see "achievement progress fields"); whether it stops at 85 once every sign is found is not established."""
 source = """docs/DLC_BACKLOG.md Rally upgrade definitions and tyre purchase; Base-disc Rally tyre conversions; Rally audio update ownership"""
+
+[[finding]]
+group = """Profile values"""
+name = """achievement progress fields"""
+what = """Three `Main` fields count toward achievements. `WristbandLevel` is zero-based: a save holding the Yellow and Green bands (achievements 175 and 176) reads 1, so bands received are the value plus one. `UpgradeDiscount` is the upgrade discount in percent; on a save with 85 of the 100 discount signs found it read 85, matching the live count. `NumRaceEncountersWon` (beside an unrelated `NumEncountersWon`) is the count for Beat 10 Festival Racers. The achievements screen uses the first two and the live sign count; the encounter field read 0 on every save tried, so its meaning is probable, not confirmed."""
+how = """Decoded profile bodies at the save hooks (`achievements.profile` events) compared with each save's unlocked achievements and with the free-roam collectible census (`achievements.census`, 85 of 100 signs) on a render route."""
+confidence = """probable"""
+source = """src/achievements/achievement_progress.cpp; docs/ACHIEVEMENTS_UI_BACKLOG.md AC-0.2"""
+
+[[finding]]
+group = """Profile values"""
+name = """no fields for popularity rank, roads or speed traps"""
+what = """The profile's self-describing section has no field for the popularity rank, roads driven or speed-trap results, the counts behind the Fame and Explore achievements that are not signs (there is a `PopularitySkills` option, not a rank). Those achievements show no progress bar until the counts are found elsewhere, such as the class-serialised tail."""
+how = """Listing every field of decoded profile bodies from two saves."""
+confidence = """confirmed"""
+negative = true
+source = """docs/ACHIEVEMENTS_UI_BACKLOG.md AC-0.2"""
 
 # --- Career progress ------------------------------------------------------
 

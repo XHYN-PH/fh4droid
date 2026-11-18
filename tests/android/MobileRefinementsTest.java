@@ -37,6 +37,8 @@ public final class MobileRefinementsTest {
       check(Math.abs(DrivingMath.tilt(-179,179,35))<.1f,"tilt handles angle wraparound");
       check(DrivingMath.tilt(Float.POSITIVE_INFINITY,0,35)==0,"invalid sensor input releases steering");
       check(Float.isFinite(DrivingMath.tilt(Float.MAX_VALUE,-Float.MAX_VALUE,35)),"extreme finite sensor values normalize without an unbounded loop");
+      check(DrivingMath.phoneTilt(35,0,35,.03f,false)==-1&&DrivingMath.phoneTilt(-35,0,35,.03f,false)==1,"phone roll maps to the corrected steering axis");
+      check(DrivingMath.phoneTilt(35,0,35,.03f,true)==1&&DrivingMath.phoneTilt(0,0,35,.03f,false)==0,"invert preference and centred phone input");
       check(DrivingMath.sustainedTarget(0,false,4)==0&&DrivingMath.sustainedTarget(20,false,4)==20,"disabled thermal mode preserves custom limits");
       check(DrivingMath.sustainedTarget(0,true,3)==30&&DrivingMath.sustainedTarget(60,true,3)==30,"severe heat bounds uncapped and high targets");
       check(DrivingMath.sustainedTarget(20,true,3)==20&&DrivingMath.sustainedTarget(40,true,0)==40,"thermal mode never raises a low limit and restores the requested limit");
@@ -47,6 +49,8 @@ public final class MobileRefinementsTest {
       String configured=AdrenoSettings.configure("TU_DEBUG=gmem,perf;IR3_SHADER_DEBUG=nouboopt",1,true,false);
       check(configured.equals("TU_DEBUG=perf,sysmem,nolrz;IR3_SHADER_DEBUG=nouboopt"),"changing memory mode preserves independent expert entries");
       check(AdrenoSettings.configure(configured,0,false,false).equals("TU_DEBUG=perf;IR3_SHADER_DEBUG=nouboopt"),"Adreno reset removes only managed workarounds");
+      check(LayoutGrid.position(53,10,200,24,true)==48&&LayoutGrid.position(53,10,200,24,false)==53,"grid snap is optional and uses square pixel spacing");
+      check(LayoutGrid.position(1,17,100,24,true)==17&&LayoutGrid.position(199,17,100,24,true)==100,"snapping cannot move targets outside the safe area");
       TouchLayout layout=new TouchLayout();layout.steering="stick";layout.leftMode=2;layout.rightMode=1;layout.timeout[5]=3;layout.idleSeconds=0;layout.drivingLabels=false;layout.buttonHints=false;layout.highContrast=true;layout.analogPedals=true;
       TouchLayout restored=new TouchLayout();restored.parse(layout.serialize());
       check(restored.steering.equals("stick")&&restored.leftMode==2&&restored.rightMode==1,"steering and both stick modes survive saving");

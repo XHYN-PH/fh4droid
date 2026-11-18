@@ -16,25 +16,25 @@ platforms = ["Windows", "Linux and Steam Deck", "macOS", "Android"]
 feature = "Resolution"
 link = "playing.md#graphics-presets"
 xbox = "1280 × 720"
-pinyon = "Android adds 25–100% raster resolution (device testing pending); desktop has 1x to 4x internal resolution; bilinear, CAS or FSR 1 output scaling, temporal FSR 2 and 3 (built in on Linux, macOS and Android, with the FidelityFX runtime on Windows); ultrawide with a 16:9 HUD"
+pinyon = "Android adds 25–100% raster resolution. Desktop offers 1x to 4x internal resolution or a 960 × 540 scene mode, bilinear, CAS, FSR and NVIDIA DLSS where supported, and ultrawide with a 16:9 HUD."
 
 [[original]]
 feature = "Frame rate"
 link = "playing.md#graphics-presets"
 xbox = "30 fps"
-pinyon = "60 or 120 fps at the correct game speed"
+pinyon = "60 or 120 fps at the correct game speed, and FSR 3 frame generation"
 
 [[original]]
 feature = "Graphics"
 link = "playing.md#graphics-presets"
 xbox = "Fixed"
-pinyon = "Presets, MSAA up to 4x, FXAA on the world only, anisotropic filtering, a texture size cap for small graphics memory, a colour LUT, optional bloom, motion blur and depth of field; HUD scale and safe zone"
+pinyon = "Presets, MSAA up to 4x with [measured Vulkan GPU savings](performance.md#the-race), FXAA on the world only, anisotropic filtering, a texture size cap for small graphics memory, a colour LUT, optional bloom, motion blur and depth of field; HUD scale, safe zone and update rate"
 
 [[original]]
 feature = "HDR"
 link = "playing.md#hdr"
 xbox = "No"
-pinyon = "HDR output with paper white, highlights and a calibration screen"
+pinyon = "HDR output with paper white, highlights and a calibration screen; on Windows it can turn the display's HDR on while playing"
 
 [[original]]
 feature = "Textures"
@@ -44,9 +44,15 @@ pinyon = "Replacement textures up to 8 times larger, reloaded in game"
 
 [[original]]
 feature = "Camera"
-link = "playing.md#immersive-camera"
+link = "playing.md#camera-editor"
 xbox = "Stock cameras"
-pinyon = "Optional immersive camera: G-forces, lean, speed shake and head motion"
+pinyon = "Live chase height, distance, FOV and stiffness; optional immersive camera motion"
+
+[[original]]
+feature = "Career pace"
+link = "playing.md#festival-pacing"
+xbox = "Fixed"
+pinyon = "Optional festival pacing on the base game: set what cars and upgrades cost and what races pay, from a quarter to five times stock"
 
 [[original]]
 feature = "Music"
@@ -64,13 +70,13 @@ pinyon = "Engine, other cars, tyres, wind, ambience and music levels, and the co
 feature = "Mods"
 link = "modding.md"
 xbox = "No"
-pinyon = "Asset, database, texture and native mods; the Forza Horizon XE mod installs from the launcher"
+pinyon = "Asset, database, texture, Vulkan shader and native mods, installed, switched on and ordered from the launcher; the Forza Horizon XE mod installs from the launcher too, and other FH1 mods of changed game files import with one command"
 
 [[original]]
 feature = "DLC and title update"
 link = "dlc.md"
 xbox = "Bought on Xbox Live"
-pinyon = "Your own packages, verified and imported; Treasure Map included; Horizon Rally and 1000 Club on the optional title update v4 build"
+pinyon = "Your own packages, verified and imported; UDLC v1.2 and its Traffic Car Unlocker through Download from ModDB or Install UDLC in the DLC panel; Treasure Map included; Horizon Rally and 1000 Club on the optional title update v4 build"
 
 [[original]]
 feature = "Controls"
@@ -82,13 +88,19 @@ pinyon = "XInput and SDL controllers with button mapping, keyboard driving with 
 feature = "Saves"
 link = "playing.md#saves"
 xbox = "Console storage"
-pinyon = "Automatic save backups, PNG photos, saves imported from Xenia"
+pinyon = "Automatic save backups, save sync between devices through a sync app, PNG photos, saves imported from Xenia"
+
+[[original]]
+feature = "Achievements"
+link = "playing.md#achievements"
+xbox = "The dashboard's list"
+pinyon = "A screen in the game's own style: wristband tiers, categories, progress bars where the save counts them, the closest ones to unlock, one tracked on the HUD, and an unlock toast with the game's reward sound"
 
 [[original]]
 feature = "Cheats"
 link = "playing.md#trainer"
 xbox = "None"
-pinyon = "A trainer on a separate profile: credits, wristbands, game speed, time of day, day length, free camera, collectibles on the map, any car in any event"
+pinyon = "A trainer on a separate profile: credits, wristbands, game speed, time of day, day length, free camera, collectibles on the map, any car in any event; experimental map travel and saved GPS targets"
 
 [[original]]
 feature = "AI opponents"
@@ -103,10 +115,16 @@ xbox = "Xbox Live (closed)"
 pinyon = "None; the 1000 Club challenges run offline on the v4 build"
 
 [[original]]
+feature = "Loading"
+link = "playing.md#gameplay-switches"
+xbox = "Loading screens stay up at least 1 s into free roam and 3 s into and out of events"
+pinyon = "Loading screens end when loading does: about 0.5 s from the title to free roam and 1.3-1.7 s into or out of a race on a desktop"
+
+[[original]]
 feature = "Installing and updating"
 link = "install.md#updating"
 xbox = "Disc"
-pinyon = "The launcher verifies your disc, builds the game and updates itself"
+pinyon = "The launcher verifies your disc, builds the game and updates itself; startup [repairs partial settings](troubleshooting.md#a-partial-settings-file-on-a-fresh-state) with missing defaults and an exact backup, keeping saved values"
 
 # Table 2: features by platform.
 [[platform]]
@@ -126,7 +144,7 @@ cells = [
   "yes: launcher ZIP",
   "yes: launcher archive; **Add to Steam** for Game Mode",
   "partly: launcher app; not notarized, so it is approved once in System Settings",
-  "yes: signed APK; local ISO or extracted-folder import",
+  "yes: signed APK; local ISO or extracted-folder import; generated module registry and packaged registration exports checked",
 ]
 
 [[platform]]
@@ -150,14 +168,14 @@ link = "playing.md#graphics-presets"
 cells = [
   "yes: up to 120 fps",
   "yes: up to 120 fps; 60 on the Steam Deck",
-  "yes: up to 120 fps",
+  "yes: 120 fps at 1x and 60 with QUALITY 60 on the M4 Pro ([measurements](platforms.md#macos-on-apple-silicon))",
   "partly: SMOOTH 60 or QUALITY 30",
 ]
 
 [[platform]]
 feature = "Graphics presets"
 link = "playing.md#graphics-presets"
-cells = ["yes", "yes", "yes", "partly: three presets of their own"]
+cells = ["yes", "yes", "yes: QUALITY 60 uses 2x MSAA on a Mac", "partly: three presets of their own"]
 
 [[platform]]
 feature = "HDR"
@@ -166,7 +184,7 @@ cells = [
   "yes",
   "partly: offered when the driver has an HDR swapchain; not tested",
   "partly: offered when the driver has an HDR swapchain; not tested",
-  "partly: HDR10 on displays that report it; tested on the Odin 2 Portal",
+  "partly: HDR10 checked on the Odin 2 Portal; Astra calibration unqualified",
 ]
 
 [[platform]]
@@ -200,9 +218,14 @@ link = "modding.md"
 cells = ["yes", "yes", "yes", "partly: DXT texture replacements need a GPU with BC formats ([#516](https://github.com/arcanite24/pinyon-shift/issues/516))"]
 
 [[platform]]
-feature = "Traffic and showcase cars"
+feature = "Frame inspector"
+link = "modding.md#frame-inspector"
+  cells = ["partly: desktop Vulkan; color, resolve-source previews and replay diagnostics", "partly: desktop Vulkan implementation; device qualification pending", "partly: desktop Vulkan implementation; diagnostic views depend on device capabilities; qualification pending", "n/a"]
+
+[[platform]]
+feature = "Hidden player-car variants"
 link = "playing.md#traffic-and-showcase-cars"
-cells = ["yes", "partly: the same database mod; tried on Windows only", "partly: the same database mod; tried on Windows only", "partly: shared from the PC with its mods; not tried"]
+cells = ["partly: base purchase, reload and driving checked; intro garage entry checked; remaining garage/paint and v4 pending", "partly: the same database mod; not qualified", "partly: the same database mod; not qualified", "partly: optional Hidden cars install and database rebuild on-device; phone qualification pending"]
 
 [[platform]]
 feature = "Wider photo camera limits"
@@ -221,7 +244,7 @@ cells = [
   "yes",
   "yes: in the launcher; on the Steam Deck a DLC car bought from the Autoshow and driven",
   "partly: in the launcher; on a Mac the DLC cars load and drive in a scripted route",
-  "partly: imported on the PC, copied with the game",
+  "partly: on-device verified package, folder and ZIP import; dependencies and prepared Rally adapter; phone qualification pending",
 ]
 
 [[platform]]
@@ -258,10 +281,20 @@ cells = ["yes", "yes", "yes: Cmd shortcuts for the F-keys", "n/a"]
 feature = "Racing wheels"
 link = "playing.md#racing-wheels"
 cells = [
+  "partly: steering and pedals with saturation, deadzones and a curve; experimental force feedback with devices bound in the launcher's Wheel screen ([#337](https://github.com/arcanite24/pinyon-shift/issues/337))",
   "partly: steering and pedals with saturation, deadzones and a curve; no force feedback yet ([#337](https://github.com/arcanite24/pinyon-shift/issues/337))",
   "partly: steering and pedals with saturation, deadzones and a curve; no force feedback yet ([#337](https://github.com/arcanite24/pinyon-shift/issues/337))",
   "partly: steering and pedals with saturation, deadzones and a curve; no force feedback yet ([#337](https://github.com/arcanite24/pinyon-shift/issues/337))",
-  "partly: steering and pedals with saturation, deadzones and a curve; no force feedback yet ([#337](https://github.com/arcanite24/pinyon-shift/issues/337))",
+]
+
+[[platform]]
+feature = "Head tracking"
+link = "playing.md#head-tracking"
+cells = [
+  "partly: cockpit and hood cameras from OpenTrack (TrackIR, webcams, VR headsets); checked on the base game with fixed poses, not yet with a tracker or on v4 ([#489](https://github.com/arcanite24/pinyon-shift/issues/489))",
+  "partly: as on Windows, untested on this platform ([#489](https://github.com/arcanite24/pinyon-shift/issues/489))",
+  "partly: as on Windows, untested on this platform ([#489](https://github.com/arcanite24/pinyon-shift/issues/489))",
+  "n/a",
 ]
 
 [[platform]]
@@ -272,7 +305,7 @@ cells = ["yes", "yes", "yes", "partly: save backups; Android photo capture omitt
 [[platform]]
 feature = "Android launcher and touch editor"
 link = "android.md#launcher"
-cells = ["n/a", "n/a", "n/a", "partly: transparent logo, organized settings, full-window editor; 20 proportion-preserving SVG icons in a shared PNG atlas, code badges, arrows/stick, explicit presets, remapping, undo/redo, separate arrow rates and per-control fading; device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: racing card launcher, management grid, controller focus with short optional transitions, organized settings, full-window editor; 20 proportion-preserving SVG icons in a shared PNG atlas, code badges, arrows/stick, explicit presets, remapping, undo/redo, separate arrow rates and per-control fading; device testing pending"]
 
 [[platform]]
 feature = "Direct ISO loading"
@@ -282,4 +315,14 @@ cells = ["n/a", "n/a", "n/a", "partly: base game; host support files cached; dev
 [[platform]]
 feature = "Phone save import/export and reports"
 link = "android.md#saves"
-cells = ["n/a", "n/a", "n/a", "partly: scoped normal/modded archives, reversible restore, original-XUID base-game Xenia import; current-session reports and visual markers; device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: scoped normal/modded archives, reversible restore, original-XUID base-game Xenia import; current-session reports, visual markers and a background-aware stall watchdog; device testing pending"]
+
+[[platform]]
+feature = "Android mod and pipeline management"
+link = "android.md#mods-dlc-and-prepared-shaders"
+cells = ["n/a", "n/a", "n/a", "partly: mod ZIP/folder import, order and options, Festival pacing, prepared Rally and pipeline-list import; source follow-up adds damaged-mod recovery, normal-import marker stripping, async discovery, retained detail/focus, durable interruption journals and storage preflight; native plugins and archive-member patches need PC preparation; further phone qualification pending"]
+
+[[platform]]
+feature = "Android resource policy and performance comparisons"
+link = "android.md#android-resource-policy"
+cells = ["n/a", "n/a", "n/a", "partly: adaptive initial texture reserve, bounded regular/AOT workers, pressure-aware trimming, effective refresh hints, cached-pipeline progress and controlled comparison tooling; phone FPS/thermal qualification pending"]

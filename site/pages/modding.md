@@ -2,12 +2,12 @@
 title: Modding
 section: Technical
 order: 4
-description: Asset, archive, database, texture and native mods for Pinyon Shift, and how they keep your save separate.
+description: Asset, archive, database, texture, Vulkan shader and native mods, and how they keep your save separate.
 ---
 
 # Modding
 
-Mods live in the state folder, never in the game files. They can replace files, patch single archive members, merge settings, patch the game database, replace textures, or run native code through a C API. This page is a summary; the full contract is [docs/MODDING.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/MODDING.md).
+Mods live in the state folder, never in the game files. They can replace files, patch single archive members, merge settings, patch the game database, replace textures or Vulkan shaders, or run native code through a C API. This page is a summary; the full contract is [docs/MODDING.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/MODDING.md).
 
 ## Layout
 
@@ -22,11 +22,32 @@ Mods live in the state folder, never in the game files. They can replace files, 
   strings/<lang>/*.toml  new or changed text in the string tables
   db/*.sql               database patches
   textures/<hash>.dds    texture replacements
+  shaders/shader_<guest>_<modification>_<translated>.spv  Vulkan replacements
+  preview.png            images the launcher shows (optional)
 ```
 
 `<state>` for an installed preview is `%LOCALAPPDATA%\PinyonShift\source\<version>\.local\preview`.
 
 ## Enabling
+
+The launcher's **Mods** button lists the installed mods with each one's description and images; **Details** under the description shows what it changes, the builds it is made for, whether it keeps your own save and the mods it needs. When a switch moves the next start to another save, it says so: switching on the first mod that changes your save moves you to a separate copy of it, and switching off the last one sends you back to your own save, while the copy keeps what you played with mods until you switch one on again. **Install ZIP** and **Install folder** add a mod (it starts switched off); **Switch on** and **Remove** act on the selected one. A mod that offers options, such as how strong its change is, shows a list for each under its description: the built-in **Festival pacing** has **Prices** (what cars, upgrades and rims cost, 0.25x to 3x) and **Rewards** (credits, wristband points and XP toward driver levels, 0.5x to 5x). A mod the game would refuse, such as one made for the other build or missing a mod it needs, is marked with the reason. The Linux and macOS launcher also takes a dropped ZIP or folder. Changes apply at the next start. A mod with native code (`code/` or a `library`) runs inside the game with your account's permissions once switched on, so install those only from authors you trust; the mod's **Details** list native code among what it changes. The in-game **SETTINGS > MODS** screen switches mods too.
+
+The built-in `hidden_cars` mod lists four hidden player-model variants.
+Traffic entries such as the tour bus are excluded because driving support
+does not establish garage or paint support. Existing purchases remain in
+the isolated modded profile. To recover a blocked current selection, close
+the game and run `python tools/fh1-profile.py recover-car --state-root "<state>"`.
+It backs up the selected modded profile and settings before requesting the
+title's starter-car fallback, preserving the trainer setting. Keep a
+save-isolating mod enabled after recovery. Use the same title version and let it save
+before restarting. Recovery/save/reload checks pass on private base and v4
+fixtures with the trainer disabled, preserving original cars, parts and
+credits. [Audit, limits and restore instructions](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/HIDDEN_CARS.md).
+
+The intro Corrado's Garage and Design Creator entry routes pass on Windows
+with the integrated livery resolve corrections. Paint editing, saving and
+reloading, the other variants' full garage checks and v4 qualification remain
+open; these entry checks do not establish complete model support.
 
 List mods, in load order, in `<state>/config/pinyon_shift.toml`:
 
@@ -34,7 +55,7 @@ List mods, in load order, in `<state>/config/pinyon_shift.toml`:
 enabled_mods = "hello_telemetry,english_strings"
 ```
 
-The in-game **SETTINGS** screen lists the mods it finds. Changes apply at the next start. Each load or rejection is logged as `mod.loaded` or `mod.rejected` with the reason.
+`tools/pinyon.py mods` does the launcher's work from the command line ([commands](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/MODDING.md#layout-and-enabling)). Each load or rejection is logged as `mod.loaded` or `mod.rejected` with the reason.
 
 ## mod.toml
 
@@ -65,11 +86,13 @@ A mod that only changes how the game looks or sounds, and never what it saves, c
 | Kind | How it works |
 | --- | --- |
 | Whole files (`game/`) | Replace the file with the same path, case-insensitively. The earlier mod in the load order wins |
+| New archives (`game/media/.../<name>.zip`) | Listed in `zipmanifest.xml` before each start, which the game needs to open them; a car's own model archive, `media/cars/<MediaName>.zip`, is one ([#496](https://github.com/arcanite24/pinyon-shift/issues/496)) |
 | Archive members (`members/<archive>/<member>`) | Before each start, the affected archives are rebuilt from your own copy with only those members replaced |
 | New archive members (`add/<archive>/<member>`) | Appended to the rebuilt archive, for example a new colour grading map in `dynamicpost.zip`. A name the archive already has is refused, as is a `members/` name it lacks |
 | Strings (`strings/<language or ALL>/<Table>.toml`) | `IDS_` names with their text: existing names are changed, new ones added with their key, which the database refers to as `_&N` (`tools/fh1-strings.py`) |
 | Merged settings (`merge/`) | `.ini` keys and `.xml` elements are merged into the file, so several mods can change one settings file |
-| Database (`db/*.sql`) | SQL scripts run in load order on a copy of `media/db/gamedb.slt`, or of the database an enabled mod replaces it with |
+| Title-update settings (`merge-update/`) | `.ini` and `.xml` member merges against the installed v4 update, such as `merge-update/media.zip/camera/cameraphysics.xml`. Built into the generated mod's `update/` overlay; inactive without the update. The verified update stays untouched |
+| Database (`db/*.sql`) | SQL scripts run in load order on a copy of `media/db/gamedb.slt`, or of the database an enabled mod replaces it with, or, on the base disc with Rally ready, of the Rally database (which carries the Rally rows). With the v4 update installed they also run on v4's own database in the update's `media.zip`, which v4 reads instead, so a script must work on both. Each copy takes only the scripts of mods whose `game_version` accepts that build |
 | New cars (`tools/clone-fh1-car.py`) | A spec of cars that reuse an existing model with their own name, price, power and listed class becomes a `db/` script and `strings/` names. Once bought, the game rates a car from its physics, so a listed index should be the one the owned car shows. Clones upgrade and paint like any car; bought cars stay in the modded profile, which still loads if the mod is removed |
 | Textures (`textures/<hash>.dds`) | Find a texture's hash with `--texture_dump_dir`. A replacement keeps the format and may be 2, 4 or 8 times larger. **SETTINGS > MODS > RELOAD TEXTURES** reloads them in game. On a GPU without BC formats (most Android GPUs) only 8_8_8_8 replacements apply |
 
@@ -83,7 +106,79 @@ For example, a merge that removes free-roam traffic:
 
 Elements without a key attribute, such as the layers in `CameraPhysics.xml`, match by position; mark an element `pinyon-add="true"` to append it instead.
 
+The built-in immersive camera supplies separate disc and v4 merges because
+the update has more chase-camera layers. Regenerate both with
+`python tools/build-immersive-camera.py`. Live chase height, distance, FOV
+and spring stiffness are in [CAMERA EDITOR](playing.md#camera-editor);
+their defaults preserve the loaded tuning and per-car camera overrides.
+See [Camera editor](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/MODDING.md#camera-editor) for the
+data and runtime boundary.
+Update member merges also preserve the winning whole-archive override
+under a mod's `update/` directory.
+
 Nothing from the game disc may be distributed. A mod's install steps should build its files from the player's own copy, as `tools/install-sample-mod.py english_strings` does.
+
+## Shader mods
+
+Enabled mods can provide Vulkan SPIR-V in `shaders/`. The earlier loaded
+mod with a valid exact match wins; separate shaders compose, while two
+replacements of one shader do not merge. Names include the guest hash,
+specialization and XXH3 hash of the original translation, so changed
+translator output cannot silently select stale bytecode. Invalid files
+are logged and skipped. Changes require a restart.
+
+Capture one GPU frame with `vulkan_shader_discovery_dir` and
+`vulkan_shader_discovery_frame`, then run
+`python tools/discover-fh1-shaders.py <capture>`. It lists exact identities,
+draws, the HUD boundary and bound color/depth surfaces without disassembly.
+`--check-mod <mod>/shaders` compares a mod against that frame. Surfaces do
+not identify materials or objects. Keep capture files in `.local/`.
+The capture also includes used texture bindings with padded guest ranges
+and ordered completed resolves. Allocation overlaps locate possible writers;
+partial copies and conditional sampling still need analysis.
+
+Overrides can change existing inputs' use; preserve the renderer's bindings
+and stage interface. They cannot add game inputs. Rebuild and test after
+translator or graphics-setting changes, and test driver compilation cost
+on the target GPU. Only independently authored code may be distributed;
+translated guest bytecode stays local.
+[Authoring contract and capture commands](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/MODDING.md#shader-replacements).
+
+## Frame inspector
+
+On desktop Vulkan, **Ctrl+F8** opens a frame inspector. **Capture next frame**
+freezes surface sizes, formats, draw counts and previews, resolve source
+rectangles, and texture identities. Hover a texture row for its base-level
+XXH3 hash, which uses the texture replacement filename's byte domain.
+GPU-written or unavailable payloads have no CPU hash. The inspector is off
+by default and captures only on request; capturing waits for the GPU.
+
+To open a local `.fh1frame` dump, restart with
+`--fh1_frame_inspector_replay=true`, paste its path and choose **Open dump**.
+The title stays suspended in this workspace. **Color** reports the replay's
+front-buffer comparison; **Wireframe** needs `fillModeNonSolid`, and
+**Overdraw** adds red per fragment on blend-capable attachments while keeping
+render-pass clears. Diagnostic views are restricted to replay.
+
+Previews are at most 256 pixels along their longest side. Resolve previews
+show the source before destination packing and sample selection; depth is
+grayscale. The [inspector contract and limits](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/native-renderer/FRAME_INSPECTOR.md)
+describe image lifetimes and how to record and compare a dump. Dumps contain
+game data: keep them local.
+
+Windows verification on an RTX 4080 covered live capture, dump recovery and
+diagnostic views. Inspected Color output matched plain replay byte for byte;
+the tested recording still differed from its live frame. Disabled frame-time
+measurements varied too much to establish a no-regression result. The linked
+contract records the method, numbers and remaining qualification work.
+
+## Rally world probe
+
+For Rally-world experiments, `tools/create-rally-freeroam-seed.py` builds a
+private base-disc seed from verified owned Rally and a pinned save. It uses a
+separate test profile and always places the car at an owned stage start.
+It cannot qualify save/resume or travel back to Colorado, and is not installed
+as a built-in mod. See the [probe and remaining gates](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/RALLY_FREEROAM.md).
 
 ## Custom radio stations
 
@@ -94,6 +189,27 @@ python tools/build-fh1-radio.py D:\Music\Drive --state-root <state> --station Ra
 ```
 
 The tracks play on the game's radio like its own; the DJ lines are unchanged. The mod holds a copy of the game's 680 MB music bank plus your tracks. To hear your music without touching the radio, use **YOUR MUSIC** on the AUDIO page instead.
+
+## Existing FH1 mods
+
+Most mods made for the Xbox 360 or Xenia ship changed game files: a modded game folder, or files to copy over it. `tools/pinyon.py import-mod` turns one into a Pinyon Shift mod. It takes a folder, ZIP, 7z or RAR, compares it with your own game files and keeps only what differs, so a mod shipped as a whole game folder takes only the space of its changes:
+
+```text
+python tools/pinyon.py import-mod "Some FH1 Mod.7z" --title "Some FH1 Mod" --enable
+```
+
+It plays the shared modded copy of your save; `--new-save` gives it a new save of its own (for mods whose readme asks for one) and `--keeps-save` keeps yours (for mods that only change looks or sound). It targets the base disc unless `--any-build`. Without `--enable` it is installed switched off; either way it then shows in the launcher's **Mods** list ([Enabling](#enabling)), where you switch it on or off like any other mod.
+
+| What the mod ships | In Pinyon Shift |
+| --- | --- |
+| Changed or new game files | Works through `import-mod` |
+| The XE mod | Works through its own installer ([below](#the-xe-mod)) |
+| A changed `default.xex` (code edits) | The code changes don't carry over to a recompiled game; its files still import, with a warning |
+| Xenia patches | Not needed: FH1's four (no motion blur, no depth of field, no shadows, no hash checks) are **F6 > GRAPHICS > MOTION BLUR**, **DEPTH OF FIELD** and **SHADOWS**, and mods' files pass the hash check already |
+| Changed DLC or title update packages | Skipped and listed in the import's result; put the changed files in a mod instead |
+| An edited save | Import it with **Import a save** |
+
+The full guidance is in [docs/MODDING.md](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/MODDING.md#existing-fh1-mods).
 
 ## The XE mod
 
@@ -106,9 +222,28 @@ python tools/pinyon.py xe install --find --open-pages --wait 14400
 
 Pinyon Shift never downloads XE itself: ModDB doesn't allow automated downloads, so your browser does it.
 
-The archives are checked against ModDB's sizes and MD5s, and only the files that differ from your game are kept (2.4 GB; 7 GB free is needed while installing). XE runs on the base disc build, hides Horizon Rally and plays its own new save in `<state>/user-xe`, as its readme asks. Your own save isn't touched. `xe disable` turns it off and `xe remove` deletes its files but keeps its save.
+Both downloads are needed: XE 1.0 without the 1.01 hotfix, together with the UDLC pack, stops the game right after the opening intro on a new save. If you installed XE 1.0 alone with an earlier release, the launcher says the hotfix is missing and hides UDLC while XE is on; choose **Reinstall** with both downloads to get it back. The archives are checked against ModDB's sizes and MD5s, and only the files that differ from your game are kept (2.4 GB; 7 GB free is needed while installing). XE runs on the base disc build, hides Horizon Rally and plays its own new save in `<state>/user-xe`, as its readme asks. Your own save isn't touched. `xe disable` turns it off and `xe remove` deletes its files but keeps its save.
 
 The archives are extracted with [7-Zip](https://www.7-zip.org) when it is installed, otherwise with the system `tar`. Some Windows `tar.exe` builds can't read XE's LZMA archives; the install then stops before extracting and asks you to install 7-Zip and choose **Install XE** again.
+
+## The UDLC pack
+
+[UDLC v1.2](https://www.moddb.com/mods/forza-horizon-udlc-pack/downloads/udlcv12)
+by Warshack4874 installs as a community DLC package. In the launcher's
+**DLC** panel, use **Download from ModDB** under **UDLC Pack** to open the
+page in your browser and install when the download finishes, or
+**Install UDLC** to select ZIPs you already have. Tick **Also install the
+Traffic Car Unlocker** before downloading if you want traffic cars too;
+the unlocker needs UDLC. The launcher asks before turning UDLC off and
+explains that owned cars are hidden until you turn it on again.
+The terminal equivalent is `python tools/pinyon.py dlc udlc --find`. See
+[installation and qualification](dlc.md#community-udlc) for the verified
+versions and known paint-shop hangs. Pinyon Shift does not redistribute
+these downloads.
+
+["Open" UDLC](https://www.moddb.com/mods/forza-horizon-udlc-pack/downloads/open-udlc)
+replaces the game's database files for editing the DLC cars. It is not a
+DLC package and is not supported by the importer or the UDLC command.
 
 ## Native mods
 

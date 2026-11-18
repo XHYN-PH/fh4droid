@@ -1,4 +1,5 @@
 import getpass
+import importlib.util
 import json
 import os
 import pathlib
@@ -122,7 +123,7 @@ if ((Get-PinyonVisualStudioRoot) -ne 'compatible-vs2022') { throw 'Supported too
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         updater = (ROOT / "launcher/Shared/LauncherUpdate.cs").read_text(encoding="utf-8")
         assets = dict(re.findall(r'public const string (\w+Asset) = "([^"]+)";', updater))
-        self.assertEqual(set(assets), {"WindowsAsset", "LinuxAsset", "MacAsset"})
+        self.assertEqual(set(assets), {"WindowsAsset", "LinuxAsset", "MacAsset", "MacIntelAsset"})
         for asset in assets.values():
             self.assertIn(f".artifacts/{asset}", workflow)
         release = json.loads((ROOT / "config/release.json").read_text(encoding="utf-8"))
@@ -137,6 +138,22 @@ if ((Get-PinyonVisualStudioRoot) -ne 'compatible-vs2022') { throw 'Supported too
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("if ($release.channel -eq 'preview') { 'dev' } else { 'main' }", workflow)
         self.assertIn('--main-ref "refs/remotes/origin/$branch"', workflow)
+
+    def test_release_attaches_and_pins_prebuilt_assets(self):
+        # TP-1 to TP-3: every platform's prebuilt job may fail without
+        # blocking the release, every packager pins what was built (on tags
+        # only, where the release URL exists), and the sidecars stay out.
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        for platform in ("windows", "linux", "macos", "macos-intel", "android"):
+            job = workflow.split(f"  prebuilt-{platform}:\n", 1)[1].split("\n\n", 1)[0]
+            self.assertIn("continue-on-error: true", job)
+            self.assertIn(f"name: prebuilt-{platform}", job)
+        self.assertEqual(workflow.count("needs: [prebuilt-windows, prebuilt-linux, prebuilt-macos, "
+                                        "prebuilt-macos-intel, prebuilt-android]"), 3)
+        self.assertIn("-PrebuiltAssets .artifacts/prebuilt", workflow)
+        self.assertEqual(workflow.count("--prebuilt-assets .artifacts/prebuilt --release-base-url"), 2)
+        self.assertIn("releases/download/{1}', github.repository, github.ref_name)", workflow)
+        self.assertIn("*.json|'.artifacts/prebuilt/*') ;;", workflow)
 
 
     @unittest.skipUnless(shutil.which("powershell"), "Windows PowerShell is required")
@@ -257,12 +274,19 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         self.assertIn("-fasync-exceptions", integration)
         self.assertIn("target_precompile_headers", integration)
         self.assertIn("_recomp OBJECT", integration)
-        self.assertIn("--ignore-stamp", integration)
+        # The generator's stamp check must stay on, or the first build after
+        # the bootstrap translates the game twice.
+        self.assertNotIn("--ignore-stamp", integration)
         self.assertIn("rexglue-sdk EXCLUDE_FROM_ALL", integration)
         self.assertIn("PINYON_SHIFT_REXGLUE_CODEGEN_DEPENDS", integration)
-        self.assertIn("$<TARGET_FILE:rexruntime>", integration)
-        self.assertIn("$<TARGET_FILE:rexgpu-fh1>", integration)
-        self.assertIn("DEPENDS ${target_name} rexruntime rexgpu-fh1", integration)
+        # The staging target copies the source build's libraries, or the
+        # prebuilt kit's imported ones (TP-3).
+        self.assertIn("set(_pinyon_runtime rexruntime)", integration)
+        self.assertIn("set(_pinyon_gpu rexgpu-fh1)", integration)
+        self.assertIn("set(_pinyon_stage_depends ${target_name} rexruntime rexgpu-fh1)", integration)
+        self.assertIn("set(_pinyon_runtime rex::runtime)", integration)
+        self.assertIn("$<TARGET_FILE:${_pinyon_runtime}>", integration)
+        self.assertIn("$<TARGET_FILE:${_pinyon_gpu}>", integration)
         graphics_cmake = (
             ROOT / "thirdparty/shiftglue-sdk/src/graphics/CMakeLists.txt"
         ).read_text(encoding="utf-8")
@@ -327,7 +351,9 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         self.assertNotIn("Get-Command git.exe", get_git)
         self.assertIn("$config.git.install_path", get_git)
         self.assertNotIn("Get-Command git.exe", provision)
-        self.assertIn("$config.git.install_path", provision)
+        install_git = common.split("function Install-PinyonGit", 1)[1].split("\nfunction ", 1)[0]
+        self.assertIn("$config.git.install_path", install_git)
+        self.assertIn("Install-PinyonGit", provision)
         self.assertIn("ConvertTo-PinyonCommandPath", common)
         self.assertIn("$inheritedPath = $env:PATH", common)
 
@@ -341,9 +367,12 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         self.assertIn("'safe.directory'", trust)
         self.assertIn('"$trusted/*"', trust)
         self.assertIn("GIT_CONFIG_COUNT", trust)
-        # A broken global http.sslCAInfo failed every clone (#604).
-        self.assertIn("'http.sslCAInfo'", trust)
-        self.assertIn(r"mingw64\etc\ssl\certs\ca-bundle.crt", trust)
+        # A broken global http.sslCAInfo failed every clone (#604). MinGit
+        # uses schannel and ignores CA files: its own bundle under a
+        # non-ASCII user folder failed with "failed to open CA file".
+        self.assertIn("@('http.sslBackend', 'schannel')", trust)
+        self.assertIn("@('http.schannelUseSSLCAInfo', 'false')", trust)
+        self.assertNotIn("@('http.sslCAInfo'", trust)
 
     def test_powershell_is_started_by_full_path(self):
         # A PATH without the WindowsPowerShell folder failed setup with "The
@@ -443,6 +472,18 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         for shipped in ("host-config.ps1", "set-graphics-experiment.ps1", "verify-codegen-log.ps1", "prepare-fh1-rally.py", "patch-fh1-archive.py", "fh1-strings.py"):
             self.assertIn(shipped, package_script)
 
+    def test_launcher_payload_ships_every_script_a_shipped_script_runs(self):
+        # 0.8.0 shipped setup-preview.ps1 without copy-disc-executables.py,
+        # so every player's setup stopped at the disc (#1014).
+        package = (ROOT / "tools/package-launcher.ps1").read_text(encoding="utf-8")
+        block = package.split("$include = @(", 1)[1].split("\n)", 1)[0]
+        include = set(re.findall(r"'([^']+)'", block))
+        for shipped in sorted(i for i in include if i.startswith("tools/") and i.endswith(".ps1")):
+            text = (ROOT / shipped).read_text(encoding="utf-8")
+            for name in re.findall(r"Join-Path \$PSScriptRoot '([\w.-]+\.(?:py|ps1))'", text):
+                if (ROOT / "tools" / name).is_file():
+                    self.assertIn("tools/" + name, include, f"{shipped} runs {name}")
+
     def test_launcher_payload_ships_the_android_build(self):
         # The launcher's Build Android APK action runs build-android.ps1, which
         # runs pinyon.py; pinyon.py imports pinyon_android, which reads the
@@ -463,6 +504,27 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         for pin in (android["bootstrap"]["cmdline_tools"], android["bootstrap"]["jdk"]):
             self.assertTrue(pin["url"].startswith("https://"))
             self.assertRegex(pin["sha256"], r"^[0-9A-F]{64}$")
+
+    def test_source_zip_contains_android_build_inputs(self):
+        spec = importlib.util.spec_from_file_location("package_launcher", ROOT / "tools/package-launcher.py")
+        packager = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(packager)
+        with tempfile.TemporaryDirectory(prefix="pinyon-source-zip-") as directory:
+            payload = pathlib.Path(directory) / "pinyon-shift-source.zip"
+            packager.build_payload(payload)
+            with zipfile.ZipFile(payload) as archive:
+                # CMake configures this test target even when building only the game.
+                camera_test = "tests/camera_tuning_tests.cpp"
+                self.assertEqual(archive.read(camera_test), (ROOT / camera_test).read_bytes())
+                for variant in ("base", "v4"):
+                    relative = f"config/performance/symbol-order-{variant}.txt"
+                    metadata = archive.read(relative)
+                    self.assertEqual(metadata, (ROOT / relative).read_bytes())
+                    # Profiling-authored linker names only, never translated code or game data.
+                    self.assertRegex(metadata.decode("ascii"), r"\A(?:__imp__sub_[0-9A-F]{8}\r?\n)+\Z")
+                self.assertFalse(any(pathlib.Path(name).suffix.lower() in packager.FORBIDDEN
+                                     or name.startswith("config/rexglue/generated/")
+                                     for name in archive.namelist()))
 
     def test_native_tools_use_the_configured_sdk_and_ship_their_sources(self):
         cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
@@ -565,7 +627,7 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
 
     def test_graphics_schema_and_diagnostics_contract(self):
         app = (ROOT / "src/pinyon_shift_app.cpp").read_text(encoding="utf-8")
-        self.assertIn("constexpr uint32_t kConfigSchema = 29", app)
+        self.assertIn("constexpr uint32_t kConfigSchema = 30", app)
         self.assertIn(".schema", app)
         # create-crash-report.ps1 is a wrapper over tools/pinyon_crash.py, the
         # crash bundler every OS uses (LX-3.5).
@@ -627,8 +689,8 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         launcher_xaml = (ROOT / "launcher/PinyonShift.Launcher/MainWindow.xaml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("constexpr uint32_t kConfigSchema = 29;", app)
-        self.assertRegex(app, r"pinyon_shift_config_schema,\s*29,")
+        self.assertIn("constexpr uint32_t kConfigSchema = 30;", app)
+        self.assertRegex(app, r"pinyon_shift_config_schema,\s*30,")
         self.assertIn('"pinyon_shift_stabilize_vehicle_presentation = false\\n"', app)
         # New files get every keyboard bind; older ones keep the keys they had.
         keys = (ROOT / "src/config/default_keys.h").read_text(encoding="utf-8")
@@ -661,8 +723,8 @@ catch { [Console]::Error.Write($_.Exception.Message); exit 2 }
         ):
             self.assertIn(f'"{retired}"', retired_block)
         graphics_tool = (ROOT / "tools/set-graphics-experiment.ps1").read_text(encoding="utf-8")
-        self.assertIn("pinyon_shift_config_schema = 29", graphics_tool)
-        self.assertIn("-gt 29", graphics_tool)
+        self.assertIn("pinyon_shift_config_schema = 30", graphics_tool)
+        self.assertIn("-gt 30", graphics_tool)
         self.assertNotIn("-gt 23", graphics_tool)
         # Apply writes the current schema and so bypasses the game's
         # migration: it must drop every setting that migration retires.

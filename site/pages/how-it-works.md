@@ -18,9 +18,9 @@ This page is a summary. The [Internals](internals.md) pages go into detail on th
 Setup runs six reproducible stages:
 
 1. Verify the ISO's exact size and SHA-256 against `config/supported-dumps.json`.
-2. Install Visual Studio Build Tools if missing, and download pinned portable tools whose hashes are in `config/release-toolchain.json`.
-3. Fetch the pinned ShiftGlue revision.
-4. Extract the disc and generate the translated source under `.local/`.
+2. Download pinned portable tools whose hashes are in `config/release-toolchain.json`, starting while the disc is still being verified. On Windows, with the prebuilt ShiftGlue kit, setup also downloads Microsoft's C++ libraries and Windows SDK once you accept Microsoft's licence; otherwise it installs Visual Studio Build Tools if missing.
+3. Fetch the pinned ShiftGlue revision. When the release carries a prebuilt ShiftGlue kit for the platform (the code generator, runtime and renderer, nothing from the game), setup downloads that instead of cloning and compiling ShiftGlue, along with our host code that doesn't depend on the translation, compiled once per release.
+4. Copy the three executables off the disc and generate the translated source under `.local/`. The rest of the disc is extracted in the background while the next step compiles.
 5. Compile `pinyon_shift.exe`.
 6. Prepare Vulkan shaders in a private startup run, so the first launch doesn't compile them.
 
@@ -35,7 +35,7 @@ The game's GPU commands run through a renderer written for *Forza Horizon*, not 
 - The game's original Xenos shaders are translated to SPIR-V. Shaders seen during setup are stored in a pack, and new ones are translated during play and kept for the next launch.
 - Rendering runs at 1x to 4x the console's 1280 × 720, with FSR 1, CAS or bilinear output scaling.
 
-Vulkan is the supported graphics API. Desktop builds target 1.3; Android has experimental 1.1/1.2 capability paths that still need phone qualification ([limits](android.md#r7-changes-and-limits)). The Direct3D 12 backend is legacy code and isn't offered to players.
+Vulkan is the supported graphics API. Desktop builds target 1.3; Android has experimental 1.1/1.2 capability paths that still need phone qualification ([limits](android.md#current-changes-and-limits)). The Direct3D 12 backend is legacy code and isn't offered to players.
 
 ## Frame rate
 
@@ -43,7 +43,7 @@ The console runs the game at 30 fps. Pinyon Shift runs it at 60 or 120 fps and f
 
 ## Host features
 
-The host adds what the console didn't have, without changing the game's files: in-game settings, the trainer, photo export, save backups, achievements, an ultrawide field of view, language selection and a [mod API](modding.md). Saves are written atomically and backed up after each write.
+The host adds what the console didn't have, without changing the game's files: in-game settings, the trainer, photo export, save backups, achievements, an ultrawide field of view, language selection and a [mod API](modding.md). Saves are written atomically and backed up at most every 10 minutes and at exit.
 
 ## Android
 

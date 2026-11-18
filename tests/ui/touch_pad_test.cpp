@@ -95,6 +95,30 @@ int main() {
   CHECK(!pad.Visible() && pad.State().thumb_lx == 0);
   pad.SetPhysicalController(false); CHECK(pad.State().thumb_lx == 0);
 
+  // Pedals retain their pointer ownership, even when dragged over steering.
+  // Tilt is an independent opt-in input: gas must neither create an axis
+  // with tilt off nor suppress tilt that the player explicitly enabled.
+  pad.SetPhoneSteering(.7f, false);
+  Press(pad, 41, "RT");
+  CHECK(pad.State().right_trigger == 255 && pad.State().thumb_lx == 0);
+  auto arrow = Find(pad, "RIGHT");
+  Access::Touch(pad, 41, Action::kMove, arrow.x, arrow.y);
+  CHECK(pad.State().right_trigger == 255 && pad.State().thumb_lx == 0);
+  Press(pad, 42, "LEFT");
+  CHECK(pad.State().right_trigger == 255 && pad.State().thumb_lx == -32767);
+  Release(pad, 42); Release(pad, 41);
+  pad.SetPhoneSteering(.7f, true);
+  Press(pad, 43, "RT");
+  CHECK(pad.State().right_trigger == 255 && pad.State().thumb_lx > 22000);
+  Press(pad, 44, "LEFT");
+  CHECK(pad.State().right_trigger == 255 && pad.State().thumb_lx == -32767);
+  Release(pad, 44);
+  CHECK(pad.State().right_trigger == 255 && pad.State().thumb_lx > 22000);
+  pad.SetPhysicalController(true);
+  CHECK(pad.State().right_trigger == 0 && pad.State().thumb_lx == 0);
+  Release(pad, 43); pad.SetPhysicalController(false);
+  pad.SetPhoneSteering(0, false);
+
   // Old layouts keep their positions and remain usable with the stick option.
   { std::ofstream out(layout); out << "steering stick\nRT 0.8 0.8 0.1 0\nLS 0.2 0.7 0.15 0\n"; }
   pad.LoadLayout(layout);
@@ -278,6 +302,10 @@ int main() {
   CHECK(!Has(pad,"RT")&&!Has(pad,"LEFT")&&Has(pad,"A")&&Has(pad,"B")&&Has(pad,"UP"));
   CHECK(!Find(pad,"A").driving_icons&&pad.Visible());
   Press(pad,3,"A");CHECK(pad.State().buttons==rex::input::X_INPUT_GAMEPAD_A);Release(pad,3);
+  CHECK(Has(pad,"LS")&&Has(pad,"RS"));
+  Press(pad,25,"LS");auto ls=Find(pad,"LS");Access::Touch(pad,25,Action::kMove,ls.x+ls.radius*.8f,ls.y-ls.radius*.6f);
+  CHECK(pad.State().thumb_lx>10000&&pad.State().thumb_ly>10000);Release(pad,25);
+  Press(pad,26,"RS");auto rs=Find(pad,"RS");Access::Touch(pad,26,Action::kMove,rs.x+rs.radius*.8f,rs.y);CHECK(pad.State().thumb_rx>10000);Release(pad,26);
   pad.SetMenuContext(false);pad.SetPhoneSteering(0,false);
   CHECK(Has(pad,"RT")&&!Has(pad,"A")&&!Has(pad,"B")&&pad.State().buttons==0);
   {std::ofstream out(layout);out<<"idle_seconds 0\nmap A Y\nmap Y A\nmap LS RT\n";}

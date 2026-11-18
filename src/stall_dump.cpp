@@ -1,4 +1,5 @@
 #include "stall_dump.h"
+#include "stall_timer.h"
 
 #include <algorithm>
 #include <atomic>
@@ -25,13 +26,14 @@
 #include "pinyon_shift_diagnostics.h"
 
 REXCVAR_DEFINE_INT32(pinyon_shift_stall_dump_seconds, 20, "Pinyon Shift",
-                     "Seconds without a title frame before the log gets every guest thread's "
+                     "Active seconds without a title frame before the log gets every guest thread's "
                      "registers and guest call stack, once per stall; 0 turns it off");
 
 namespace {
 
 std::atomic<int64_t> g_last_frame_ns{0};
-std::atomic<uint64_t> g_frames{0};
+std::mutex g_timer_mutex;
+pinyon_shift::stall::StallTimer g_timer;
 
 int64_t NowNs() {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -57,14 +59,17 @@ uint32_t Load32(rex::memory::Memory* memory, uint32_t address) {
 // Each thread's last stored registers (current at its last kernel call, which
 // is where a stalled thread sits) and its guest back chain: the title saves
 // the caller's link register 8 bytes below the caller's frame.
-void DumpThreads() {
+void DumpThreads(int64_t active_elapsed_ns = -1) {
   auto* kernel = rex::system::kernel_state();
   if (!kernel) return;
   auto* memory = kernel->memory();
   auto threads = kernel->object_table()->GetObjectsByType<rex::system::XThread>();
-  REXLOG_WARN("Stall: {:.1f} s since the last title frame; {} threads",
-              double(NowNs() - g_last_frame_ns.load(std::memory_order_acquire)) / 1e9,
-              threads.size());
+  if (active_elapsed_ns < 0) {
+    REXLOG_WARN("Stall: requested thread dump; {} threads", threads.size());
+  } else {
+    REXLOG_WARN("Stall: {:.1f} active s without a title frame; {} threads",
+                double(active_elapsed_ns) / 1e9, threads.size());
+  }
   // The table lists a thread once per handle, and a thread often has two
   // (#542's dump printed most threads twice).
   std::set<uint32_t> dumped;
@@ -98,7 +103,6 @@ void DumpThreads() {
 }
 
 void Watchdog() {
-  int64_t dumped_for = -1;
   // On demand too: a stall can keep the title's frames ticking while nothing
   // reaches the screen. Creating logs/dump-threads asks for one dump.
   const auto trigger = pinyon_shift::diagnostics::StateRoot() / "logs" / "dump-threads";
@@ -109,18 +113,24 @@ void Watchdog() {
       DumpThreads();
     }
     const int32_t seconds = REXCVAR_GET(pinyon_shift_stall_dump_seconds);
-    if (seconds <= 0) continue;
-    const int64_t last = g_last_frame_ns.load(std::memory_order_acquire);
-    if (last == dumped_for) continue;
-    if (NowNs() - last < int64_t(seconds) * 1000000000) continue;
-    dumped_for = last;
-    DumpThreads();
+    int64_t elapsed;
+    {
+      std::lock_guard lock(g_timer_mutex);
+      elapsed = g_timer.Poll(NowNs(), g_last_frame_ns.load(std::memory_order_acquire),
+                             int64_t(seconds) * 1000000000);
+    }
+    if (elapsed > 0) DumpThreads(elapsed);
   }
 }
 
 }  // namespace
 
 namespace pinyon_shift::stall {
+
+void SetPaused(bool paused) {
+  std::lock_guard lock(g_timer_mutex);
+  g_timer.SetPaused(paused, NowNs());
+}
 
 void NoteFrame() {
   g_last_frame_ns.store(NowNs(), std::memory_order_release);

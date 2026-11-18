@@ -1,4 +1,5 @@
 """Separately maintained driver patches must survive shader regeneration."""
+import json
 import pathlib
 import runpy
 import tempfile
@@ -15,6 +16,10 @@ class AndroidSdkPatchTests(unittest.TestCase):
             script = root / "tools/update-android-sdk-patch.py"
             script.parent.mkdir()
             script.write_bytes((ROOT / "tools/update-android-sdk-patch.py").read_bytes())
+            config = root / "config/release-toolchain.json"
+            config.parent.mkdir()
+            config.write_bytes((ROOT / "config/release-toolchain.json").read_bytes())
+            pin = json.loads(config.read_text(encoding="utf-8"))["rexglue"]["revision"]
             patches = root / "cmake/patches"
             patches.mkdir(parents=True)
             driver = patches / "shiftglue-fh4droid-z-driver-preflight.patch"
@@ -29,7 +34,7 @@ class AndroidSdkPatchTests(unittest.TestCase):
             diff = validation_bytes + runtime + b"diff --git a/src/ui/driver.cpp b/src/ui/driver.cpp\n+driver\n" \
                 + b"diff --git a/thirdparty/loader b/thirdparty/loader\n+dirty\n" + shader
             with mock.patch("subprocess.check_output", side_effect=[
-                "79d3e6fae4b79e00def48a595c80f0eaa47fd2b6\n", diff
+                pin + "\n", diff
             ]), mock.patch("builtins.print"):
                 runpy.run_path(str(script), run_name="__main__")
             self.assertEqual(validation.read_bytes(),validation_bytes)

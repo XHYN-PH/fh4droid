@@ -4,11 +4,13 @@ setup path (LX-3) and the Steam shortcut (LX-5.10)."""
 import hashlib
 import json
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -119,6 +121,57 @@ class DiscImageTests(unittest.TestCase):
         self.assertEqual(pinyon_setup.check_paths([("DEFAULT.XEX", 0, 1), ("media/A.zip", 0, 1)],
                                                   expected), [])
 
+    def catalog(self, files: dict) -> tuple[dict, dict]:
+        """A dump whose executables are default.xex and the two facades."""
+        entries = {name.lower(): {"guest_path": name, "size_bytes": len(content),
+                                  "sha256": hashlib.sha256(content).hexdigest().upper()}
+                   for name, content in files.items()}
+        entries["media/a.bin"] = {"guest_path": "media/a.bin", "size_bytes": 10,
+                                  "sha256": hashlib.sha256(b"inner file").hexdigest().upper()}
+        executables = [entries[name.lower()] for name in
+                       ("default.xex", "SpeechFacade_default.xex", "XMediaFacade_default.xex")]
+        return {"id": "test", "executables": executables}, entries
+
+    def test_executables_come_out_first_and_the_rest_waits_for_the_swap(self):
+        # TP-7: the build starts on the executables while extraction runs.
+        files = {"default.xex": b"xex" * 1000, "SpeechFacade_default.xex": b"speech",
+                 "XMediaFacade_default.xex": b"xmedia", "readme.txt": b"hello"}
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "disc.iso"
+            make_image(image, files)
+            game = Path(directory) / "game" / "base"
+            with patch.object(pinyon_setup, "load_catalog", return_value=self.catalog(files)), \
+                    patch.object(pinyon_setup, "GAME", game):
+                pinyon_setup.copy_executables(image, game)
+                self.assertEqual(sorted(path.name for path in game.iterdir()),
+                                 ["SpeechFacade_default.xex", "XMediaFacade_default.xex",
+                                  "default.xex"])
+                dump, staging = pinyon_setup.Extraction(image).result()
+                self.assertEqual(dump["id"], "test")
+                self.assertEqual((staging / "media" / "a.bin").read_bytes(), b"inner file")
+                # The executables alone are not a game until the swap.
+                self.assertFalse(pinyon_setup.game_ready())
+                pinyon_setup.replace_game(staging)
+                self.assertFalse(staging.exists())
+                self.assertTrue((game / "readme.txt").is_file())
+                self.assertTrue(pinyon_setup.game_ready())
+
+    def test_another_disc_fails_before_anything_is_built(self):
+        files = {"default.xex": b"xex" * 1000, "SpeechFacade_default.xex": b"speech",
+                 "XMediaFacade_default.xex": b"xmedia", "readme.txt": b"hello"}
+        dump, expected = self.catalog(files)
+        dump["executables"][0] = dict(dump["executables"][0], sha256="0" * 64)
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "disc.iso"
+            make_image(image, files)
+            with patch.object(pinyon_setup, "load_catalog", return_value=(dump, expected)):
+                with self.assertRaises(pinyon_setup.SetupError):
+                    pinyon_setup.copy_executables(image, Path(directory) / "out")
+            make_image(image, dict(files, **{"extra.bin": b"x"}))
+            with patch.object(pinyon_setup, "load_catalog", return_value=self.catalog(files)):
+                with self.assertRaises(pinyon_setup.SetupError):
+                    pinyon_setup.copy_executables(image, Path(directory) / "out2")
+
     def test_the_supported_catalog_matches_the_dump_manifest(self):
         dump, expected = pinyon_setup.load_catalog()
         self.assertEqual(len(expected), dump["extraction"]["file_count"])
@@ -128,7 +181,7 @@ class DiscImageTests(unittest.TestCase):
 class ToolchainPinTests(unittest.TestCase):
     def test_posix_downloads_are_https_and_sha256_pinned(self):
         config = json.loads((ROOT / "config/release-toolchain.json").read_text(encoding="utf-8"))
-        for name in ("linux-x86_64", "macos-arm64"):
+        for name in ("linux-x86_64", "macos-arm64", "macos-x86_64"):
             tools = config["posix"][name]
             self.assertGreater(tools["disk_space_gb"]["first_build"], 0)
             for key, item in tools.items():
@@ -255,6 +308,52 @@ class ToolchainPinTests(unittest.TestCase):
                     pinyon_setup.os.environ["PINYON_SHIFT_CPU_BASELINE"] = saved
         self.assertEqual(pinyon_setup.cpu_baseline("macos-arm64"), "native")
 
+    def test_an_intel_mac_picks_its_baseline_from_sysctl(self):
+        # Experimental Intel Mac port: sysctl's feature names map to
+        # /proc/cpuinfo's, and Rosetta keeps SSE4.1.
+        def fake(features, translated="0"):
+            def run(command, **_):
+                keys = command[2:]
+                out = translated if keys == ["sysctl.proc_translated"] else features
+                return pinyon_setup.subprocess.CompletedProcess(command, 0, out + "\n", "")
+            return run
+        kaby_lake = ("FPU SSE SSE2 SSE3 SSSE3 SSE4.1 SSE4.2 FMA MOVBE POPCNT AVX F16C "
+                     "AVX2 BMI1 BMI2 SYSCALL LZCNT")
+        flags = pinyon_setup.macos_cpu_flags(fake(kaby_lake))
+        self.assertTrue(set(pinyon_setup.V3_CPU_FLAGS) <= flags)
+        self.assertEqual(pinyon_setup.macos_cpu_flags(fake(kaby_lake, translated="1")), set())
+        saved = pinyon_setup.macos_cpu_flags
+        try:
+            pinyon_setup.macos_cpu_flags = lambda: flags
+            self.assertEqual(pinyon_setup.cpu_baseline("macos-x86_64"), "v3")
+            pinyon_setup.macos_cpu_flags = lambda: set()
+            self.assertEqual(pinyon_setup.cpu_baseline("macos-x86_64"), "sse4.1")
+        finally:
+            pinyon_setup.macos_cpu_flags = saved
+
+    def test_intel_mac_presets_exist_for_setup(self):
+        presets = json.loads((ROOT / "CMakePresets.json").read_text(encoding="utf-8"))
+        configure = {item["name"]: item for item in presets["configurePresets"]}
+        build = {item["name"] for item in presets["buildPresets"]}
+        game = pinyon_setup.PRESETS["macos-x86_64"]["game"]
+        for suffix in ("release", "v4"):
+            self.assertIn(f"{game}-{suffix}", configure)
+            self.assertIn(f"{game}-{suffix}", build)
+        base = configure["macos-amd64-base"]["cacheVariables"]
+        self.assertEqual(base["CMAKE_OSX_ARCHITECTURES"], "x86_64")
+        self.assertIn("-msse4.1", base["CMAKE_CXX_FLAGS"])
+        # The kit, the translator and the game share one deployment target.
+        target = pinyon_setup.MACOS_DEPLOYMENT_TARGET["macos-x86_64"]
+        self.assertEqual(base["CMAKE_OSX_DEPLOYMENT_TARGET"], target)
+        self.assertIn(f"-DCMAKE_OSX_DEPLOYMENT_TARGET={target}",
+                      pinyon_setup.KIT_CACHE["macos-x86_64"])
+        sdk_presets = ROOT / "thirdparty/shiftglue-sdk/CMakePresets.json"
+        if not sdk_presets.is_file():
+            return  # a checkout without the submodule
+        sdk = json.loads(sdk_presets.read_text(encoding="utf-8"))
+        self.assertIn(pinyon_setup.PRESETS["macos-x86_64"]["sdk"],
+                      {item["name"] for item in sdk["configurePresets"]})
+
     def test_the_payload_ships_the_posix_setup(self):
         script = (ROOT / "tools/package-launcher.ps1").read_text(encoding="utf-8")
         include = script.split("$include = @(", 1)[1].split("\n)", 1)[0]
@@ -262,6 +361,213 @@ class ToolchainPinTests(unittest.TestCase):
                          "tools/verify-codegen-log.py", "cmake"):
             self.assertIn(f"'{required}'", include)
             self.assertTrue((ROOT / required).exists(), required)
+
+
+class MacPchTests(unittest.TestCase):
+    def prepare_failure(self, directory):
+        build = directory / "sdk/out/build/mac-arm64"
+        build.mkdir(parents=True)
+        log = directory / "rexglue-build.log"
+        output = "src/filesystem/CMakeFiles/rexfilesystem.dir/Release/cmake_pch.hxx.pch"
+        log.write_text(f"FAILED: [code=1] {output}\nno member named 'bit_cast'\n")
+        args = ["/usr/bin/clang++", "-std=c++2b", "-arch", "arm64", "-isysroot",
+                "/SDK path", "-I/include path", "-DKEEP=1", "-Xclang", "-emit-pch",
+                "-Xclang", "-include", "-Xclang", "/PCH path/cmake_pch.hxx",
+                "-x", "c++-header", "-MD", "-MT", output, "-MF", output + ".d",
+                "-o", output, "-c", "/PCH path/cmake_pch.hxx.cxx"]
+        # Include another config to ensure only the failed command is replayed.
+        entries = [{"directory": str(build), "command": pinyon_setup.shlex.join(args),
+                    "file": args[-1], "output": output}]
+        entries.append(dict(entries[0], output=output.replace("/Release/", "/Debug/")))
+        (build / "compile_commands.json").write_text(json.dumps(entries))
+        return build, log
+
+    def test_diagnostics_retain_the_failed_pch_flags_without_writing_build_outputs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            build, log = self.prepare_failure(Path(temp))
+            original = log.read_bytes()
+            environment = {"CPATH": "/custom headers", "TOKEN": "not-for-the-log"}
+
+            def fake_run(command, **kwargs):
+                kwargs["stdout"].write("compiler output\n")
+                return subprocess.CompletedProcess(command, 1)
+
+            with patch.object(pinyon_setup.subprocess, "run", side_effect=fake_run) as run:
+                diagnostic = pinyon_setup.diagnose_macos_pch(build, log, environment)
+            self.assertEqual(run.call_count, 5)
+            headers, macros = [call.args[0] for call in run.call_args_list[-2:]]
+            for command in (headers, macros):
+                self.assertIn("-I/include path", command)
+                self.assertIn("/SDK path", command)
+                self.assertIn("/PCH path/cmake_pch.hxx", command)
+                self.assertIn("-DKEEP=1", command)
+                self.assertNotIn("-emit-pch", command)
+                for removed in ("-c", "-MD", "-MF", "-MT"):
+                    self.assertNotIn(removed, command)
+            self.assertEqual(headers[-9:], ["-E", "-H", "-v", "-Xclang", "-header-include-file",
+                                           "-Xclang", "-", "-o", pinyon_setup.os.devnull])
+            self.assertEqual(macros[-2:], ["-E", "-dM"])
+            for call in run.call_args_list:
+                self.assertIs(call.kwargs["env"], environment)
+                self.assertEqual(call.kwargs["cwd"], str(build))
+            text = diagnostic.read_text()
+            self.assertIn("CPATH=/custom headers", text)
+            self.assertIn("exit: 1", text)
+            self.assertNotIn("not-for-the-log", text)
+            self.assertEqual(log.read_bytes(), original)
+            self.assertEqual(sorted(p.name for p in build.iterdir()), ["compile_commands.json"])
+
+    def test_non_pch_failure_is_not_replayed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            log = Path(temp) / "build.log"
+            log.write_text("FAILED: other.cpp.o\n")
+            with patch.object(pinyon_setup.subprocess, "run") as run:
+                self.assertIsNone(pinyon_setup.diagnose_macos_pch(Path(temp), log, {}))
+                run.assert_not_called()
+
+    def test_missing_database_and_failed_probe_preserve_the_translator_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            build, log = self.prepare_failure(root)
+            for failure in (FileNotFoundError("compiler missing"),
+                            subprocess.TimeoutExpired("clang++", 30), None):
+                if failure is None:
+                    (build / "compile_commands.json").unlink()
+                with patch.object(pinyon_setup, "LOGS", root), \
+                        patch.object(pinyon_setup.subprocess, "run", side_effect=failure), \
+                        patch.object(pinyon_setup, "run_logged") as run:
+                    run.side_effect = [None, pinyon_setup.SetupError("translator failed", "build")]
+                    with self.assertRaisesRegex(pinyon_setup.SetupError, "translator failed") as caught:
+                        pinyon_setup.build(None, {"cmake": "cmake"}, root / "sdk",
+                                           Path(sys.executable), "macos-arm64", 2)
+                self.assertEqual(caught.exception.stage, "build")
+                self.assertIn("rexglue-pch-diagnostics.log", str(caught.exception))
+                self.assertIn("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", run.call_args_list[0].args[0])
+                self.assertIn("Could not finish PCH diagnostics", (root /
+                              "rexglue-pch-diagnostics.log").read_text())
+
+    @unittest.skipUnless(sys.platform == "darwin", "native AppleClang PCH regression")
+    def test_types_bit_apis_compile_as_a_pch_and_can_be_consumed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            temp = Path(temp)
+            header = temp / "bit-apis.h"
+            header.write_text("""#include <rex/types.h>
+static_assert(std::bit_cast<uint32_t>(1.0f) == 0x3f800000);
+static_assert(std::byteswap(uint32_t{0x12345678}) == 0x78563412);
+static_assert(rex::byte_swap(uint16_t{0x1234}) == 0x3412);
+static_assert(rex::byte_swap(uint32_t{0x12345678}) == 0x78563412);
+static_assert(rex::byte_swap(uint64_t{0x0123456789abcdef}) == 0xefcdab8967452301);
+""")
+            source = temp / "cmake_pch.hxx.cxx"
+            source.write_text("static_assert(rex::byte_swap(uint8_t{42}) == 42);\n")
+            common = ["/usr/bin/clang++", "-std=c++23", "-arch", "arm64",
+                      "-I" + str(ROOT / "thirdparty/shiftglue-sdk/include")]
+            pch = temp / "bit-apis.pch"
+            for command in (common + ["-x", "c++-header", str(header), "-o", str(pch)],
+                            common + ["-include-pch", str(pch), "-fsyntax-only", str(source)]):
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            # CMake force-includes its PCH header; -H alone omits that header tree.
+            output = "cmake_pch.hxx.pch"
+            command = common + ["-Xclang", "-emit-pch", "-Xclang", "-include", "-Xclang",
+                                str(header), "-x", "c++-header", "-o", output, "-c", str(source)]
+            (temp / "compile_commands.json").write_text(json.dumps([{
+                "directory": str(temp), "arguments": command, "file": str(source), "output": output}]))
+            log = temp / "build.log"
+            log.write_text(f"FAILED: {output}\n")
+            before = pch.read_bytes()
+            diagnostic = pinyon_setup.diagnose_macos_pch(temp, log, dict(pinyon_setup.os.environ))
+            text = diagnostic.read_text()
+            self.assertEqual(text.count("exit: 0"), 5, text)
+            self.assertIn("/rex/types.h", text)
+            self.assertIn("/include/c++/v1/bit", text)
+            self.assertIn("__cpp_lib_byteswap 202110L", text)
+            self.assertEqual(pch.read_bytes(), before)
+            self.assertFalse((temp / output).exists())
+
+
+class UnpackTests(unittest.TestCase):
+    DEEP = "top/" + "/".join(["d" * 40] * 6) + "/f.json"
+
+    def test_files_deeper_than_max_path_unpack(self):
+        # #1072: the NDK's deepest files pass 260 characters under a long
+        # install folder, and Windows refuses them without LongPathsEnabled.
+        import io
+        import os
+        import tarfile
+        import shutil
+        import zipfile
+        base = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, pinyon_setup.long_path(base), True)
+        zipped = base / "a.zip"
+        with zipfile.ZipFile(zipped, "w") as stream:
+            stream.writestr(self.DEEP, "x")
+        tarred = base / "a.tar.gz"
+        with tarfile.open(tarred, "w:gz") as stream:
+            info = tarfile.TarInfo(self.DEEP)
+            info.size = 1
+            stream.addfile(info, io.BytesIO(b"x"))
+        for archive in (zipped, tarred):
+            install = base / ("install-" + archive.suffix[1:]) / "ndk" / "29.0.14206865"
+            pinyon_setup.unpack(archive, install)
+            inner = pinyon_setup.long_path(install) / self.DEEP.split("/", 1)[1]
+            self.assertGreater(len(str(install)) + len(self.DEEP), 260)
+            self.assertTrue(os.path.isfile(inner), archive.name)
+
+    def test_appledouble_files_do_not_keep_the_top_folder(self):
+        # #1052: on exFAT, macOS writes ._python beside the unpacked python/.
+        import shutil
+        import zipfile
+        base = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, base, True)
+        archive = base / "python.zip"
+        with zipfile.ZipFile(archive, "w") as stream:
+            stream.writestr("python/bin/python3", "x")
+            stream.writestr("._python", "apple double")
+        install = base / "python-3.13"
+        pinyon_setup.unpack(archive, install)
+        self.assertTrue((install / "bin" / "python3").is_file())
+
+    def test_the_install_drive_file_system_comes_from_mount(self):
+        # #1053: setup stops on exFAT and FAT drives on macOS.
+        output = ("/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)\n"
+                  "/dev/disk3s5 on /System/Volumes/Data (apfs, local, journaled, nobrowse)\n"
+                  "/dev/disk4s1 on /Volumes/T7 Shield (exfat, local, nodev, nosuid, noowners)\n"
+                  "/dev/disk5s1 on /Volumes/T7 Shield/image (apfs, local, nodev, nosuid)\n")
+        kind = pinyon_setup.mount_filesystem
+        self.assertEqual(kind(Path("/Volumes/T7 Shield/PinyonShift"), output), "exfat")
+        self.assertEqual(kind(Path("/Volumes/T7 Shield/image/PinyonShift"), output), "apfs")
+        self.assertEqual(kind(Path("/Volumes/T7 Shieldx"), output), "apfs")
+        self.assertIn("exfat", pinyon_setup.MACOS_UNSUPPORTED_FILESYSTEMS)
+
+    def test_download_progress_accepts_a_plain_callable(self):
+        # #1041/#1042: the Android build passed a lambda, which has no stage.
+        payload = b"x" * (3 << 20)
+        item = {"url": "https://example.invalid/kit.zip",
+                "sha256": hashlib.sha256(payload).hexdigest().upper()}
+
+        class Response:
+            headers = {"Content-Length": str(len(payload))}
+
+            def __init__(self):
+                self.left = payload
+
+            def read(self, size):
+                block, self.left = self.left[:size], self.left[size:]
+                return block
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        messages = []
+        clock = iter(range(0, 1000, 3))
+        with tempfile.TemporaryDirectory() as temporary,                 patch.object(pinyon_setup, "DOWNLOADS", Path(temporary)),                 patch.object(pinyon_setup.urllib.request, "urlopen", lambda *a, **k: Response()),                 patch.object(pinyon_setup.time, "monotonic", lambda: next(clock)):
+            target = pinyon_setup.download(item, lambda _s, _p, m: messages.append(m), "the kit")
+            self.assertEqual(target.read_bytes(), payload)
+        self.assertTrue(any(m.startswith("Downloading the kit") for m in messages))
 
 
 class SteamShortcutTests(unittest.TestCase):

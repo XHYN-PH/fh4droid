@@ -1,19 +1,24 @@
 """Contracts of the Android port's tooling (docs/ANDROID_PORT_BACKLOG.md)."""
 
 import json
-import shutil
+import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import pinyon_android  # noqa: E402
+import pinyon_common  # noqa: E402
+import pinyon_shaders  # noqa: E402
 
 
 class AndroidPortTest(unittest.TestCase):
@@ -34,11 +39,14 @@ class AndroidPortTest(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("powershell") or shutil.which("pwsh"), "PowerShell is unavailable on this host")
     def test_boundary_check_rejects_a_renamed_elf_library(self):
+        ps = shutil.which("powershell") or shutil.which("pwsh")
+        if not ps:
+            self.skipTest("powershell is not available on this host")
         stray = ROOT / "android" / f"stray-{uuid.uuid4().hex}.bin"
         stray.write_bytes(b"\x7fELF\x02\x01\x01" + bytes(64))
         try:
             check = subprocess.run(
-                [shutil.which("powershell") or shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                [ps, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
                  str(ROOT / "tools" / "check-repository-boundary.ps1"), "-Json"],
                 capture_output=True, text=True, cwd=ROOT)
         finally:
@@ -128,7 +136,17 @@ class AndroidPortTest(unittest.TestCase):
         name, code = pinyon_android.release_version()
         self.assertEqual(name, release["version"])
         major, minor, patch = (int(part) for part in name.split("-")[0].split(".")[:3])
-        self.assertEqual(code, major * 10000 + minor * 100 + patch)
+        self.assertEqual(code, release.get("android_version_code",major * 10000 + minor * 100 + patch))
+
+    def test_android_version_override_is_validated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);(root/"config").mkdir();file=root/"config/release.json"
+            with mock.patch.object(pinyon_android,"ROOT",root):
+                for code in (True,0,-1,2100000001,"803"):
+                    file.write_text(json.dumps({"version":"0.8.2-test3","android_version_code":code}))
+                    with self.assertRaises(pinyon_android.AndroidError):pinyon_android.release_version()
+                file.write_text(json.dumps({"version":"0.8.2-test3","android_version_code":803}))
+                self.assertEqual(pinyon_android.release_version(),("0.8.2-test3",803))
 
     def test_android_presets_target_the_pinned_platform(self):
         presets = json.loads((ROOT / "CMakePresets.json").read_text(encoding="utf-8"))
@@ -161,6 +179,175 @@ class AndroidPortTest(unittest.TestCase):
         source = (ROOT / "tools" / "pinyon_android.py").read_text(encoding="utf-8")
         push_data = source[source.index("def push_data"):source.index("def _pid")]
         self.assertIn("share_with_app(", push_data)
+
+    def test_push_data_copies_the_pcs_pipeline_list(self):
+        with tempfile.TemporaryDirectory() as temp:
+            game, state = Path(temp) / "game", Path(temp) / "state"
+            game.mkdir()
+            (game / "default.xex").write_bytes(b"xex")
+            shareable = state / "cache" / "shaders" / "shareable"
+            shareable.mkdir(parents=True)
+            (shareable / pinyon_android.AOT_PIPELINES).write_bytes(b"XEAO")
+            calls = []
+            args = mock.Mock(game_root=game, state_root=state, serial=None)
+            with mock.patch.object(pinyon_android, "Tools"),                     mock.patch.object(pinyon_android, "share_with_app"),                     mock.patch.object(pinyon_android, "adb",
+                                      side_effect=lambda tools, args, *command, **_: calls.append(command)):
+                pinyon_android.push_data(args)
+            remote = (f"{pinyon_android.DEVICE_FILES}/state/cache/shaders/shareable/"
+                      f"{pinyon_android.AOT_PIPELINES}")
+            self.assertIn(("push", (shareable / pinyon_android.AOT_PIPELINES).resolve(), remote),
+                          calls)
+            # Without --state-root the checkout's state is used, and a list
+            # missing there is written first when the extractor is built.
+            calls.clear()
+            args.state_root = None
+            empty = Path(temp) / "empty"
+            written = []
+            with mock.patch.object(pinyon_android, "Tools"),                     mock.patch.object(pinyon_android, "share_with_app"),                     mock.patch.object(pinyon_common, "default_state_root", return_value=empty),                     mock.patch.object(pinyon_common, "find_extractor",
+                                      return_value=Path(temp) / "build" / "extract"),                     mock.patch.object(pinyon_shaders, "prepare_aot",
+                                      side_effect=lambda *a: written.append(a) or "ready"),                     mock.patch.object(pinyon_android, "adb",
+                                      side_effect=lambda tools, args, *command, **_: calls.append(command)):
+                pinyon_android.push_data(args)
+            self.assertEqual(written[0][0], empty.resolve())
+            self.assertFalse(any(command[0] == "push" and remote in command for command in calls))
+
+
+class FakeProcess:
+    def __init__(self, code, lines):
+        self.returncode = code
+        self.stdout = iter(lines)
+        self.stdin = mock.MagicMock()
+
+    def wait(self):
+        return self.returncode
+
+
+class AndroidSetupRobustnessTest(unittest.TestCase):
+    """Player failures of the Android build on a PC with no developer tools."""
+
+    def install(self, processes):
+        tools = mock.Mock(sdkmanager=Path("sdkmanager.bat"), sdk=Path("sdk"))
+        sleeps = []
+        with mock.patch.object(pinyon_android.subprocess, "Popen", side_effect=processes) as popen:
+            try:
+                pinyon_android.sdkmanager_install(tools, mock.Mock(accept_licenses=True), {},
+                                                  sleep=sleeps.append)
+            finally:
+                self.popen = popen
+        return sleeps
+
+    def test_a_dropped_download_is_retried_with_a_pause(self):
+        # Changing network or a VPN fixed the failure for players (#811, #868).
+        sleeps = self.install([FakeProcess(1, ["Fetch remote repository...\n"]),
+                               FakeProcess(1, ["Connection reset\n"]), FakeProcess(0, [])])
+        self.assertEqual(self.popen.call_count, 3)
+        self.assertEqual(sleeps, [10, 20])
+        for call in self.popen.call_args_list:
+            self.assertIn("--install", call.args[0])
+
+    def test_the_last_failure_names_the_packages_and_the_host(self):
+        with self.assertRaises(pinyon_android.AndroidError) as raised:
+            self.install([FakeProcess(1, []) for _ in range(pinyon_android.TRANSIENT_ATTEMPTS)])
+        self.assertIn("ndk;29.0.14206865", str(raised.exception))
+        self.assertIn("dl.google.com", str(raised.exception))
+        self.assertEqual(self.popen.call_count, pinyon_android.TRANSIENT_ATTEMPTS)
+
+    def test_old_java_is_not_retried(self):
+        # sdkmanager: "Java version 17 or higher is required." (#811).
+        with self.assertRaises(pinyon_android.AndroidError) as raised:
+            self.install([FakeProcess(1, ["Java version 17 or higher is required.\n"])])
+        self.assertEqual(self.popen.call_count, 1)
+        self.assertIn("Java 17", str(raised.exception))
+
+    def test_jdk_versions_parse_and_unrunnable_ones_are_none(self):
+        for text, major in (("javac 17.0.20.1\n", 17), ("javac 1.8.0_411\n", 8),
+                            ("javac 21\n", 21), ("nonsense\n", None)):
+            completed = mock.Mock(stdout="", stderr=text)
+            with mock.patch.object(pinyon_android.subprocess, "run", return_value=completed):
+                self.assertEqual(pinyon_android.jdk_major("javac"), major, text)
+        with mock.patch.object(pinyon_android.subprocess, "run", side_effect=OSError):
+            self.assertIsNone(pinyon_android.jdk_major("javac"))
+
+    def test_a_jdk_folder_needs_javac_keytool_and_the_pinned_version(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            (home / "bin").mkdir()
+            (home / "bin" / pinyon_android._exe("javac")).write_bytes(b"")
+            with mock.patch.object(pinyon_android, "jdk_major", return_value=17):
+                self.assertFalse(pinyon_android._usable_jdk(home))  # no keytool (#868)
+                (home / "bin" / pinyon_android._exe("keytool")).write_bytes(b"")
+                self.assertTrue(pinyon_android._usable_jdk(home))
+            with mock.patch.object(pinyon_android, "jdk_major", return_value=8):
+                self.assertFalse(pinyon_android._usable_jdk(home))  # Java 8 (#811)
+                with mock.patch.dict(os.environ, {"JAVA_HOME": str(home)}), \
+                        mock.patch.object(pinyon_android, "LOCAL_JDK", home / "none"):
+                    self.assertIsNone(pinyon_android.java_home())
+
+    def test_cmake_gets_a_git_when_the_pc_has_none(self):
+        # FetchContent cloned FidelityFX with git: "could not find git" (#810).
+        git = Path("mingit") / "cmd" / "git.exe"
+        with mock.patch.object(pinyon_android, "pinned_git", return_value=git), \
+                mock.patch.object(pinyon_android.shutil, "which", return_value=None):
+            environment = pinyon_android.with_git({"PATH": "elsewhere"})
+        self.assertEqual(environment["PATH"].split(os.pathsep), [str(git.parent), "elsewhere"])
+        with mock.patch.object(pinyon_android, "pinned_git", return_value=git), \
+                mock.patch.object(pinyon_android.shutil, "which", return_value="/usr/bin/git"):
+            self.assertEqual(pinyon_android.with_git({"PATH": "elsewhere"}), {"PATH": "elsewhere"})
+
+    def test_the_pinned_git_is_read_from_the_toolchain_pins(self):
+        pins = (ROOT / "config" / "release-toolchain.json").read_text(encoding="utf-8")
+        entry = json.loads(pins)["git"]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "config").mkdir()
+            (root / "config" / "release-toolchain.json").write_text(pins, encoding="utf-8")
+            with mock.patch.object(pinyon_android, "ROOT", root):
+                self.assertIsNone(pinyon_android.pinned_git())  # not provisioned yet
+                executable = root / entry["install_path"] / entry["executable"]
+                executable.parent.mkdir(parents=True)
+                executable.write_bytes(b"")
+                self.assertEqual(pinyon_android.pinned_git(), executable)
+
+    def test_both_cmake_runs_get_the_git_environment(self):
+        source = (ROOT / "tools" / "pinyon_android.py").read_text(encoding="utf-8")
+        build = source[source.index("def build(args"):source.index("def configured")]
+        self.assertIn("with_git(dict(os.environ, ANDROID_NDK_HOME", build)
+        self.assertIn("build_fidelityfx(tools, args, environment)", build)
+
+
+@unittest.skipUnless(os.name == "nt" and shutil.which("powershell"), "Windows PowerShell 5.1 only")
+class LongPathUnzipTest(unittest.TestCase):
+    def test_a_zip_deeper_than_260_characters_unpacks(self):
+        # The Android command-line tools under a long install folder (#799).
+        import zipfile
+        with tempfile.TemporaryDirectory(prefix="pinyon long ") as temp:
+            temp = Path(temp)
+            archive = temp / "tools.zip"
+            deep = "cmdline-tools/lib/" + "/".join(["segment-" + "x" * 30] * 5) + "/leaf.jar"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("cmdline-tools/bin/sdkmanager.bat", "bat")
+                bundle.writestr(deep, "jar")
+            destination = temp / ("d" * 40) / ("e" * 40)
+            script = temp / "run.ps1"
+            script.write_text(
+                f". '{ROOT / 'tools' / 'release-common.ps1'}'\n"
+                "$ErrorActionPreference = 'Stop'\n"
+                f"Expand-PinyonZip -Archive '{archive}' -Destination '{destination}'\n"
+                f"$deep = Join-Path '{destination}' '{deep.replace('/', chr(92))}'\n"
+                "if ($deep.Length -le 260) { throw 'the test path is not long enough' }\n"
+                "Initialize-PinyonLongPath\n"
+                "if (-not [IO.File]::Exists([PinyonLongPath]::Prefix($deep))) { throw 'missing' }\n"
+                f"[IO.Directory]::Move('{destination}\\cmdline-tools', '{destination}\\latest')\n"
+                f"if (-not (Test-Path '{destination}\\latest\\bin\\sdkmanager.bat')) "
+                "{ throw 'not moved' }\n"
+                f"Remove-PinyonTree -Path '{temp / ('d' * 40)}'\n"
+                f"if (Test-Path '{destination}') {{ throw 'not removed' }}\n"
+                "'ok'\n", encoding="utf-8")
+            result = subprocess.run(
+                ["powershell", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                 str(script)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("ok", result.stdout)
 
 
 if __name__ == "__main__":

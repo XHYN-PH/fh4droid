@@ -9,9 +9,9 @@ description: How Forza Horizon draws a frame on the Xbox 360: its passes and dra
 
 The game renders through the Xbox 360's Direct3D 9 runtime, which is linked into `default.xex`, so the D3D code is part of the guest and shows up in these records with addresses. Most of what the game draws comes from command buffers (display lists) that the engine builds ahead of time, rewrites while the game runs, and chains into the ring once per EDRAM tile. Everything on this page was measured on the recompiled game, whose GPU stream is the one the console would have received.
 
-A race frame is 2,900 to 7,400 draws. In order, the GPU fills two depth-only targets (the sun shadow map and a second depth pass), a few 2x MSAA targets, then the 4x MSAA main scene in three horizontal tiles, then a post chain of about 43 small renderings, and finally the HUD and the swap:
+A race frame is 2,900 to 7,400 draws. In order, the GPU fills shadow atlases and camera depth for a screen-space shadow mask, a few 2x MSAA targets, then the 4x MSAA main scene in three horizontal tiles, then a post chain of about 43 small renderings, and finally the HUD and the swap:
 
-{{diagram:game-race-frame|Order of work in a race frame, from a race-start capture. Draw counts move with the scene; the shares hold: main scene about 61 %, sun shadow map 18 %, second depth pass 11 %.}}
+{{diagram:game-race-frame|Order of work in a race frame. Draw counts move with the scene; an earlier race sample assigned about 61 % to the main scene, 18 % to camera depth and 11 % to shadow atlases.}}
 
 The renderer this project replaced the Xenos emulator with is described under [Internals](renderer.md); this page is about what the game itself asks for.
 
@@ -25,6 +25,17 @@ Average draws per frame range from about 50 at boot and 841 in the menus to 3,22
 
 The 10 MB of EDRAM never holds a full 1280x720 4x MSAA frame, so the main scene is drawn in three predicated tiles of up to 256 rows, each replaying the same command buffers with a different bin select. Surfaces never use more than one colour target.
 
+The depth at base tile 0, pitch 16, has both a 1280x720 single-sample view and a 640x360 four-sample view. The four samples of one pixel in the smaller view occupy four pixels in the larger view: both address the same 720 tiles. Reinterpreting those words does not establish that drawing at a different pixel rate is equivalent. The color-writing draw using this depth reads an interpolator, and the four alias draws in the current race trace do not use an ordered depth comparison. The [depth-alias research](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/DEPTH_ALIAS_RESEARCH.md) separates those observed states from the earlier transparency hypothesis.
+
+The main-scene sky already follows depth-writing geometry in each tile. It
+tests the populated scene depth, writes stencil, and is followed immediately
+by blended stars, then sun and cloud layers. Moving it later therefore does
+not have the simple image-preservation argument of an opaque sky drawn over
+empty depth. The [sky-order study](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/native-renderer/SKY_DRAW_ORDER.md)
+records the shader identities and measured ordering.
+
+The tiling comes from a small static table of scenarios (4x in three bands, 2x in two, one tile at 1x, a reduced one-tile `Small2xMSAA`, split screen), picked by name from the render settings. The full-screen textures the frame renders into are another static table, mostly sized as a divisor of the 1280x720 screen. Changing both at launch renders the frame at a smaller size. A one-tile scenario at any size loses the road and terrain, because the static world's command lists are recorded for the 720p three-band tiling: each replay sets its band's 720p window offset and scissor itself. Keeping the three bands, scaling their rows and rewriting those window values in the GPU decoder (`pinyon_shift_fh1_scene_size`, the **SCENE RESOLUTION** setting) draws the whole world at 960x540; on the UHD 620 the frame takes 15.6 % less GPU time than tiled 720p. Its exposure and sun glare still differ from 720p, because a small luminance pass keeps the 720p size. The measurements are on the [Lessons](lessons.md#what-didnt-pay-off-here) page.
+
 {{findings:rendering/Render targets and EDRAM}}
 
 ## Resolves
@@ -35,9 +46,26 @@ A resolve copies EDRAM to a texture in main memory. The game does about 60 to 92
 
 ## Shadows
 
-The sun's shadow map is the 1280-wide depth-only pass at the start of the frame; skipping it removes every shadow. Shadow atlases are refreshed only in part each frame.
+The 1040-pitch depth target supplies the shadow atlases, refreshed only in
+part each frame. The 1280-wide float-depth pass supplies camera depth for
+the screen-space shadow mask. Skipping it removes shadows too, which led
+to its older "sun shadow map" label. Ordered texture/resolve traces and
+depth-output comparisons distinguish their roles: the mask samples both
+depth inputs before main-scene shading reads the mask. Same-frame main
+depth therefore arrives too late to replace the prepass directly. See the
+[dependency study](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/MODERN_RENDERING_RESEARCH.md#depth-before-the-shadow-mask).
 
 {{findings:rendering/Shadows}}
+
+### Alpha-tested shadow casters
+
+Enabled alpha-test or alpha-to-coverage register bits do not, by themselves,
+identify foliage in FH1's shadow targets. Some flagged draws execute without
+a pixel shader. A target-filtered experiment that removed all of them also
+removed the player car's self-shadowing, restored when the filter was switched
+off again. Count raw flags separately from draws whose effective pixel shader
+uses alpha coverage. The [R03 experiment](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/PERFORMANCE_BACKLOG.md#r03-alpha-tested-shadow-casters)
+records the selectors, measurements and image checks.
 
 ## Post effects
 
@@ -62,3 +90,9 @@ The D3D runtime's own functions (command buffer execution, the ring writer, reso
 The game's shaders are compiled Xenos microcode, in `media/shaders/**/*.fxobj` and inside `default.xex`; a few are generated at run time. No resolve writes a block-compressed format, and texture assets are mostly DXT.
 
 {{findings:rendering/Shaders, textures and models}}
+
+## Light glows
+
+Lamp, outpost and headlight glows are additive sprites that only the depth test hides behind geometry. Right after the player's car the game stamps the nearest depth over the car's stencil, so glows and smoke drawn later cannot cover it. Some lamp and headlight glows ask for an `ALWAYS` depth test and showed through the car and the terrain in the port; the host depth-tests them like the others ([#531](https://github.com/arcanite24/pinyon-shift/issues/531)).
+
+{{findings:rendering/Light glows}}

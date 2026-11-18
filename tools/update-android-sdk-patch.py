@@ -5,11 +5,12 @@ Regenerate Vulkan headers first with compile-fh1-native.sh. Mark any newly
 added SDK source with git add -N before invoking this script. No commit or
 network operation is performed here.
 """
+import json
 import pathlib
 import subprocess
 root=pathlib.Path(__file__).resolve().parents[1]
 sdk=root/"thirdparty/shiftglue-sdk"
-pin="79d3e6fae4b79e00def48a595c80f0eaa47fd2b6"
+pin=json.loads((root/"config/release-toolchain.json").read_text(encoding="utf-8"))["rexglue"]["revision"]
 if subprocess.check_output(["git","-C",str(sdk),"rev-parse","HEAD"],text=True).strip()!=pin:
     raise SystemExit("Review the SDK pin before regenerating Android patches.")
 diff=subprocess.check_output(["git","-C",str(sdk),"diff","--binary","--ignore-submodules=all"])

@@ -84,12 +84,56 @@ void TestStore() {
   }
   CHECK(backups == 1);
   CHECK(!std::filesystem::exists(path.string() + ".tmp"));
+  config.Set("fh4droid_fresh_hardware_defaults", "true");
+  CHECK(config.Save());
+  const auto before_defaults = ReadFile(path);
+  config.Set("fh1_coarse_shading", Quote("coarse"));
+  config.Set("fh4droid_fresh_hardware_defaults", "false");
+  const auto blocked = std::filesystem::path(path.string() + ".lock");
+  std::filesystem::remove(blocked);
+  std::filesystem::create_directories(blocked);
+  CHECK(WriteAtomically(blocked / "keep", "block the pending write"));
+  CHECK(!config.Save() && config.dirty());
+  CHECK(ReadFile(path) == before_defaults);
+  std::filesystem::remove_all(blocked);
+  CHECK(config.Save());
+  CHECK(GetValue(*ReadFile(path), "fh4droid_fresh_hardware_defaults") == "false");
+  CHECK(GetValue(*ReadFile(path), "fh1_coarse_shading") == "coarse");
+  HostConfig other(path);
+  CHECK(other.Load());
+  other.Set("vsync", "false");
+  config.Set("present_effect", Quote("bilinear"));
+  CHECK(other.Save());
+  CHECK(config.Save());
+  CHECK(GetValue(*ReadFile(path), "vsync") == "false");
+  CHECK(GetValue(*ReadFile(path), "present_effect") == "bilinear");
+  // A failed reload revokes the previous successful load. Edits made after
+  // storage disappears must not recreate the file from an obsolete snapshot.
+  config.Set("vsync", "false");
+  std::filesystem::remove(path);
+  CHECK(!config.Load());
+  CHECK(!config.Get("vsync") && !config.dirty());
+  config.Set("vsync", "true");
+  CHECK(!config.Save() && !std::filesystem::exists(path));
+  CHECK(WriteAtomically(path, "vsync = false\n"));
+  CHECK(config.Load() && config.Get("vsync") == "false");
+  config.Set("vsync", "true");
+  CHECK(config.Save());
   std::filesystem::remove_all(directory);
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
+  if(argc == 5 && std::string(argv[1]) == "--write-many") {
+    for(int i=0;i<100;++i){
+      HostConfig store(argv[2]);
+      if(!store.Load())return 2;
+      store.Set(std::string(argv[3])+std::to_string(i),std::to_string(i));
+      if(!store.Save())return 3;
+    }
+    return 0;
+  }
   // For tools/tests/test_host_config.py: apply `name literal` pairs to a file
   // the way the settings screen does and write it.
   if (argc >= 5 && std::string(argv[1]) == "--set" && argc % 2 == 1) {

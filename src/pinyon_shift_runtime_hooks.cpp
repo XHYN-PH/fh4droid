@@ -1,3 +1,4 @@
+#include <rex/cs_scheduler.h>
 #include <algorithm>
 #include <atomic>
 #include <array>
@@ -5,6 +6,7 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <ctime>
 #include <cstdint>
 #include <cstdlib>
@@ -27,6 +29,7 @@
 
 #include <fmt/format.h>
 #include <rex/cvar.h>
+#include <rex/session_probe.h>
 #include <rex/thread.h>
 #include <rex/filesystem.h>
 #include <rex/kernel/xam/module.h>
@@ -46,14 +49,18 @@
 #include <rex/ui/upscaler.h>
 
 #include "pinyon_shift_diagnostics.h"
+#include "head_tracking/head_tracking.h"
 #include "ui/view_policy.h"
 #include "fh1_guest_address.h"
+#include "camera_tuning.h"
 #include "platform/host_platform.h"
 #include "fh1_render_test.h"
 #include "auto_start.h"
 #include "pinyon_shift_runtime_hooks.h"
 #include "cheats.h"
+#include "achievements/achievement_progress.h"
 #include "cheats_map.h"
+#include "cheats_travel.h"
 #include "dev_options.h"
 #include "dlc_token_unlocks.h"
 #include "hud_toggle.h"
@@ -68,6 +75,7 @@
 #include "save/live_profile.h"
 #include "save/profile_body.h"
 #include "telemetry/telemetry_out.h"
+#include "telemetry/telemetry_probe.h"
 #include "ui/fh1_ui_api.h"
 #include "ui/ui_strings.h"
 
@@ -94,6 +102,9 @@ REXCVAR_DEFINE_BOOL(pad_ds_log_telemetry, false, "Input",
 REXCVAR_DEFINE_BOOL(fh1_render_test_rally_ai_driver, false, "Pinyon Shift",
                     "Use native AI for Rally results/persistence tests; ignored outside render tests")
     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+REXCVAR_DEFINE_INT32(pinyon_shift_physics_trace, 0, "Pinyon Shift",
+                     "Diagnostic: record every car's speed, rpm, gear and controls as "
+                     "fh1.physics_trace every this many frames (0 off)");
 REXCVAR_DEFINE_BOOL(pinyon_shift_car_challenge_gate_probe, false, "Pinyon Shift",
                     "Diagnostic (v4): pass 1000 Club's LIVE and Forza-server checks to "
                     "trace what its challenges need offline")
@@ -120,8 +131,18 @@ REXCVAR_DEFINE_BOOL(
     pinyon_shift_stabilize_vehicle_presentation, false, "Pinyon Shift",
     "Suppress isolated implausible player-vehicle presentation transforms");
 REXCVAR_DEFINE_DOUBLE(pinyon_shift_fov_scale, 1.0, "Display",
-                      "Multiply the cameras' vertical field of view (0.8 to 1.3)")
-    .range(0.8, 1.3)
+                      "Multiply the cameras' vertical field of view (0.8 to 2.0)")
+    .range(0.8, 2.0)
+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_DOUBLE(pinyon_shift_chase_height, 0.0, "Display", "Chase height offset in metres")
+    .range(-0.5, 1.5).lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_DOUBLE(pinyon_shift_chase_distance, 0.0, "Display", "Chase distance offset in metres")
+    .range(-1.0, 3.0).lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_DOUBLE(pinyon_shift_chase_fov, 1.0, "Display", "Chase field of view multiplier")
+    .range(0.8, 1.3).lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_DOUBLE(pinyon_shift_chase_stiffness, 1.0, "Display", "Chase yaw and height spring stiffness multiplier")
+    .range(0.5, 2.0).lifecycle(rex::cvar::Lifecycle::kHotReload);
+REXCVAR_DEFINE_INT32(pinyon_shift_drive_camera, 0, "Display", "Driving view: 0 normal, 10 wheel, 15 car-relative replay")
     .lifecycle(rex::cvar::Lifecycle::kHotReload);
 // The built-in immersive camera's effect groups (#443), applied at once.
 REXCVAR_DEFINE_DOUBLE(pinyon_shift_camera_gforce, 1.0, "Display",
@@ -185,6 +206,21 @@ REXCVAR_DEFINE_BOOL(disable_bloom, true, "Pinyon Shift",
                     "Disable Forza Horizon bloom contribution");
 REXCVAR_DEFINE_BOOL(disable_depth_of_field, true, "Pinyon Shift",
                     "Disable Forza Horizon depth of field");
+
+// Verification uses the scheduler's clock for host features that affect guest state.
+static inline __attribute__((always_inline)) std::chrono::steady_clock::time_point CsSemanticNow() {
+  if (rex::cs_scheduler::InActor())
+    return std::chrono::steady_clock::time_point(std::chrono::nanoseconds(rex::cs_scheduler::Now()));
+  return std::chrono::steady_clock::now();
+}
+static inline __attribute__((always_inline)) std::chrono::system_clock::time_point CsSystemNow() {
+  if (rex::cs_scheduler::InActor()) {
+    const auto ticks = rex::cs_scheduler::Epoch() - UINT64_C(116444736000000000);
+    return std::chrono::system_clock::time_point(std::chrono::duration_cast<std::chrono::system_clock::duration>(
+        std::chrono::nanoseconds(ticks * 100 + rex::cs_scheduler::Now())));
+  }
+  return std::chrono::system_clock::now();
+}
 
 namespace {
 
@@ -603,13 +639,13 @@ void ScanLiveProfile(uint32_t address, uint32_t size) {
                                    {"result", "no_fields"}});
     return;
   }
-  const auto start = std::chrono::steady_clock::now();
+  const auto start = CsSemanticNow();
   auto candidates = pinyon_shift::save::FindLiveProfileValue(*credits, *xp, *winnings, 0x4000);
   if (candidates.empty()) {
     candidates = pinyon_shift::save::FindLiveProfileValue(*credits, 0, 0, 0, 256);
   }
   const auto elapsed = std::chrono::duration<double, std::milli>(
-                           std::chrono::steady_clock::now() - start)
+                           CsSemanticNow() - start)
                            .count();
   std::string list;
   for (const auto& candidate : candidates) {
@@ -4794,21 +4830,32 @@ void ApplyUiMutationExperiment() {
 // until the job thread catches up or two seconds pass, so the title's own
 // escape needs a real stall, as on the 360.
 void PinyonShiftThrottleRenderJobs(PPCRegister& r1) {
+  const bool trace = rex::session_probe::Enabled();
+  const uint32_t address = r1.u32 + 84;
+  if (trace) rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook,
+      UINT64_C(0x823F4B3000000000), LoadGuestU32(address));
+  auto live = [&]() {
   using Clock = std::chrono::steady_clock;
   constexpr uint32_t kIterations = 1000;
   constexpr auto kLimit = std::chrono::seconds(2);
   thread_local Clock::time_point started;
   const uint32_t counter = r1.u32 + 84;
   const uint32_t left = LoadGuestU32(counter);
-  const Clock::time_point now = Clock::now();
+  const Clock::time_point now = CsSemanticNow();
   if (left >= kIterations) {
     started = now;
     return;  // The first pass yields as before: usually that is enough.
   }
   if (now - started < kLimit) {
     if (left < 2) StoreGuestU32(counter, 2);
-    std::this_thread::sleep_for(std::chrono::microseconds(50));
+    if (rex::cs_scheduler::InActor()) rex::cs_scheduler::Sleep(50000);
+    else std::this_thread::sleep_for(std::chrono::microseconds(50));
   }
+
+  };
+  if (!(trace && rex::session_probe::Replaying())) live();
+  if (trace) StoreGuestU32(address, uint32_t(rex::session_probe::Scalar(
+      rex::session_probe::Kind::kHostHook, UINT64_C(0x823F4B3000000001), LoadGuestU32(address), true)));
 }
 
 // Observe the same player and finish flag as CWaitForEndCondition
@@ -5426,7 +5473,7 @@ static void ProbeRallyPace(uint32_t route, uint32_t serial, double seconds, uint
   {
     std::lock_guard lock(g_vehicle_hook_sample_mutex);
     const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
+        CsSemanticNow().time_since_epoch()).count();
     pose_fresh = car && g_rally_pace_pose_ms && now - g_rally_pace_pose_ms <= 500;
     if (pose_fresh) position = {g_rally_pace_pose.x, g_rally_pace_pose.y, g_rally_pace_pose.z};
   }
@@ -5561,6 +5608,79 @@ static void UpdateRallyPace(PPCContext& ctx, uint8_t* base) {
   g_rally_audio_update(ctx, base);
 }
 
+// AC-3.3: notification sounds through the title's own UI event project. The
+// title's MiniAchieve UI event is silent (it maps to the Blank cue), so an
+// unlock uses the HUD reward cue its sponsor and flyer notifications play.
+// Cues are created, played and released only inside CAudioEngine::Update,
+// where cue work is safe (the FMOD channel settings race).
+static PPCFunc* g_ui_audio_update = nullptr;
+static std::atomic<uint32_t> g_ui_sounds_requested{0};
+static void UpdateUiSounds(PPCContext& ctx, uint8_t* base) {
+  static uint32_t scratch = 0, cue = 0, consumed = 0;
+  auto method = [](uint32_t object, uint32_t offset) -> uint32_t {
+    if (!object || !PinyonShiftGuestRangeReadable(object, 4)) return 0;
+    const uint32_t table = LoadGuestU32(object);
+    if (!table || !PinyonShiftGuestRangeReadable(table + offset, 4)) return 0;
+    const uint32_t value = LoadGuestU32(table + offset);
+    return value && PinyonShiftGuestRangeReadable(value, 4) ? value : 0;
+  };
+  auto call_guest = [](uint32_t address, std::initializer_list<uint32_t> args) {
+    std::array<uint64_t, 6> values{};
+    std::copy(args.begin(), args.end(), values.begin());
+    return uint32_t(rex::system::kernel_state()->function_dispatcher()->ExecuteTrap(
+        rex::runtime::ThreadState::Get(), address, values.data(), args.size()));
+  };
+  auto release = [&] {
+    if (const auto stop = method(cue, 76)) call_guest(stop, {cue});
+    if (const auto release_cue = method(cue, 12)) call_guest(release_cue, {cue});
+    cue = 0;
+  };
+  if (cue) {
+    const auto playing = method(cue, 84), channels = method(cue, 88);
+    if (!playing || !channels || (!call_guest(playing, {cue}) && !call_guest(channels, {cue}))) {
+      release();
+    }
+  }
+  const uint32_t requested = g_ui_sounds_requested.load();
+  if (requested != consumed) {
+    consumed = requested;
+    const uint32_t manager = LoadGuestU32(FH1_ADDR(0x83439490u));
+    const auto create = method(manager, 300);
+    auto* memory = rex::system::kernel_state()->memory();
+    if (!scratch) scratch = memory->SystemHeapAlloc(128, 16);
+    if (create && scratch) {
+      if (cue) release();  // one notification sound at a time
+      auto* text = reinterpret_cast<char*>(memory->virtual_membase() + scratch);
+      std::snprintf(text + 16, 48, "UIInGame/UI/HorizonHud");
+      std::snprintf(text + 64, 64, "HUD_General_Notification_Reward");
+      StoreGuestU32(scratch, 0);
+      call_guest(create, {scratch, manager, scratch + 16, scratch + 64, 1});
+      cue = LoadGuestU32(scratch);
+      const auto play = method(cue, 72);
+      if (play) call_guest(play, {cue, 0});
+      pinyon_shift::diagnostics::RecordEvent(
+          "achievements.sound", {{"result", !cue ? "no_cue" : play ? "played" : "no_play"}});
+      if (cue && !play) release();
+    }
+  }
+  g_ui_audio_update(ctx, base);
+}
+
+void PinyonShiftPlayNotificationSound() {
+  static std::once_flag installed;
+  std::call_once(installed, [] {
+    auto* dispatcher = rex::system::kernel_state()->function_dispatcher();
+    // Chains with the Rally pace hook on the same function, either order.
+    g_ui_audio_update = dispatcher->GetFunction(FH1_ADDR(0x82BB5918u));
+    const bool ok =
+        g_ui_audio_update && dispatcher->SetFunction(FH1_ADDR(0x82BB5918u), UpdateUiSounds);
+    if (!ok) g_ui_audio_update = nullptr;
+    pinyon_shift::diagnostics::RecordEvent("achievements.sound_hook",
+                                           {{"installed", ok ? "1" : "0"}});
+  });
+  if (g_ui_audio_update) g_ui_sounds_requested.fetch_add(1);
+}
+
 // Native upgrade views and test-only DLC qualification.
 static PPCFunc* g_dlc_async_query = nullptr;
 static PPCFunc* g_dlc_raw_query = nullptr;
@@ -5637,7 +5757,7 @@ static void ProfileSqlPrepare(uint32_t text) {
   using Clock = std::chrono::steady_clock;
   thread_local std::string previous;
   thread_local Clock::time_point previous_at;
-  const auto now = Clock::now();
+  const auto now = CsSemanticNow();
   if (!previous.empty()) {
     const double ms = std::chrono::duration<double, std::milli>(now - previous_at).count();
     if (ms >= 20 && ms < 1000) {
@@ -5646,7 +5766,7 @@ static void ProfileSqlPrepare(uint32_t text) {
     }
   }
   previous = ReadDlcSql(text, rex::system::kernel_state()->memory()->virtual_membase());
-  previous_at = Clock::now();
+  previous_at = CsSemanticNow();
 }
 // v4 defines Restrictions_Data_Car as Data_Car LEFT JOINed with subqueries
 // for each car's level-4 springs, level-5 tyres and level-4 transmission.
@@ -5719,7 +5839,7 @@ static std::optional<uint32_t> RunGameSql(uint32_t database, std::string_view sq
 }
 
 static void SpeedUpRestrictionsView(uint32_t database, bool v4_text) {
-  const auto start = std::chrono::steady_clock::now();
+  const auto start = CsSemanticNow();
   for (const std::string_view statement : {
            "CREATE INDEX IF NOT EXISTS PinyonShift_SpringDamper_Ordinal "
            "ON List_UpgradeSpringDamper(Ordinal)",
@@ -5763,7 +5883,7 @@ static void SpeedUpRestrictionsView(uint32_t database, bool v4_text) {
     }
   }
   const double ms = std::chrono::duration<double, std::milli>(
-      std::chrono::steady_clock::now() - start).count();
+      CsSemanticNow() - start).count();
   REXLOG_INFO("Game database: {} of 4 Restrictions_Data_Car indexes, view {} ({:.1f} ms)",
               indexes, view, ms);
   pinyon_shift::diagnostics::RecordEvent("db.restrictions_view", {
@@ -6023,18 +6143,54 @@ namespace car_dynamics {
 constexpr uint32_t kInterface = 0x2D90;      // CCar -> ICarDynamics
 constexpr uint32_t kEngineSpeed = 324;       // f32 rad/s
 constexpr uint32_t kRedline = 452;           // f32 rad/s
+constexpr uint32_t kIdle = 1228;             // f32 rad/s
 constexpr uint32_t kGear = 2240;             // u8: 0 reverse, 1-8, 9 neutral
 constexpr uint32_t kAbsActive = 3020;        // s32, rewritten every step
 constexpr uint32_t kAbsAssist = 3436;        // the ABS assist setting
 constexpr uint32_t kSpeed = 3128;            // f32 m/s
 constexpr uint32_t kWheels = 3936;           // four 1024-byte wheel blocks
 constexpr uint32_t kWheelStride = 1024;
+constexpr uint32_t kWheelSpeed = 12;         // f32 rad/s
 constexpr uint32_t kWheelSlip = 496;         // f32 smoothed slip, 1.0 = peak grip
+// f32 smoothed slip angle over the tyre's peak (wheel.norm_slip_angle).
+constexpr uint32_t kWheelSlipAngle = 520;
 constexpr uint32_t kWheelContact = 796;      // u8
+// The car's controls as the game built them from the player's input
+// (dynamics.controls, built by sub_82487650): f32 gas, brake, steer (-1 to
+// 1), clutch and handbrake. Same offsets in v4.
+constexpr uint32_t kControls = 3904;
+constexpr uint32_t kControlGas = 0;
+constexpr uint32_t kControlBrake = 4;
+constexpr uint32_t kControlSteer = 8;
+constexpr uint32_t kControlClutch = 12;
+constexpr uint32_t kControlHandbrake = 16;
+// Suspension (sub_82D2EC70): the wheel's suspension position at wheel +0 and
+// its spring's rest point at +860; the spring force is their difference
+// times the rate at +828, so compression is +0 above +860.
+constexpr uint32_t kWheelSuspension = 0;
+constexpr uint32_t kWheelSuspensionRest = 860;
+// The car's three collision pulses and two scripted motor adds, which the
+// rumble builder sub_8248AB08 reads and then clears each frame
+// (site/findings/ui.toml, rumble output). v4 adds a word before them.
+constexpr uint32_t kCarRumbleInputs = pinyon_shift::fh1::kTitleUpdateV4 ? 14668 : 14664;
+// The pad's rumble as 0-1 floats ([0x834398E0] + 16 + 5648 * pad): the low
+// (bumps, kerbs, impacts) motor at +696, the high (engine) motor at +700.
+constexpr uint32_t kPadStride = 5648;
+constexpr uint32_t kPadRumbleLow = 696;
+constexpr uint32_t kPadRumbleHigh = 700;
 constexpr float kRadPerSecToRpm = 9.5492966f;
 // The car's driver type, 0 for the player's car (same offset in v4).
 constexpr uint32_t kDriverType = 11728;
 }  // namespace car_dynamics
+
+// The last telemetry sample's simulation values and since when they held,
+// for the stopped-simulation check (guest task thread only).
+struct TelemetryStill {
+  bool valid = false;
+  std::array<float, 10> values{};
+  std::chrono::steady_clock::time_point since{};
+};
+static TelemetryStill g_telemetry_still;
 
 static void QueueCarTelemetry() {
   namespace ds = rex::input::dualsense;
@@ -6066,6 +6222,7 @@ static void QueueCarTelemetry() {
     const bool log = REXCVAR_GET(pad_ds_log_telemetry) && ++log_frames >= 30;
     if (log) log_frames = 0;
     if (!player) {
+      g_telemetry_still = {};
       // Telemetry out (#481) says there is no car, as the game's own
       // Data Out does in menus.
       pinyon_shift::telemetry::Send({});
@@ -6108,11 +6265,129 @@ static void QueueCarTelemetry() {
     pinyon_shift::telemetry::CarSample sample;
     sample.driving = !narrow;
     sample.rpm = t.rpm;
+    sample.idle_rpm = LoadGuestF32(dyn + cd::kIdle) * cd::kRadPerSecToRpm;
     sample.redline_rpm = t.redline_rpm;
     sample.gear = t.gear;
     sample.speed_mps = t.speed_mps;
-    for (int w = 0; w < 4; ++w) sample.wheel_slip[w] = direction * slip[w];
+    for (uint32_t w = 0; w < 4; ++w) {
+      const uint32_t wheel = dyn + cd::kWheels + w * cd::kWheelStride;
+      sample.wheel_slip[w] = direction * slip[w];
+      const float angle = LoadGuestF32(wheel + cd::kWheelSlipAngle);
+      sample.wheel_slip_angle[w] =
+          std::isfinite(angle) && LoadGuestU8(wheel + cd::kWheelContact) ? angle : 0.0f;
+      sample.wheel_speed_rad_s[w] = LoadGuestF32(wheel + cd::kWheelSpeed);
+    }
+    const uint32_t controls = dyn + cd::kControls;
+    sample.throttle = LoadGuestF32(controls + cd::kControlGas);
+    sample.brake = LoadGuestF32(controls + cd::kControlBrake);
+    sample.steer = LoadGuestF32(controls + cd::kControlSteer);
+    sample.clutch = LoadGuestF32(controls + cd::kControlClutch);
+    sample.handbrake = LoadGuestF32(controls + cd::kControlHandbrake);
+    // Normalised travel over the range this car has shown, since the
+    // game's travel limits are not traced; reset when the car changes.
+    static uint32_t travel_car = 0;
+    static std::array<float, 4> travel_min{}, travel_max{};
+    if (travel_car != dyn) {
+      travel_car = dyn;
+      travel_min.fill(-0.02f);
+      travel_max.fill(0.02f);
+    }
+    for (uint32_t w = 0; w < 4; ++w) {
+      const uint32_t wheel = dyn + cd::kWheels + w * cd::kWheelStride;
+      const float travel = LoadGuestF32(wheel + cd::kWheelSuspension) -
+                           LoadGuestF32(wheel + cd::kWheelSuspensionRest);
+      if (!std::isfinite(travel)) continue;
+      sample.suspension_m[w] = travel;
+      travel_min[w] = std::min(travel_min[w], travel);
+      travel_max[w] = std::max(travel_max[w], travel);
+      sample.suspension_normalized[w] = (travel - travel_min[w]) / (travel_max[w] - travel_min[w]);
+    }
+    const uint32_t pads = FH1_BASE_ONLY_ADDR(0x834398E0u);
+    const uint32_t pad = pads ? pointer(pads, 16 + cd::kPadStride) : 0;
+    const float rumble_low = pad ? LoadGuestF32(pad + 16 + cd::kPadRumbleLow) : 0.0f;
+    if (std::isfinite(rumble_low)) sample.surface_rumble.fill(std::clamp(rumble_low, 0.0f, 1.0f));
+    // Forward velocity in the car's frame, for tools that take the speed from
+    // the velocity rather than the speed field.
+    sample.velocity_forward_mps = direction * sample.speed_mps;
+    // The pause menu and other screens drawn over the stopped game keep the
+    // gameplay view, so the car is still "driving" above. The simulation is
+    // stopped there: engine, wheels and suspension hold exactly the same
+    // values, where a running car, even idling, never does. After half a
+    // second of that (timed, so it holds at any frame rate), telemetry says
+    // the race is off, as the game's own Data Out does in menus.
+    const std::array<float, 10> values = {
+        sample.rpm, sample.speed_mps, sample.wheel_speed_rad_s[0], sample.wheel_speed_rad_s[1],
+        sample.wheel_speed_rad_s[2], sample.wheel_speed_rad_s[3], sample.suspension_m[0],
+        sample.suspension_m[1], sample.suspension_m[2], sample.suspension_m[3]};
+    const auto now = std::chrono::steady_clock::now();
+    auto& still = g_telemetry_still;
+    if (!still.valid || values != still.values) {
+      still.valid = true;
+      still.values = values;
+      still.since = now;
+    }
+    if (now - still.since >= std::chrono::milliseconds(500)) sample.driving = false;
+    if (pinyon_shift::telemetry::MovingOnly() && std::fabs(sample.speed_mps) < 0.5f) {
+      sample.driving = false;
+    }
     pinyon_shift::telemetry::Send(sample);
+
+    // telemetry_probe: candidate fields to confirm against a drive before
+    // telemetry sends them (suspension geometry, surface, collisions, rumble,
+    // body vectors), and the dynamics block at a slower rate.
+    namespace tp = pinyon_shift::telemetry;
+    if (tp::ProbeFastDue()) {
+      static const std::string header = [] {
+        std::string h = "speed,rpm,gear,throttle,brake,steer";
+        for (int w = 0; w < 4; ++w) {
+          for (const char* f : {"pos0", "rest860", "f864", "f868", "f872", "f876", "f996",
+                                "force676", "arb700", "f716", "surf336", "surf337", "surf338",
+                                "contact796", "wspeed12", "slip496", "angle520"}) {
+            h += fmt::format(",w{}_{}", w, f);
+          }
+        }
+        for (int i = 0; i < 6; ++i) h += fmt::format(",car{}", cd::kCarRumbleInputs + 4 * i);
+        h += ",pad_low,pad_high";
+        for (const uint32_t v : {2832u, 2848u, 2864u, 2880u, 2896u}) {
+          h += fmt::format(",v{0}x,v{0}y,v{0}z", v);
+        }
+        return h;
+      }();
+      std::vector<float> row = {sample.speed_mps, sample.rpm, float(sample.gear), sample.throttle,
+                                sample.brake, sample.steer};
+      for (uint32_t w = 0; w < 4; ++w) {
+        const uint32_t wheel = dyn + cd::kWheels + w * cd::kWheelStride;
+        for (const uint32_t f : {0u, 860u, 864u, 868u, 872u, 876u, 996u, 676u, 700u, 716u}) {
+          row.push_back(LoadGuestF32(wheel + f));
+        }
+        for (const uint32_t b : {336u, 337u, 338u, 796u}) row.push_back(float(LoadGuestU8(wheel + b)));
+        row.push_back(LoadGuestF32(wheel + cd::kWheelSpeed));
+        row.push_back(LoadGuestF32(wheel + cd::kWheelSlip));
+        row.push_back(LoadGuestF32(wheel + cd::kWheelSlipAngle));
+      }
+      const bool car_readable = PinyonShiftGuestRangeReadable(car + cd::kCarRumbleInputs, 24);
+      for (uint32_t i = 0; i < 6; ++i) {
+        row.push_back(car_readable ? LoadGuestF32(car + cd::kCarRumbleInputs + 4 * i) : NAN);
+      }
+      row.push_back(pad ? LoadGuestF32(pad + 16 + cd::kPadRumbleLow) : NAN);
+      row.push_back(pad ? LoadGuestF32(pad + 16 + cd::kPadRumbleHigh) : NAN);
+      for (const uint32_t v : {2832u, 2848u, 2864u, 2880u, 2896u}) {
+        for (uint32_t c = 0; c < 3; ++c) row.push_back(LoadGuestF32(dyn + v + 4 * c));
+      }
+      tp::ProbeWriteFast(header, row);
+    }
+    if (tp::ProbeSlowDue()) {
+      // The dynamics block before the wheels, one float per word.
+      static const std::string header = [] {
+        std::string h;
+        for (uint32_t o = 0; o < cd::kWheels; o += 4) h += fmt::format("{}d{}", o ? "," : "", o);
+        return h;
+      }();
+      std::vector<float> row;
+      row.reserve(cd::kWheels / 4);
+      for (uint32_t o = 0; o < cd::kWheels; o += 4) row.push_back(LoadGuestF32(dyn + o));
+      tp::ProbeWriteSlow(header, row);
+    }
 
     if (log) {
       REXLOG_INFO("Car telemetry: rpm {:.0f} redline {:.0f} gear {} speed {:.1f} abs {} slip "
@@ -6120,6 +6395,70 @@ static void QueueCarTelemetry() {
                   t.rpm, t.redline_rpm, t.gear, t.speed_mps, t.abs_active ? 1 : 0, slip[0],
                   slip[1], slip[2], slip[3], LoadGuestU32(dyn + cd::kAbsAssist), narrow ? 1 : 0);
     }
+  });
+}
+
+// Physics behaviour harness (#1071 P0): every car in the world's car
+// vector, every pinyon_shift_physics_trace frames, as one
+// fh1.physics_trace event. tools/physics-behaviour.py turns it into 0-100
+// times, distances and order, and compares a native subsystem's run with
+// the translated one.
+static void QueuePhysicsTrace() {
+  const int32_t every = REXCVAR_GET(pinyon_shift_physics_trace);
+  if (every <= 0) return;
+  static uint64_t host_frames = 0;
+  ++host_frames;
+  if (host_frames % uint64_t(every) != 0) return;
+  const uint64_t frame = pinyon_shift::fh1_render_test::Enabled()
+                             ? pinyon_shift::fh1_render_test::CurrentFrame()
+                             : host_frames;
+  // Host time for routes without a fixed clock, whose frame numbers are
+  // output frames.
+  static const auto start = std::chrono::steady_clock::now();
+  const double t_ms =
+      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+  pinyon_shift::mod::EnqueueHostGuestTask([frame, t_ms] {
+    namespace cd = car_dynamics;
+    auto pointer = [](uint32_t field, uint32_t size) -> uint32_t {
+      if (!PinyonShiftGuestRangeReadable(field, 4)) return 0;
+      const uint32_t value = LoadGuestU32(field);
+      return value && PinyonShiftGuestRangeReadable(value, size) ? value : 0;
+    };
+    const uint32_t holder = pointer(FH1_ADDR(0x832DF024u), 8);
+    const uint32_t manager = holder ? pointer(holder + 4, 56) : 0;
+    const uint32_t world = manager ? pointer(manager + 4, 136) : 0;
+    if (!world) return;
+    const uint32_t session = pointer(world + 124, 60);
+    const uint32_t mode = session ? LoadGuestU32(session + 56) : 0;
+    const uint32_t begin = LoadGuestU32(world + 128);
+    const uint32_t end = LoadGuestU32(world + 132);
+    if (end < begin || end - begin > 4 * 64 || !PinyonShiftGuestRangeReadable(begin, end - begin)) return;
+    // index:car:driver:speed m/s:rpm:gear:gas:brake:steer, cars split by
+    // "|". Driver 0 is the player, 1 a race AI, 4 the cars around free
+    // roam; the vector's order changes as cars come and go.
+    std::string cars;
+    uint32_t count = 0;
+    for (uint32_t entry = begin; entry < end; entry += 4) {
+      const uint32_t car = pointer(entry, cd::kDriverType + 4);
+      const uint32_t dyn = car ? pointer(car + cd::kInterface, cd::kControls + 20) : 0;
+      if (!dyn) continue;
+      const uint8_t gear = LoadGuestU8(dyn + cd::kGear);
+      const uint32_t controls = dyn + cd::kControls;
+      if (!cars.empty()) cars += '|';
+      cars += fmt::format("{}:{:08X}:{}:{:.3f}:{:.0f}:{}:{:.2f}:{:.2f}:{:.2f}", (entry - begin) / 4,
+                          car, int32_t(LoadGuestU32(car + cd::kDriverType)),
+                          LoadGuestF32(dyn + cd::kSpeed),
+                          LoadGuestF32(dyn + cd::kEngineSpeed) * cd::kRadPerSecToRpm,
+                          gear == 0 ? -1 : gear >= 9 ? 0 : int(gear),
+                          LoadGuestF32(controls + cd::kControlGas),
+                          LoadGuestF32(controls + cd::kControlBrake),
+                          LoadGuestF32(controls + cd::kControlSteer));
+      ++count;
+    }
+    pinyon_shift::diagnostics::RecordEvent("fh1.physics_trace", {
+        {"frame", fmt::format("{}", frame)}, {"t_ms", fmt::format("{:.1f}", t_ms)},
+        {"mode", fmt::format("{}", mode)},
+        {"count", fmt::format("{}", count)}, {"cars", cars}});
   });
 }
 
@@ -6364,7 +6703,7 @@ static void QueueRallyRaceTrace() {
     static bool hub_probe_queued = false;
     if (mode == 17 && profile_ready && PinyonShiftUseBuiltinRallyAdapter()) {
       const auto now_ms = uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch()).count());
+          CsSemanticNow().time_since_epoch()).count());
       bool live_presentation = false;
       {
         std::lock_guard lock(g_vehicle_hook_sample_mutex);
@@ -6569,6 +6908,9 @@ void PinyonShiftTraceFrameTelemetry(PPCRegister& r28, PPCRegister& r31) {
   // The trainer's collectible markers (NP-8.6) queue their pass here, so it
   // also runs while the pause map is open.
   pinyon_shift::cheats::UpdateCollectibleMarkers();
+  // The achievements screen's collectible count (AC-4.1).
+  pinyon_shift::achievements::Update();
+  pinyon_shift::cheats::UpdateDestinations();
   // The Treasure Map add-on's reveal, when the setting owns it.
   pinyon_shift::dlc::UpdateTreasureMap();
   UpdateMapView();
@@ -6585,6 +6927,8 @@ void PinyonShiftTraceFrameTelemetry(PPCRegister& r28, PPCRegister& r31) {
   }
   QueueRallyRaceTrace();
   QueueCarTelemetry();
+  QueuePhysicsTrace();
+  pinyon_shift::head_tracking::Update();
   // frame.tick for mods: their guest tasks, then the hook.
   pinyon_shift::mod::RunGuestTasks();
   if (pinyon_shift::mod::HasSubscribers(PINYON_HOOK_FRAME_TICK)) {
@@ -6605,7 +6949,7 @@ void PinyonShiftTraceFrameTelemetry(PPCRegister& r28, PPCRegister& r31) {
 
   const uint64_t now_ms = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
+          CsSemanticNow().time_since_epoch())
           .count());
   uint64_t previous_ms =
       g_last_frame_telemetry_ms.load(std::memory_order_relaxed);
@@ -6704,7 +7048,7 @@ static void PinyonShiftHoldTimeOfDay(double delta_seconds) {
   double seconds = held;
   if (held < 0.0) {
     if (day_minutes < 0.0) {
-      const auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+      const auto now = std::chrono::system_clock::to_time_t(CsSystemNow());
       std::tm local{};
 #if defined(_WIN32)
       localtime_s(&local, &now);
@@ -6733,7 +7077,7 @@ static void PinyonShiftHoldTimeOfDay(double delta_seconds) {
           {{"seconds", fmt::format("{:.1f}", seconds)},
            {"day_minutes", fmt::format("{:g}", day_minutes)},
            {"host_ms", fmt::format("{}", std::chrono::duration_cast<std::chrono::milliseconds>(
-                                             std::chrono::steady_clock::now().time_since_epoch())
+                                             CsSemanticNow().time_since_epoch())
                                              .count())}});
       last_logged = seconds;
     }
@@ -6788,6 +7132,115 @@ static void PinyonShiftApplyFreeCamera() {
     }
     pinyon_shift::diagnostics::RecordEvent(
         "cheat.free_camera", {{"enabled", wanted ? "1" : "0"}, {"cameras", fmt::format("{}", count)}});
+  });
+}
+
+// Camera settings are parsed once. Edit their loaded data on the guest main
+// thread; always derive from the original merged data, never our last edit.
+static void PinyonShiftApplyCameraEditor() {
+  static uint32_t ticks = 0;
+  if (++ticks % 12 != 0) return;
+  static bool used = false;
+  const std::array<float, 4> values = {
+      float(REXCVAR_GET(pinyon_shift_chase_height)), float(REXCVAR_GET(pinyon_shift_chase_distance)),
+      float(REXCVAR_GET(pinyon_shift_chase_fov)), float(REXCVAR_GET(pinyon_shift_chase_stiffness))};
+  const int selected = REXCVAR_GET(pinyon_shift_drive_camera);
+  const uint32_t mode = selected == 10 || selected == 15 ? uint32_t(selected) : 0u;
+  if (!used && values == std::array<float, 4>{0, 0, 1, 1} && mode == 0) return;
+  used = true;
+  if (!std::all_of(values.begin(), values.end(), [](float v) { return std::isfinite(v); })) return;
+  pinyon_shift::mod::EnqueueHostGuestTask([values, mode] {
+    static uint32_t generation = 0;
+    static std::map<uint32_t, pinyon_shift::camera::Tuning> originals;
+    struct Placement {
+      uint32_t car = 0;
+      std::array<pinyon_shift::camera::Offset, 2> offsets;
+    };
+    static std::map<uint32_t, Placement> positions;
+    // Per controller: the player's own view before the editor switched it,
+    // and the view the editor switched to.
+    struct ForcedMode {
+      uint32_t player = 0;
+      uint32_t forced = 0;
+    };
+    static std::map<uint32_t, ForcedMode> previous_modes;
+    const uint32_t current = g_title_generation.load(std::memory_order_relaxed);
+    if (generation != current) {
+      // Tuning blocks are static title data and survive world teardown.
+      previous_modes.clear();
+      generation = current;
+    }
+    const uint32_t holder = LoadGuestU32(FH1_ADDR(0x832DF024u));
+    if (!holder || !PinyonShiftGuestRangeReadable(holder + 4, 4)) return;
+    const uint32_t handle = LoadGuestU32(holder + 4);
+    if (!handle || !PinyonShiftGuestRangeReadable(handle + 4, 4)) return;
+    const uint32_t world = LoadGuestU32(handle + 4);
+    if (!world) return;
+    const uint32_t count = pinyon_shift::mod::CallGuest(FH1_ADDR(0x82486C40u), {world});
+    for (uint32_t i = 0; i < std::min(count, 4u); ++i) {
+      const uint32_t controller = pinyon_shift::mod::CallGuest(FH1_ADDR(0x82486C70u), {world, i});
+      if (!controller || !PinyonShiftGuestRangeReadable(controller, 120)) continue;
+      // Both chase cameras point at the title's loaded 56-byte tuning blocks.
+      for (uint32_t chase = 0; chase < 2; ++chase) {
+        const uint32_t camera = LoadGuestU32(controller + 24 + 4 * chase);
+        if (!camera || !PinyonShiftGuestRangeReadable(camera + 192, 88)) continue;
+        const uint32_t tuning = LoadGuestU32(camera + 192);
+        if (!tuning || !PinyonShiftGuestRangeReadable(tuning, 56)) continue;
+        auto found = originals.find(tuning);
+        if (found == originals.end()) {
+          pinyon_shift::camera::Tuning stock;
+          for (size_t n = 0; n < stock.size(); ++n) stock[n] = LoadGuestF32(tuning + uint32_t(n * 4));
+          if (!std::all_of(stock.begin(), stock.end(), [](float v) { return std::isfinite(v); }) ||
+              stock[7] < 1 || stock[7] > 180) continue;
+          found = originals.emplace(tuning, stock).first;
+          pinyon_shift::diagnostics::RecordEvent("camera.editor.data",
+              {{"chase", std::to_string(chase)}, {"height", std::to_string(stock[0])},
+               {"distance", std::to_string(stock[1])}, {"fov", std::to_string(stock[7])},
+               {"yaw_k", std::to_string(stock[8])}, {"height_k", std::to_string(stock[12])}});
+        }
+        const auto adjusted = pinyon_shift::camera::Adjust(found->second, values[0], values[1], values[2], values[3]);
+        const float height = LoadGuestF32(camera + 268), distance = LoadGuestF32(camera + 276);
+        if (!std::isfinite(height) || !std::isfinite(distance)) continue;
+        auto& position = positions[camera];
+        const uint32_t car = LoadGuestU32(camera + 16);
+        if (position.car != car) position = Placement{car, {}};
+        StoreGuestF32(camera + 268, position.offsets[0].Apply(height, values[0]));
+        StoreGuestF32(camera + 276, position.offsets[1].Apply(distance, values[1]));
+        for (const uint32_t n : {3u, 4u, 7u, 8u, 9u, 12u, 13u}) {
+          StoreGuestF32(tuning + n * 4, adjusted[n]);
+        }
+        static std::array<float, 4> reported{0, 0, 1, 1};
+        if (reported != values) {
+          reported = values;
+          pinyon_shift::diagnostics::RecordEvent("camera.editor.applied",
+              {{"height", std::to_string(values[0])}, {"distance", std::to_string(values[1])},
+               {"fov", std::to_string(adjusted[7])}, {"stiffness", std::to_string(values[3])},
+               {"yaw_k", std::to_string(adjusted[8])}, {"height_k", std::to_string(adjusted[12])}});
+        }
+      }
+      const uint32_t active = LoadGuestU32(controller + 8);
+      const auto previous = previous_modes.find(controller);
+      // Leave photo mode, cutscenes, free camera and replay sequences alone.
+      if (mode && active <= 4) {
+        if (LoadGuestU32(controller + 24 + mode * 4)) {
+          previous_modes[controller] = {active, mode};
+          pinyon_shift::mod::CallGuest(FH1_ADDR(0x82858638u), {controller, mode});
+          pinyon_shift::diagnostics::RecordEvent("camera.editor.mode", {{"mode", std::to_string(mode)}});
+        }
+      } else if (previous != previous_modes.end() && active == previous->second.forced &&
+                 active != mode) {
+        // Only the view the editor set is switched again: the title's own use
+        // of the wheel or car-relative cameras (replay sequences) is left alone.
+        pinyon_shift::mod::CallGuest(FH1_ADDR(0x82858638u),
+                                     {controller, mode ? mode : previous->second.player});
+        if (mode) {
+          previous->second.forced = mode;
+        } else {
+          previous_modes.erase(previous);
+        }
+        pinyon_shift::diagnostics::RecordEvent("camera.editor.mode", {{"mode", std::to_string(mode)}});
+      }
+    }
   });
 }
 
@@ -6919,7 +7372,7 @@ void PinyonShiftAiTraceDrive(PPCRegister& r3) {
   if (!PinyonShiftGuestRangeReadable(controller, 232)) return;
   static std::mutex mutex;
   static std::unordered_map<uint32_t, std::chrono::steady_clock::time_point> last;
-  const auto now = std::chrono::steady_clock::now();
+  const auto now = CsSemanticNow();
   {
     std::lock_guard lock(mutex);
     auto& at = last[controller];
@@ -6971,6 +7424,24 @@ void PinyonShiftAiTraceDynamicUpdate(PPCRegister&) {
   if (REXCVAR_GET(pinyon_shift_ai_trace)) {
     pinyon_shift::diagnostics::RecordEvent("ai.dynamic_update", {});
   }
+}
+
+// The map still runs its complete native fade, move and streaming sequence.
+void PinyonShiftMapTravelGate(PPCRegister& r11, PPCRegister& r30, PPCRegister& r31) {
+  if (pinyon_shift::cheats::AllowMapTravel(r30.u32, (r31.u32 & 0xFFu) != 0,
+                                           (r11.u32 & 0xFFu) != 0)) {
+    r11.u64 = 1;
+  }
+}
+
+void PinyonShiftMapTravelInput(PPCRegister& r21, PPCRegister& r31) {
+  if (pinyon_shift::cheats::PrepareMapTravelInput(r31.u32)) r21.u64 = 0;
+}
+
+// The predicate also runs for the map's button hints, so the hovered marker
+// is only dropped here, at the map update's own call, never in the gate.
+void PinyonShiftMapTravelMarker(PPCRegister& r3, PPCRegister& r21, PPCRegister& r31) {
+  if (pinyon_shift::cheats::UseMapRoadFallback(r31.u32, (r3.u32 & 0xFFu) != 0)) r21.u64 = 0;
 }
 
 // The trainer's live credits (NP-8.3), through the title's own accessors as
@@ -7057,8 +7528,15 @@ struct FixedStepSite {
 };
 
 void ScaleFixedStep(FixedStepSite& site, uint32_t object, PPCRegister& step) {
+  const bool trace = rex::session_probe::Enabled();
+  const uint64_t key = trace ? (uint64_t(uint32_t(rex::session_probe::Digest(site.name, std::strlen(site.name)))) << 32) | object : 0;
+  if (trace) rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, key, step.u64);
+  if (trace && rex::session_probe::Replaying()) {
+    step.u64 = rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, key ^ 1, 0, true); return;
+  }
+
   using Clock = FixedStepSite::Clock;
-  const Clock::time_point now = Clock::now();
+  const Clock::time_point now = CsSemanticNow();
   std::lock_guard<std::mutex> lock(site.mutex);
   FixedStepSite::ObjectClock* clock = nullptr;
   for (auto& entry : site.clocks) {
@@ -7098,6 +7576,8 @@ void ScaleFixedStep(FixedStepSite& site, uint32_t object, PPCRegister& step) {
     site.log_calls = 0;
     site.log_fixed = site.log_applied = 0.0;
   }
+
+  if (trace) rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, key ^ 1, step.u64);
 }
 
 FixedStepSite animated_camera_step{"animated_camera"};
@@ -7126,7 +7606,13 @@ thread_local uint32_t crowd_call_steps = 1;
 
 // sub_82E08A00 after its prologue: r29 is the procedural models object.
 void PinyonShiftCrowdStepBegin(PPCRegister& r29) {
-  const auto now = std::chrono::steady_clock::now();
+  const bool trace = rex::session_probe::Enabled();
+  const uint64_t key = UINT64_C(0x82E08A0000000000) | r29.u32;
+  if (trace && rex::session_probe::Replaying()) {
+    crowd_call_steps = uint32_t(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, key, 0, true)); return;
+  }
+
+  const auto now = CsSemanticNow();
   std::lock_guard<std::mutex> lock(crowd_clock_mutex);
   if (crowd_clocks.size() >= 1024) crowd_clocks.clear();
   CrowdClock& clock = crowd_clocks[uint32_t(r29.u64)];
@@ -7143,6 +7629,8 @@ void PinyonShiftCrowdStepBegin(PPCRegister& r29) {
   }
   clock.last = now;
   crowd_call_steps = steps;
+
+  if (trace) rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, key, crowd_call_steps);
 }
 
 namespace {
@@ -7215,10 +7703,10 @@ void RaiseStepEvent() {
 // between the swaps. Logged every second as simulation.step_pacing.
 void PinyonShiftNoteTitleSwap() {
   g_title_swaps.fetch_add(1, std::memory_order_release);
+  bool raise = false;
   if (g_step_raise_held.load(std::memory_order_acquire)) {
     // A raise is held for this swap: raise it now rather than at the next
     // vblank, so a frame that missed its vblank pair still gets its step.
-    bool raise = false;
     {
       std::lock_guard lock(g_step_gate_mutex);
       if (g_step_raise_held.load(std::memory_order_relaxed) && StepLead() < 2) {
@@ -7229,10 +7717,14 @@ void PinyonShiftNoteTitleSwap() {
     // Raise after unlocking: the vblank callback takes g_step_gate_mutex
     // while it holds the global critical region, and the object lookup takes
     // that region, so raising under the gate mutex deadlocks the two threads.
-    if (raise) {
-      RaiseStepEvent();
-    }
   }
+  if (rex::session_probe::Enabled()) {
+    std::lock_guard lock(g_step_gate_mutex);
+    raise = bool(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F100000001), raise, true));
+    g_step_raise_held.store(bool(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F100000002), g_step_raise_held.load(), true)));
+    g_step_gate_base = int64_t(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F100000003), uint64_t(g_step_gate_base), true));
+  }
+  if (raise) RaiseStepEvent();
   if (!REXCVAR_GET(pinyon_shift_step_pacing_log)) {
     return;
   }
@@ -7244,7 +7736,7 @@ void PinyonShiftNoteTitleSwap() {
   static std::array<uint32_t, 4> steps_per_swap{};
   static uint32_t swaps = 0, strays = 0;
   static double stray_ms = 0.0;
-  const Clock::time_point now = Clock::now();
+  const Clock::time_point now = CsSemanticNow();
   const uint64_t steps = g_simulation_steps.load(std::memory_order_acquire);
   const int64_t step_ns = g_simulation_step_ns.load(std::memory_order_acquire);
   if (last != Clock::time_point{} && steps >= last_steps) {
@@ -7293,13 +7785,16 @@ void PinyonShiftNoteTitleSwap() {
 // that keep up stay on the vblank, so each step's time matches the vblank its
 // frame is shown on.
 void PinyonShiftGateSimulationStep(PPCRegister& r11) {
+  const bool trace = rex::session_probe::Enabled();
+  if (trace) rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000000), r11.u64);
+
   using Clock = std::chrono::steady_clock;
   // Runs on the vblank thread only.
   static Clock::time_point held_since{};
   static uint64_t raises = 0, holds = 0, swap_raises = 0, timeouts = 0;
   static double held_ms = 0.0;
   static Clock::time_point report{};
-  const Clock::time_point now = Clock::now();
+  const Clock::time_point now = CsSemanticNow();
   if (held_since != Clock::time_point{} &&
       !g_step_raise_held.load(std::memory_order_acquire)) {
     // The swap raised the held step.
@@ -7309,6 +7804,12 @@ void PinyonShiftGateSimulationStep(PPCRegister& r11) {
   }
   if ((r11.u32 & 0xFF) != 0) {
     std::lock_guard lock(g_step_gate_mutex);
+    if (trace && rex::session_probe::Replaying()) {
+      r11.u64 = rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000001), 0, true);
+      g_step_raise_held.store(bool(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000002), 0, true)));
+      g_step_gate_base = int64_t(rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000003), 0, true));
+      return;
+    }
     bool hold = false;
     if (REXCVAR_GET(pinyon_shift_step_backpressure)) {
       int64_t lead = StepLead();
@@ -7343,6 +7844,11 @@ void PinyonShiftGateSimulationStep(PPCRegister& r11) {
       }
       ++raises;
     }
+    if (trace) {
+      rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000001), r11.u64);
+      rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000002), hold);
+      rex::session_probe::Scalar(rex::session_probe::Kind::kHostHook, UINT64_C(0x8247C6F000000003), uint64_t(g_step_gate_base));
+    }
   }
   if (now - report >= std::chrono::seconds(10)) {
     if (report != Clock::time_point{} && REXCVAR_GET(pinyon_shift_step_backpressure)) {
@@ -7372,7 +7878,7 @@ void PinyonShiftObserveSimulationDelta(PPCRegister& f31) {
     // instead, capped, so the game runs smoothly and slows under load.
     using Clock = std::chrono::steady_clock;
     static Clock::time_point last_tick;
-    const Clock::time_point now = Clock::now();
+    const Clock::time_point now = CsSemanticNow();
     if (last_tick != Clock::time_point{}) {
       const double host_seconds = std::chrono::duration<double>(now - last_tick).count();
       const double cap = REXCVAR_GET(pinyon_shift_max_simulation_step_ms) / 1000.0;
@@ -7389,6 +7895,7 @@ void PinyonShiftObserveSimulationDelta(PPCRegister& f31) {
   g_simulation_step_ns.fetch_add(int64_t(std::llround(seconds * 1e9)), std::memory_order_release);
   PinyonShiftHoldTimeOfDay(seconds);
   PinyonShiftApplyFreeCamera();
+  PinyonShiftApplyCameraEditor();
   PinyonShiftApplyCredits();
   PROFILE_SIMULATION_TIME_NS(
       static_cast<int64_t>(std::llround(seconds * 1'000'000'000.0)));
@@ -7419,7 +7926,7 @@ void PinyonShiftTraceVehiclePose(PPCRegister& r1, PPCRegister& r30,
   const uint32_t forward_address = static_cast<uint32_t>(forward_address_64);
   const uint64_t now_ms = static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now().time_since_epoch())
+          CsSemanticNow().time_since_epoch())
           .count());
   const uint32_t generation =
       g_title_generation.load(std::memory_order_acquire);
@@ -7584,6 +8091,11 @@ void PinyonShiftTraceSavePreEncryption(PPCRegister& r4, PPCRegister& r5) {
   pinyon_shift::mod::RecordSave(r4.u32, r5.u32);
   SnapshotSavePayload("plaintext", r4.u32, r5.u32, FH1_ADDR(0x82C666D4u));
   ScanLiveProfile(r4.u32, r5.u32);
+  if (r4.u32 != 0 && r5.u32 != 0 && r5.u32 <= (16u << 20)) {
+    // The title has just written the body here, so the range is mapped.
+    pinyon_shift::achievements::ObserveProfile(
+        rex::system::kernel_state()->memory()->TranslateVirtual<const uint8_t*>(r4.u32), r5.u32);
+  }
 }
 
 void PinyonShiftObserveSaveDecrypted(PPCRegister& r24, PPCRegister& r30) {
@@ -7604,6 +8116,7 @@ void PinyonShiftObserveSaveDecrypted(PPCRegister& r24, PPCRegister& r30) {
   auto* body = kernel_state->memory()->TranslateVirtual<uint8_t*>(address);
   pinyon_shift::dlc::GrantProfileUnlocks(body, size);
   pinyon_shift::cheats::EditLoadedProfile(body, size);
+  pinyon_shift::achievements::ObserveProfile(body, size);
 }
 
 void PinyonShiftAcceptModdedBlock(PPCRegister& r3, PPCRegister& r24) {
@@ -7674,8 +8187,13 @@ void PinyonShiftSetViewportAspectScale(float scale) {
 }
 
 void PinyonShiftCameraFieldOfView(PPCRegister& f1) {
+  // Up to 2x applies to every camera, and a wide one would reach 180
+  // degrees, where the projection's tangent diverges; stop at 170.
+  constexpr double kMaxFieldOfView = 170.0 * 3.14159265358979323846 / 180.0;
   const double scale = REXCVAR_GET(pinyon_shift_fov_scale);
-  if (scale != 1.0) f1.f64 = double(float(f1.f64 * scale));
+  if (scale != 1.0) {
+    f1.f64 = double(float(std::min(f1.f64 * scale, std::max(f1.f64, kMaxFieldOfView))));
+  }
 }
 
 // sub_82857B00 (v4 sub_82907F88) updates one camera physics layer at r31
@@ -7685,11 +8203,13 @@ void PinyonShiftCameraFieldOfView(PPCRegister& f1) {
 // tools/build-immersive-camera.py writes them. No stock layer has such a
 // fraction. Scaling the factor eases a sprung layer to its new strength.
 void PinyonShiftImmersiveCameraLayer(PPCRegister& r1, PPCRegister& r31) {
-  const double scales[] = {REXCVAR_GET(pinyon_shift_camera_gforce),
-                           REXCVAR_GET(pinyon_shift_camera_lean),
-                           REXCVAR_GET(pinyon_shift_camera_shake),
-                           REXCVAR_GET(pinyon_shift_camera_head)};
-  if (std::all_of(std::begin(scales), std::end(scales), [](double s) { return s == 1.0; })) {
+  const double scales[] = {
+      REXCVAR_GET(pinyon_shift_camera_gforce), REXCVAR_GET(pinyon_shift_camera_lean),
+      REXCVAR_GET(pinyon_shift_camera_shake), REXCVAR_GET(pinyon_shift_camera_head)};
+  // The head layers' noise range is 0 to 0, so they are still without us.
+  const bool head_tracking = REXCVAR_GET(head_tracking);
+  if (!head_tracking &&
+      std::all_of(std::begin(scales), std::end(scales), [](double s) { return s == 1.0; })) {
     return;
   }
   const uint32_t layer = r31.u32;
@@ -7699,7 +8219,25 @@ void PinyonShiftImmersiveCameraLayer(PPCRegister& r1, PPCRegister& r31) {
   const double fraction = double(tagged) - std::floor(double(tagged));
   const double group = (fraction - 0.0419) / 0.0002;
   const double nearest = std::round(group);
-  if (nearest < 1.0 || nearest > 4.0 || std::abs(group - nearest) > 0.25) return;
+  if (nearest < 1.0 || nearest > 10.0 || std::abs(group - nearest) > 0.25)
+    return;
+  if (nearest >= 5.0) {
+    // Head tracking (#489): groups 5-10 are unit offsets for yaw, pitch,
+    // roll (degrees) and x, y, z (metres), 0 unless it is on.
+    // FH1 pitches and rolls the other way from the pose (look up, tilt right).
+    if (!head_tracking)
+      return;
+    static constexpr float kSigns[] = {1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f};
+    const size_t axis = size_t(nearest) - 5;
+    // Once, so a log shows the camera physics has the head layers.
+    static std::atomic<bool> seen{};
+    if (!seen.exchange(true, std::memory_order_relaxed)) {
+      pinyon_shift::diagnostics::RecordEvent("camera.head_tracking.layers", {});
+    }
+    const auto pose = pinyon_shift::head_tracking::Current();
+    StoreGuestF32(r1.u32 + 96u, pose[axis] * kSigns[axis]);
+    return;
+  }
   const size_t index = size_t(nearest) - 1;
   const double scale = scales[index];
   if (scale == 1.0) return;
@@ -8065,6 +8603,21 @@ bool PinyonShiftGuardChildDispatch(PPCRegister& r11) {
         "object.child_dispatch.stale_child",
         {{"address", pinyon_shift::fh1::kTitleUpdateV4 ? "82CE2A78" : "82C22308"}, {"child", Hex32(child)},
          {"vtable", Hex32(vtable)}, {"method", Hex32(method)}});
+  }
+  return true;
+}
+
+// Match v4's empty-slot handling; keep the last result and the loop's unlock.
+bool PinyonShiftGuardEmptyAudioChild(PPCRegister& r3, PPCRegister& r28,
+                                     PPCRegister& r30, PPCRegister& r31) {
+  if (r3.u32 != 0u) return false;
+  r3.u64 = r28.u64;
+  static std::atomic<uint32_t> skipped{};
+  if (skipped.fetch_add(1, std::memory_order_relaxed) < 16u) {
+    pinyon_shift::diagnostics::RecordEvent(
+        "audio.child_dispatch.empty",
+        {{"owner", Hex32(r30.u32)}, {"index", Hex32(r31.u32)},
+         {"previous_result", Hex32(r28.u32)}});
   }
   return true;
 }
@@ -9448,4 +10001,22 @@ bool PinyonShiftArrayReleaseWalk(PPCContext& ctx, [[maybe_unused]] uint8_t* base
   ctx.r11.u64 = ctx.r10.u64;
   ctx.cr6.compare<uint32_t>(ctx.r11.u32, ctx.r10.u32, ctx.xer);
   return true;
+}
+
+// Observe the selected allocator before its virtual call (#674), without reading
+// the object again or changing allocation behavior.
+void PinyonShiftTraceAllocationOverride(PPCRegister& r3, PPCRegister& r4,
+                                        PPCRegister& r5, PPCRegister& r11) {
+  static const bool enabled =
+      pinyon_shift::platform::EnvironmentFlag("PINYON_SHIFT_FACADE_LIFETIME_TRACE");
+  if (!enabled) return;
+  static thread_local uint32_t previous_object = 0, previous_target = 0;
+  if (r3.u32 == previous_object && r11.u32 == previous_target && r4.u32 < 0x100000u) return;
+  previous_object = r3.u32;
+  previous_target = r11.u32;
+  const auto* thread = rex::runtime::ThreadState::Get();
+  pinyon_shift::diagnostics::RecordEvent("facade.allocation_override",
+      {{"thread", fmt::format("{:08X}", thread ? thread->thread_id() : 0)},
+       {"object", fmt::format("{:08X}", r3.u32)}, {"target", fmt::format("{:08X}", r11.u32)},
+       {"size", fmt::format("{:08X}", r4.u32)}, {"attributes", fmt::format("{:08X}", r5.u32)}});
 }

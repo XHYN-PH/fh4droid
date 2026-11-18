@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -48,12 +49,13 @@ class HostConfig {
   void Set(std::string_view name, std::string_view literal);
   bool dirty() const { return dirty_; }
   // Writes pending changes; true when there was nothing to write. Refuses
-  // when the file was never loaded, so a partial file never replaces it.
+  // when the last load failed, so stale data never replaces the file.
   bool Save();
 
  private:
   std::filesystem::path path_;
   std::string text_;
+  std::map<std::string, std::string> pending_;
   bool loaded_ = false;
   bool dirty_ = false;
   bool backed_up_ = false;

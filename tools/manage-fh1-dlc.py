@@ -22,6 +22,11 @@ PACKAGE_ID = re.compile(r"[0-9A-F]{1,42}\Z")
 MAGIC = (b"LIVE", b"PIRS", b"CON ")
 MAX_PACKAGE = 2 * 1024**3
 RALLY = "6F6992766050D818245ADD408031E280FB5F4E634D"
+UDLC = "4D5309C900000729"
+TRAFFIC = "4D5309C900000732"
+UDLC_PAGE = "https://www.moddb.com/mods/forza-horizon-udlc-pack/downloads/udlcv12"
+OLD_UDLC_SIZE = 1053251920
+OLD_UDLC_MD5 = "de63fea5dc471456e35c7dcde660f9c4"
 
 
 def long_path(path: Path) -> Path:
@@ -83,20 +88,32 @@ def payload_catalog(root: Path) -> tuple[list[dict], str]:
     return files, digest
 
 
+def header_name(header: bytes) -> str:
+    """The package's first display name (UTF-16BE at 0x411), or ""."""
+    raw = header[0x411:0x491]
+    try:
+        return raw.decode("utf-16-be").split("\0", 1)[0].strip()
+    except UnicodeDecodeError:
+        return ""
+
+
 def inspect(stream, size: int, manifest: dict) -> tuple[dict, dict]:
     header = stream.read(0x971A)
     if len(header) != 0x971A or header[:4] not in MAGIC:
         raise ValueError("not an Xbox 360 content package")
+    named = f'"{header_name(header)}": ' if header_name(header) else ""
     if header[0x360:0x364].hex().upper() != manifest["title_id"]:
-        raise ValueError("package belongs to another game")
+        raise ValueError(f"{named}package belongs to another game")
     if header[0x344:0x348].hex().upper() != manifest["content_type"]:
-        raise ValueError("expected Marketplace DLC, not a title update or save")
+        raise ValueError(f"{named}content type {header[0x344:0x348].hex().upper()} is not "
+                         "Marketplace DLC (00000002), so it holds no cars or tracks to import")
     if not len(header) <= size <= MAX_PACKAGE:
         raise ValueError("invalid DLC package size")
     content_id = header[0x32C:0x340].hex().upper()
     package = next((p for p in manifest["packages"] if p["content_id"] == content_id), None)
     if package is None:
-        raise ValueError("this DLC package is not in the verified catalog")
+        raise ValueError(f"{named}this DLC package is not in the verified catalog "
+                         "(see the DLC page), so it was skipped")
     digest = hashlib.sha256(header)
     total = len(header)
     while block := stream.read(4 * 1024**2):
@@ -190,15 +207,28 @@ def stage_unpacked(source: Path, manifest: dict) -> tuple[list[tuple], set[Path]
     return found, roots
 
 
-def stage_inputs(source: Path, temporary: Path, manifest: dict) -> list[tuple]:
-    """Read only the inputs; never extract wrapper member paths to the host."""
+MAX_NESTING = 3
+MAX_NESTED_ZIP = 8 * 1024**3
+
+
+def stage_inputs(sources: "Path | list[Path]", temporary: Path, manifest: dict) -> list[tuple]:
+    """Read only the inputs; never extract wrapper member paths to the host.
+
+    Each source is a raw package, a ZIP or a folder. Folders are searched at
+    any depth, ZIPs at any depth inside the ZIP, and a ZIP inside a ZIP (or
+    inside a folder) is opened in turn, so a pack unpacked into subfolders,
+    split over several ZIPs, or a ZIP of per-package ZIPs all import. Several
+    sources are merged into one batch (#857)."""
+    if isinstance(sources, Path):
+        sources = [sources]
     found = {}
     skipped = []
+    counter = iter(range(1 << 30))
 
     def accept(stream, size: int) -> None:
         if size > MAX_PACKAGE:
             raise ValueError("DLC package exceeds the supported size")
-        path = temporary / f"input-{len(found)}.stfs"
+        path = temporary / f"input-{next(counter)}.stfs"
         with path.open("wb") as output:
             # Bound ZIP inflation even if its size fields are inconsistent.
             copied = 0
@@ -207,8 +237,12 @@ def stage_inputs(source: Path, temporary: Path, manifest: dict) -> list[tuple]:
                 if copied > size:
                     raise ValueError("package exceeds its declared size")
                 output.write(block)
-        with path.open("rb") as file:
-            package, variant = inspect(file, size, manifest)
+        try:
+            with path.open("rb") as file:
+                package, variant = inspect(file, size, manifest)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
         id = package["package_id"]
         if id in found:
             # Same payload, another licence: keep one copy and both purchases.
@@ -218,9 +252,52 @@ def stage_inputs(source: Path, temporary: Path, manifest: dict) -> list[tuple]:
             return
         found[id] = (path, package, variant, [variant], None)
 
-    unpacked, unpacked_roots = stage_unpacked(source, manifest) if source.is_dir() else ([], set())
-    inputs = sorted(source.rglob("*")) if source.is_dir() else [source]
-    for path in inputs:
+    def scan_zip(archive: zipfile.ZipFile, depth: int) -> None:
+        for member in archive.infolist():
+            safe_archive_path(member.filename)
+            if member.is_dir():
+                continue
+            with archive.open(member) as stream:
+                prefix = stream.read(4)
+            if prefix in MAGIC:
+                with archive.open(member) as stream:
+                    accept(stream, member.file_size)
+            elif prefix == b"PK" and depth < MAX_NESTING:
+                scan_nested_zip(archive, member, depth + 1)
+
+    def scan_nested_zip(archive: zipfile.ZipFile, member: zipfile.ZipInfo, depth: int) -> None:
+        if member.file_size > MAX_NESTED_ZIP:
+            return
+        copy = temporary / f"nested-{next(counter)}.zip"
+        try:
+            with archive.open(member) as stream, copy.open("wb") as output:
+                copied = 0
+                while block := stream.read(4 * 1024**2):
+                    copied += len(block)
+                    if copied > member.file_size:
+                        raise ValueError("nested ZIP exceeds its declared size")
+                    output.write(block)
+            try:
+                with zipfile.ZipFile(copy) as inner:
+                    scan_zip(inner, depth)
+            except (NotImplementedError, zipfile.BadZipFile, RuntimeError):
+                # An archive inside a wrapper that is not a DLC ZIP (game
+                # media, a readme bundle): nothing to import from it.
+                skipped.append(f"{PurePosixPath(member.filename.replace(chr(92), '/')).name} (not readable)")
+        finally:
+            copy.unlink(missing_ok=True)
+
+    unpacked, unpacked_roots = [], set()
+    inputs = []
+    for source in dict.fromkeys(sources):
+        if source.is_dir():
+            roots_found, roots = stage_unpacked(source, manifest)
+            unpacked += roots_found
+            unpacked_roots |= roots
+            inputs += [(path, True) for path in sorted(source.rglob("*"))]
+        else:
+            inputs.append((source, False))
+    for path, in_folder in inputs:
         if path.is_symlink():
             raise ValueError("input folder contains a symbolic link")
         if not path.is_file() or any(root in path.parents for root in unpacked_roots):
@@ -231,17 +308,13 @@ def stage_inputs(source: Path, temporary: Path, manifest: dict) -> list[tuple]:
             with path.open("rb") as stream:
                 accept(stream, path.stat().st_size)
         elif zipfile.is_zipfile(path):
+            if path.stat().st_size == OLD_UDLC_SIZE:
+                with path.open("rb") as stream:
+                    if hashlib.file_digest(stream, "md5").hexdigest() == OLD_UDLC_MD5:
+                        raise ValueError(f"This is UDLC v1.11. Download UDLC v1.2 from ModDB: {UDLC_PAGE}")
             try:
                 with zipfile.ZipFile(path) as archive:
-                    for member in archive.infolist():
-                        safe_archive_path(member.filename)
-                        if member.is_dir():
-                            continue
-                        with archive.open(member) as stream:
-                            prefix = stream.read(4)
-                        if prefix in MAGIC:
-                            with archive.open(member) as stream:
-                                accept(stream, member.file_size)
+                    scan_zip(archive, 1)
             except (NotImplementedError, zipfile.BadZipFile, RuntimeError) as error:
                 # A folder can hold game ZIPs that are not DLC wrappers, such
                 # as an installed package's Media/DLCZips (an unsupported
@@ -252,10 +325,10 @@ def stage_inputs(source: Path, temporary: Path, manifest: dict) -> list[tuple]:
                           "Deflate64; extract it first" if isinstance(error, NotImplementedError)
                           else "it is damaged" if isinstance(error, zipfile.BadZipFile)
                           else "it is encrypted")
-                if not source.is_dir():
+                if not in_folder:
                     raise ValueError(f"the ZIP cannot be read: {reason}") from None
                 skipped.append(f"{path.name} ({reason})")
-        elif not source.is_dir():
+        elif not in_folder:
             raise ValueError("choose a raw DLC package, DLC folder or ZIP")
     for entry in unpacked:
         id = entry[1]["package_id"]
@@ -336,16 +409,22 @@ def list_content(state: Path) -> list[dict]:
     state = long_path(state)
     records = []
     metadata = state / "dlc"
+    packages = {p["package_id"]: p for p in catalog()["packages"]}
     for path in sorted(metadata.glob("*.json")):
         id = path.stem
         if not PACKAGE_ID.fullmatch(id):
             continue
         enabled, disabled, header = package_paths(state, id)
         record = import_record(path)
+        source = packages.get(id, {}).get("source", "official" if id in packages else "unknown")
         if record is None:
             records.append(dict(package_id=id, display_name=id, enabled=enabled.is_dir(),
-                                status="metadata_invalid"))
+                                status="metadata_invalid", source=source))
             continue
+        record["source"] = source
+        if packages.get(id, {}).get("author"):
+            record["author"] = packages[id]["author"]
+        record.setdefault("display_name", packages.get(id, {}).get("display_name", id))
         record["enabled"] = enabled.is_dir()
         record["status"] = ("conflict" if enabled.exists() and disabled.exists() else
                             "missing" if not (enabled.is_dir() or disabled.is_dir()) or not header.is_file()
@@ -375,11 +454,11 @@ def list_content(state: Path) -> list[dict]:
             if path.is_dir() and path.name not in known:
                 records.append(dict(package_id=path.name, display_name=path.name,
                                     enabled=folder.name == "00000002" and folder.parent.name == "4D5309C9",
-                                    status="unmanaged"))
+                                    status="unmanaged", source=packages.get(path.name, {}).get("source", "unknown")))
     return records
 
 
-def import_content(source: Path, state: Path, extractor: Path) -> list[dict]:
+def import_content(source: "Path | list[Path]", state: Path, extractor: Path) -> list[dict]:
     state = long_path(state)
     with mutation_lock(state), tempfile.TemporaryDirectory(prefix="staging-", dir=state / "dlc") as directory:
         staging = Path(directory)
@@ -490,7 +569,28 @@ def set_enabled(state: Path, id: str, enabled: bool) -> list[dict]:
         source, destination = (inactive, active) if enabled else (active, inactive)
         if enabled:
             # Repeated enable must also reject an already active damaged package.
-            verified_content(state, id)
+            _, package, _ = verified_content(state, id)
+            for required in package.get("requires", []):
+                dependency = next(p for p in catalog()["packages"] if p["package_id"] == required)
+                try:
+                    verified_content(state, required, require_enabled=True)
+                except ValueError:
+                    raise ValueError(f'{package["display_name"]} requires {dependency["display_name"]}; '
+                                     'enable it first (turning it off also disables the unlocker)') from None
+        else:
+            # Check every destination before moving anything; also repair an
+            # active companion left behind when its parent was already off.
+            dependents = [package_paths(state, p["package_id"])[:2]
+                          for p in catalog()["packages"] if id in p.get("requires", [])]
+            for child_active, child_inactive in dependents:
+                if child_active.exists() and child_inactive.exists():
+                    raise ValueError("both enabled and disabled copies exist for a dependent package")
+            if source.exists() and destination.exists():
+                raise ValueError("both enabled and disabled copies exist")
+            for child_active, child_inactive in dependents:
+                if child_active.is_dir():
+                    child_inactive.parent.mkdir(parents=True, exist_ok=True)
+                    child_active.rename(child_inactive)
         if destination.exists():
             if source.exists():
                 raise ValueError("both enabled and disabled copies exist")
@@ -506,7 +606,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("list", "import", "enable", "disable"))
     parser.add_argument("--state-root", type=Path, required=True)
-    parser.add_argument("--source", type=Path)
+    parser.add_argument("--source", type=Path, action="append",
+                        help="a package, ZIP or folder; repeat to import several at once")
     parser.add_argument("--package-id")
     parser.add_argument("--game-root", type=Path, default=ROOT / ".local/game/base")
     parser.add_argument("--extractor", type=Path, default=ROOT / "out/build/win-amd64-release/pinyon_shift_fh1_archive_extract.exe")
@@ -518,7 +619,7 @@ def main() -> int:
         elif args.action == "import":
             if args.source is None:
                 raise ValueError("choose a DLC input")
-            records = import_content(args.source.resolve(), state, args.extractor.resolve())
+            records = import_content([p.resolve() for p in args.source], state, args.extractor.resolve())
         else:
             if args.package_id is None:
                 raise ValueError("choose an imported package")

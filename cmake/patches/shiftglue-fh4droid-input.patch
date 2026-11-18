@@ -1,10 +1,11 @@
 diff --git a/include/rex/input/input_driver.h b/include/rex/input/input_driver.h
+index 1a72675b..401fee13 100644
 --- a/include/rex/input/input_driver.h
 +++ b/include/rex/input/input_driver.h
-@@ -84,6 +84,9 @@
+@@ -84,6 +84,9 @@ class InputDriver {
      return host_read_ || !is_active_callback_ || is_active_callback_();
    }
-
+ 
 +  // Physical calibration must not alter host-menu navigation.
 +  bool is_host_read() const { return host_read_; }
 +
@@ -12,14 +13,13 @@ diff --git a/include/rex/input/input_driver.h b/include/rex/input/input_driver.h
    friend class InputSystem;
    static inline thread_local bool host_read_ = false;
 diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+index 44fbca79..0eb0a2f3 100644
 --- a/src/input/sdl/sdl_input_driver.cpp
 +++ b/src/input/sdl/sdl_input_driver.cpp
-@@ -41,6 +41,26 @@
-                      "Tilt steering sensitivity in percent: 100 reaches full lock at 45 degrees "
-                      "of tilt, 200 at 22.5")
+@@ -48,6 +48,26 @@ REXCVAR_DEFINE_INT32(pad_gyro_sensitivity, 100, "Input",
      .range(25, 400)
-+    .lifecycle(rex::cvar::Lifecycle::kHotReload);
-+
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
 +#if defined(__ANDROID__)
 +extern "C" __attribute__((used,visibility("default"))) const char fh4droid_runtime_input_abi[] =
 +    "fh4droid-runtime-input:r3-hotfix-v1";
@@ -38,14 +38,15 @@ diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver
 +    .lifecycle(rex::cvar::Lifecycle::kHotReload);
 +REXCVAR_DEFINE_DOUBLE(fh4droid_trigger_outer, 1.0, "Input", "FH4Droid physical controller calibration")
 +    .range(0.6, 1.0)
-     .lifecycle(rex::cvar::Lifecycle::kHotReload);
-
- namespace rex::input::sdl {
-@@ -368,6 +384,36 @@
-     pad.thumb_lx = ShapeWheelSteering(static_cast<int16_t>(pad.thumb_lx), shaping);
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++
+ // Racing wheels (FB-2). The guest sees one XInput wheel: steering on the left
+ // stick X, throttle on the right trigger, brake on the left trigger.
+ // Off by default: wheels then go through the SDL gamepad path (hid_wheel_*).
+@@ -583,6 +603,36 @@ X_RESULT SDLInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
      pad.left_trigger = ShapeWheelPedal(pad.left_trigger, shaping);
      pad.right_trigger = ShapeWheelPedal(pad.right_trigger, shaping);
-+  }
+   }
 +  // Optional calibration applies only to physical gamepads, leaving host
 +  // menu navigation, synthetic touch input and racing-wheel shaping intact.
 +  if (!is_host_read() && !controller->wheel_type && !IsListedWheel(controller->guid)) {
@@ -75,6 +76,7 @@ diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver
 +      pad.left_trigger = shape(pad.left_trigger);
 +      pad.right_trigger = shape(pad.right_trigger);
 +    }
-   }
++  }
    if (!is_active) {
      // Simulate an "untouched" controller. When we become active again the
+     // pressed buttons aren't lost and will be visible again.

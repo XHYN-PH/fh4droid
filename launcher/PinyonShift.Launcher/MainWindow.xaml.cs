@@ -29,7 +29,7 @@ public partial class MainWindow : Window
     ];
 
     // The content area shows one of these at a time.
-    private enum View { Setup, Ready, Log, Crash, Graphics, Dlc, Android, Radio }
+    private enum View { Setup, Ready, Log, Crash, Graphics, Dlc, Android, Radio, Mods }
 
     private CancellationTokenSource? _cancellation;
     private string? _repositoryRoot;
@@ -79,6 +79,10 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
+        // Started from a PowerShell 7 prompt, the launcher inherits its PSModulePath, and the
+        // Windows PowerShell it starts then fails to load its own modules (Get-FileHash is "not
+        // recognized"). Without the variable each PowerShell builds its default.
+        Environment.SetEnvironmentVariable("PSModulePath", null);
         InitializeComponent();
         RouteList.ItemsSource = _steps;
         BuildLocationRun.Text = Path.Combine(
@@ -105,6 +109,7 @@ public partial class MainWindow : Window
         };
         Closing += (_, _) =>
         {
+            CloseWheel();
             _androidShare?.Dispose();
             _cancellation?.Cancel();
             _sessionLog?.Dispose();
@@ -113,6 +118,7 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        if (await RunWheelSelfTestIfAskedAsync()) return;
         await InitializeSourceAsync();
         ReportUpdateAndCleanUp();
         // Started by Windows after the restart that setup asked for: continue
@@ -355,6 +361,7 @@ public partial class MainWindow : Window
         BrowseButton.IsEnabled = false;
         BrowseFolderButton.IsEnabled = false;
         OwnershipCheckBox.IsEnabled = false;
+        MicrosoftLicenseCheckBox.IsEnabled = false;
         PrimaryButton.IsEnabled = false;
         SetPrimaryText("Building…");
         ShowPanel(View.Log);
@@ -389,6 +396,8 @@ public partial class MainWindow : Window
             startInfo.ArgumentList.Add(Directory.Exists(IsoPathTextBox.Text) ? "-ExtractedPath" : "-IsoPath");
             startInfo.ArgumentList.Add(IsoPathTextBox.Text);
             startInfo.ArgumentList.Add("-JsonEvents");
+            if (MicrosoftLicenseCheckBox.IsChecked == true)
+                startInfo.Environment["PINYON_SHIFT_ACCEPT_MICROSOFT_LICENSE"] = "1";
 
             using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
             process.OutputDataReceived += (_, args) => Dispatcher.Invoke(() => HandleOutput(args.Data));
@@ -435,6 +444,7 @@ public partial class MainWindow : Window
             BrowseButton.IsEnabled = true;
             BrowseFolderButton.IsEnabled = true;
             OwnershipCheckBox.IsEnabled = true;
+            MicrosoftLicenseCheckBox.IsEnabled = true;
             UpdatePrimaryButton();
         }
     }
@@ -578,7 +588,7 @@ public partial class MainWindow : Window
     {
         var scale = ConfiguredResolutionScale();
         SetSubhead("Vulkan · " +
-                   $"{scale}× ({1280 * scale} × {720 * scale}) · F6 opens settings in game");
+                   $"{scale}× ({1280 * scale} × {720 * scale}) · F6 opens settings in game" + SyncSummary());
     }
 
     private void DetectExistingBuild()
@@ -755,7 +765,8 @@ public partial class MainWindow : Window
                 !string.IsNullOrWhiteSpace(result.IssueUrl))
             {
                 SetPendingReport(new CrashReport(result.CrashId, result.Bundle, result.IssueUrl,
-                    $"0x{unchecked((uint)result.ExitCode):X8}", result.GraphicsDriver, result.GraphicsMemory));
+                    $"0x{unchecked((uint)result.ExitCode):X8}", result.GraphicsDriver, result.GraphicsMemory,
+                    result.DiscReadError, result.MissingFile));
             }
             if (_pendingReport is null)
                 throw new InvalidOperationException(string.IsNullOrWhiteSpace(error)
@@ -848,10 +859,22 @@ public partial class MainWindow : Window
                 WaitingBrush, ActiveBrush, CompleteBrush, FailedBrush);
         HeadlineText.Text = "The game crashed";
         SetSubhead("");
+        // The game stopped itself on its "dirty disc" error: a file it needs
+        // could not be opened, almost always one a mod or DLC pack changed
+        // (#901: the XE mod with UDLC).
+        if (report.DiscReadError)
+        {
+            HeadlineText.Text = "The game could not read one of its files";
+            SetSubhead("It stopped on a disc read error" +
+                (string.IsNullOrWhiteSpace(report.MissingFile) ? "" : $" after it failed to open {report.MissingFile}") +
+                ". This usually comes from a mod or a DLC pack that changes the game's files. " +
+                "Turn off the mod or DLC you added last, then play again. Report the crash if it " +
+                "happens without mods.");
+        }
         // Exit 1309: the GPU device was lost (src/pinyon_shift_app.cpp,
         // OnHostGpuLoss). Usually a driver reset on weak graphics, which the
         // player can act on; the report still helps when it is not.
-        if (string.Equals(report.ExitCodeHex, "0x0000051D", StringComparison.OrdinalIgnoreCase))
+        else if (string.Equals(report.ExitCodeHex, "0x0000051D", StringComparison.OrdinalIgnoreCase))
         {
             HeadlineText.Text = "The graphics driver stopped responding";
             SetSubhead("Install the newest graphics driver. On integrated or older graphics, choose " +
@@ -975,7 +998,7 @@ public partial class MainWindow : Window
             // Files an earlier release had and this one dropped; never .local.
             foreach (var stale in PayloadManifest.RemoveStale(destination, entries))
                 _portableNotes.Add($"Removed {stale}, which this release no longer has.");
-            await Task.Run(() => ZipFile.ExtractToDirectory(payload, destination, overwriteFiles: true));
+            await Task.Run(() => PayloadExtractor.Extract(payload, destination));
             if (!IsRoot(destination) || !HasPayloadFiles())
                 throw new InvalidDataException("The release source payload is incomplete. Extract a fresh launcher release and retry.");
             await File.WriteAllTextAsync(payloadMarker, payloadHash + Environment.NewLine);
@@ -1010,23 +1033,24 @@ public partial class MainWindow : Window
 
     private void ShowPanel(View panel)
     {
-        // The DLC, radio and Android panels take the headline while open.
-        var wasSide = _panel is View.Dlc or View.Android or View.Radio;
-        if (panel is View.Dlc or View.Android or View.Radio && panel != _panel)
+        // The DLC, mods, radio and Android panels take the headline while open.
+        var wasSide = _panel is View.Dlc or View.Android or View.Radio or View.Mods;
+        if (panel is View.Dlc or View.Android or View.Radio or View.Mods && panel != _panel)
         {
             if (!wasSide) _headlineBeforeDlc = HeadlineText.Text;
             HeadlineText.Text = panel switch
             {
                 View.Dlc => "Downloadable content",
                 View.Radio => "Custom radio",
+                View.Mods => "Mods",
                 _ => "Android"
             };
         }
-        else if (wasSide && panel is not (View.Dlc or View.Android or View.Radio)) HeadlineText.Text = _headlineBeforeDlc;
+        else if (wasSide && panel is not (View.Dlc or View.Android or View.Radio or View.Mods)) HeadlineText.Text = _headlineBeforeDlc;
         // The local network share serves only while its panel is open.
         if (_panel == View.Android && panel != View.Android && _androidShare is not null) StopAndroidShare();
         _panel = panel;
-        SubheadText.Visibility = panel is View.Dlc or View.Android or View.Radio || string.IsNullOrEmpty(SubheadText.Text)
+        SubheadText.Visibility = panel is View.Dlc or View.Android or View.Radio or View.Mods || string.IsNullOrEmpty(SubheadText.Text)
             ? Visibility.Collapsed : Visibility.Visible;
         SetupPanel.Visibility = panel == View.Setup ? Visibility.Visible : Visibility.Collapsed;
         LogPanel.Visibility = panel == View.Log ? Visibility.Visible : Visibility.Collapsed;
@@ -1035,6 +1059,7 @@ public partial class MainWindow : Window
         DlcPanel.Visibility = panel == View.Dlc ? Visibility.Visible : Visibility.Collapsed;
         AndroidPanel.Visibility = panel == View.Android ? Visibility.Visible : Visibility.Collapsed;
         RadioPanel.Visibility = panel == View.Radio ? Visibility.Visible : Visibility.Collapsed;
+        ModsPanel.Visibility = panel == View.Mods ? Visibility.Visible : Visibility.Collapsed;
         // The route only tells something while there is setup left to do.
         RouteList.Visibility = panel is View.Setup or View.Log ? Visibility.Visible : Visibility.Collapsed;
         if (panel == View.Ready) UpdateSummary();
@@ -1072,6 +1097,8 @@ public partial class MainWindow : Window
         OpenLogsButton.Content = "Logs";
         OpenLogsButton.Visibility = Visibility.Visible;
         OpenStateFolderButton.Visibility = Visibility.Visible;
+        OpenSyncButton.Visibility = Visibility.Visible;
+        UpdateSyncButton();
         AppendLog("Build complete. Generated files remain on this computer.");
     }
 
@@ -1104,19 +1131,23 @@ public partial class MainWindow : Window
     private void UpdatePrimaryButton()
     {
         ChooseInstallRootButton.IsEnabled = !_busy && _canChooseInstallRoot &&
-            _panel is not (View.Graphics or View.Dlc or View.Android or View.Radio);
-        PrimaryButton.IsEnabled = !_busy && _panel is not (View.Dlc or View.Android or View.Radio) && (_pendingReport is not null || _gameExecutable is not null ||
+            _panel is not (View.Graphics or View.Dlc or View.Android or View.Radio or View.Mods);
+        PrimaryButton.IsEnabled = !_busy && _panel is not (View.Dlc or View.Android or View.Radio or View.Mods) && (_pendingReport is not null || _gameExecutable is not null ||
             (_repositoryRoot is not null && (File.Exists(IsoPathTextBox.Text) || Directory.Exists(IsoPathTextBox.Text)) && OwnershipCheckBox.IsChecked == true));
         // The Android package is made from the game this PC built.
         AndroidButton.Visibility = _gameExecutable is not null && _pendingReport is null
             ? Visibility.Visible : Visibility.Collapsed;
-        AndroidButton.IsEnabled = !_busy && _panel is not (View.Dlc or View.Radio);
+        AndroidButton.IsEnabled = !_busy && _panel is not (View.Dlc or View.Radio or View.Mods);
         DlcButton.Visibility = _gameExecutable is not null && _pendingReport is null
             ? Visibility.Visible : Visibility.Collapsed;
         DlcButton.IsEnabled = !_busy;
         RadioButton.Visibility = DlcButton.Visibility;
         RadioButton.IsEnabled = !_busy;
-        GraphicsSettingsButton.IsEnabled = !_busy && _panel is not (View.Dlc or View.Radio);
+        ModsButton.Visibility = DlcButton.Visibility;
+        ModsButton.IsEnabled = !_busy;
+        WheelButton.Visibility = DlcButton.Visibility;
+        WheelButton.IsEnabled = !_busy;
+        GraphicsSettingsButton.IsEnabled = !_busy && _panel is not (View.Dlc or View.Radio or View.Mods);
     }
 
     // ---- Android (ONE_CLICK_SETUP_BACKLOG A-1 to A-5) -----------------------
@@ -1147,7 +1178,7 @@ public partial class MainWindow : Window
     private async void AndroidButton_Click(object sender, RoutedEventArgs e)
     {
         if (_busy || _repositoryRoot is null || _gameExecutable is null) return;
-        if (_panel is not (View.Android or View.Dlc or View.Radio)) _panelBeforeDlc = _panel;
+        if (_panel is not (View.Android or View.Dlc or View.Radio or View.Mods)) _panelBeforeDlc = _panel;
         ShowPanel(View.Android);
         RefreshAndroidPanel();
         try { _titleUpdate = await RunTitleUpdateToolAsync("status"); } catch (Exception) { }
@@ -1591,6 +1622,11 @@ public partial class MainWindow : Window
     private static void OpenUrl(string url) =>
         Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
 
+    // The license the Visual Studio installer itself presents for the Build
+    // Tools; xwin fetches the same packages (config/release-toolchain.json).
+    private void MicrosoftLicenseLink_Click(object sender, RoutedEventArgs e) =>
+        OpenUrl("https://go.microsoft.com/fwlink/?LinkId=2179911");
+
     private void ProjectButton_Click(object sender, RoutedEventArgs e) =>
         Process.Start(new ProcessStartInfo("https://github.com/arcanite24/pinyon-shift") { UseShellExecute = true });
 
@@ -1702,7 +1738,7 @@ public partial class MainWindow : Window
     private async void DlcButton_Click(object sender, RoutedEventArgs e)
     {
         if (_busy || _repositoryRoot is null || _stateRoot is null) return;
-        if (_panel is not (View.Dlc or View.Android or View.Radio)) _panelBeforeDlc = _panel;
+        if (_panel is not (View.Dlc or View.Android or View.Radio or View.Mods)) _panelBeforeDlc = _panel;
         ShowPanel(View.Dlc);
         await ChangeDlcAsync("list", success: "Changes apply the next time you start the game.");
         await RefreshTitleUpdateAsync();
@@ -1875,7 +1911,9 @@ public partial class MainWindow : Window
             ? "Not installed. Download from ModDB opens both downloads in your browser and installs them when they finish; Install XE takes archives you already have."
             : status.Enabled
                 ? $"XE {status.Version} is on. It plays its own new save and hides Horizon Rally; your base save is kept."
-                : $"XE {status.Version} is installed and off. The game runs as on the disc.");
+                : $"XE {status.Version} is installed and off. The game runs as on the disc.")
+            // A 1.0-only install from an earlier release (#901).
+            + (message is null && status.Installed && !status.Hotfix ? " The 1.01 hotfix is missing: choose Reinstall with both downloads. Until then UDLC is hidden while XE is on (#901)." : "");
     }
 
     private async void InstallXeButton_Click(object sender, RoutedEventArgs e)
@@ -1894,8 +1932,18 @@ public partial class MainWindow : Window
 
     // ModDB disallows automated downloads, so the player's browser fetches both
     // archives and the tool installs them from Downloads when they finish (#426).
+    // The wait lasts up to four hours, so the button stops it while it runs, and
+    // Done stops it too. Stopping is safe at any point: the install builds XE in a
+    // staging folder and only renames it into place at the end.
+    private CancellationTokenSource? _xeWait;
+
     private async void DownloadXeButton_Click(object sender, RoutedEventArgs e)
     {
+        if (_xeWait is { } wait)
+        {
+            wait.Cancel();
+            return;
+        }
         if (_busy) return;
         await ChangeXeAsync("download", [],
             "XE is installed and on. Its first start creates a new save.");
@@ -1921,7 +1969,16 @@ public partial class MainWindow : Window
     private async Task ChangeXeAsync(string action, string[] archives, string success)
     {
         _busy = true;
-        XeControls.IsEnabled = false;
+        var waiting = action == "download";
+        if (waiting)
+        {
+            // Only the download button stays live, as Stop waiting.
+            _xeWait = new CancellationTokenSource();
+            XeInstallButton.IsEnabled = XeToggleButton.IsEnabled = false;
+            XeDownloadButton.Content = "Stop waiting";
+            AutomationProperties.SetName(XeDownloadButton, "Stop waiting for the XE downloads");
+        }
+        else XeControls.IsEnabled = false;
         UpdatePrimaryButton();
         XeStatusText.Text = action switch
         {
@@ -1930,7 +1987,13 @@ public partial class MainWindow : Window
                           "Installing starts by itself when they finish in your Downloads folder…",
             _ => "Updating…"
         };
-        try { ApplyXe(await RunXeToolAsync(action, archives), success); }
+        try { ApplyXe(await RunXeToolAsync(action, archives, _xeWait?.Token ?? default), success); }
+        catch (OperationCanceledException)
+        {
+            await RefreshXeAsync("Stopped waiting for the XE downloads. Download from ModDB opens the pages again; " +
+                                 "Install XE takes archives you already have.");
+            AppendLog("XE mod: stopped waiting for the downloads.");
+        }
         catch (Exception ex)
         {
             await RefreshXeAsync(ex.Message);
@@ -1938,13 +2001,22 @@ public partial class MainWindow : Window
         }
         finally
         {
+            if (waiting)
+            {
+                _xeWait?.Dispose();
+                _xeWait = null;
+                XeDownloadButton.Content = "Download from ModDB";
+                AutomationProperties.SetName(XeDownloadButton, "Open the XE mod's ModDB downloads and install them when they finish");
+                XeInstallButton.IsEnabled = true;
+            }
             _busy = false;
             XeControls.IsEnabled = true;
             UpdatePrimaryButton();
         }
     }
 
-    private async Task<XeStatus> RunXeToolAsync(string action, string[]? archives = null)
+    private async Task<XeStatus> RunXeToolAsync(string action, string[]? archives = null,
+        CancellationToken cancel = default)
     {
         if (_repositoryRoot is null || _stateRoot is null)
             throw new InvalidOperationException("Release source is not ready.");
@@ -1961,7 +2033,12 @@ public partial class MainWindow : Window
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Windows could not start XE management.");
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        using (cancel.Register(() =>
+               {
+                   try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+               }))
+            await process.WaitForExitAsync();
+        cancel.ThrowIfCancellationRequested();
         var stdout = (await output).Trim();
         var stderr = (await error).Trim();
         var json = stdout[(stdout.LastIndexOf('\n') + 1)..];
@@ -1979,7 +2056,7 @@ public partial class MainWindow : Window
     private async void RadioButton_Click(object sender, RoutedEventArgs e)
     {
         if (_busy || _repositoryRoot is null || _stateRoot is null) return;
-        if (_panel is not (View.Dlc or View.Android or View.Radio)) _panelBeforeDlc = _panel;
+        if (_panel is not (View.Dlc or View.Android or View.Radio or View.Mods)) _panelBeforeDlc = _panel;
         ShowPanel(View.Radio);
         await ChangeRadioAsync("list");
     }
@@ -2211,6 +2288,8 @@ public partial class MainWindow : Window
         public bool Installed { get; set; }
         public bool Enabled { get; set; }
         public string? Version { get; set; }
+        // Absent before #901: count an install as complete unless it says otherwise.
+        public bool Hotfix { get; set; } = true;
         public string? Error { get; set; }
     }
 
@@ -2224,41 +2303,98 @@ public partial class MainWindow : Window
         [JsonPropertyName("pre_v4_backups")] public List<string> PreV4Backups { get; set; } = [];
     }
 
+    private async void InstallUdlcButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        var picker = new OpenFileDialog
+        {
+            Title = "Choose the UDLC zip and optionally the Traffic Car Unlocker zip",
+            Filter = "UDLC archives (*.zip)|*.zip|All files|*.*", Multiselect = true
+        };
+        if (picker.ShowDialog(this) == true) await ChangeUdlcAsync(picker.FileNames);
+    }
+
+    private async void DownloadUdlcButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        await ChangeUdlcAsync([], download: true);
+    }
+
+    private async Task ChangeUdlcAsync(string[] archives, bool download = false)
+    {
+        _busy = true;
+        UdlcControls.IsEnabled = DlcControls.IsEnabled = DlcList.IsEnabled = false;
+        UpdatePrimaryButton();
+        UdlcStatusText.Text = download
+            ? "Download UDLCv1.2.zip on the ModDB page that opened (UDLC Pack by Warshack4874, about 1 GB). " +
+              "Installing starts by itself when it finishes in your Downloads folder…"
+            : "Checking and extracting the UDLC archives. This takes a few minutes…";
+        try
+        {
+            await RunDlcToolAsync("udlc", archives: archives, download: download,
+                traffic: download && UdlcTrafficCheckBox.IsChecked == true);
+            ApplyDlcResult(await RunDlcToolAsync("list"));
+        }
+        catch (Exception ex)
+        {
+            try { ApplyDlcResult(await RunDlcToolAsync("list")); } catch { }
+            UdlcStatusText.Text = ex.Message;
+            AppendLog($"UDLC Pack: {ex.Message}");
+        }
+        finally
+        {
+            _busy = false;
+            UdlcControls.IsEnabled = DlcControls.IsEnabled = DlcList.IsEnabled = true;
+            UpdatePrimaryButton();
+        }
+    }
+
     private async void ImportDlcButton_Click(object sender, RoutedEventArgs e)
     {
         if (_busy) return;
-        var picker = new OpenFileDialog { Title = "Choose your FH1 DLC package or ZIP", Filter = "DLC packages and ZIPs|*.*" };
+        var picker = new OpenFileDialog
+        {
+            Title = "Choose your FH1 DLC packages or ZIPs (several at once are fine)",
+            Filter = "DLC packages and ZIPs|*.*", Multiselect = true
+        };
         if (picker.ShowDialog(this) == true)
-            await ChangeDlcAsync("import", picker.FileName, success: "Import verified. Enable individual packages when ready to test them.");
+            await ChangeDlcAsync("import", picker.FileNames, success: "Import verified. Enable individual packages when ready to test them.");
     }
 
     private async void ImportDlcFolderButton_Click(object sender, RoutedEventArgs e)
     {
         if (_busy) return;
-        var picker = new OpenFolderDialog { Title = "Choose your FH1 DLC folder" };
+        var picker = new OpenFolderDialog { Title = "Choose your FH1 DLC folders (subfolders are searched too)", Multiselect = true };
         if (picker.ShowDialog(this) == true)
-            await ChangeDlcAsync("import", picker.FolderName, success: "Import verified. Enable individual packages when ready to test them.");
+            await ChangeDlcAsync("import", picker.FolderNames, success: "Import verified. Enable individual packages when ready to test them.");
     }
 
     private async void ToggleDlcButton_Click(object sender, RoutedEventArgs e)
     {
         if (_busy || (sender as Button)?.Tag is not DlcPackage package) return;
+        if (package.Enabled && package.PackageId == "4D5309C900000729" && MessageBox.Show(this,
+                "Cars you own from UDLC are hidden while it is off, and the game picks another car for you. " +
+                "They come back when you turn UDLC on again. Turn UDLC off?",
+                "UDLC Pack", MessageBoxButton.YesNo, MessageBoxImage.Information) != MessageBoxResult.Yes) return;
         await ChangeDlcAsync(package.Enabled ? "disable" : "enable", packageId: package.PackageId,
             success: "Updated. Applies at the next start; saves were not changed.");
     }
 
     private void CloseDlcButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_busy) return;
+        // Leaving stops waiting for the XE downloads; other DLC work finishes first.
+        if (_xeWait is { } wait) wait.Cancel();
+        else if (_busy) return;
         ShowPanel(_panelBeforeDlc);
         UpdatePrimaryButton();
     }
 
-    private async Task ChangeDlcAsync(string action, string? source = null, string? packageId = null, string success = "")
+    private async Task ChangeDlcAsync(string action, string[]? source = null, string? packageId = null, string success = "")
     {
         _busy = true;
         DlcControls.IsEnabled = false;
         DlcList.IsEnabled = false;
+        UdlcControls.IsEnabled = false;
         UpdatePrimaryButton();
         DlcStatusText.Text = action == "import" ? "Verifying and importing packages…" :
             action == "enable" && packageId == "6F6992766050D818245ADD408031E280FB5F4E634D"
@@ -2281,11 +2417,13 @@ public partial class MainWindow : Window
             _busy = false;
             DlcControls.IsEnabled = true;
             DlcList.IsEnabled = true;
+            UdlcControls.IsEnabled = true;
             UpdatePrimaryButton();
         }
     }
 
-    private async Task<DlcResult> RunDlcToolAsync(string action, string? source = null, string? packageId = null)
+    private async Task<DlcResult> RunDlcToolAsync(string action, string[]? source = null, string? packageId = null,
+        string[]? archives = null, bool download = false, bool traffic = false)
     {
         if (_repositoryRoot is null || _stateRoot is null)
             throw new InvalidOperationException("Release source is not ready.");
@@ -2298,29 +2436,46 @@ public partial class MainWindow : Window
         foreach (var argument in new[] { "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
             Path.Combine(_repositoryRoot, "tools", "manage-dlc.ps1"), "-Action", action, "-StateRoot", _stateRoot })
             start.ArgumentList.Add(argument);
-        if (source is not null) { start.ArgumentList.Add("-InputPath"); start.ArgumentList.Add(source); }
+        if (source is { Length: > 0 }) { start.ArgumentList.Add("-InputPath"); start.ArgumentList.Add(source[0]); }
         if (packageId is not null) { start.ArgumentList.Add("-PackageId"); start.ArgumentList.Add(packageId); }
+        if (download)
+            foreach (var argument in new[] { "-Find", "-OpenPages", "-Wait", "14400" }) start.ArgumentList.Add(argument);
+        if (traffic) start.ArgumentList.Add("-Traffic");
+        // Further import sources travel as remaining arguments, like UDLC archives.
+        foreach (var archive in (archives ?? []).Concat(source?.Skip(1) ?? [])) start.ArgumentList.Add(archive);
+        if (action == "udlc")
+            AppendLog($"UDLC command: {start.FileName} " + string.Join(" ", start.ArgumentList.Select(argument => $"\"{argument}\"")));
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Windows could not start DLC management.");
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
         var stdout = await output;
         var stderr = await error;
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? "DLC management stopped." : stderr.Trim());
-        return JsonSerializer.Deserialize<DlcResult>(stdout.Trim(), new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-            ?? throw new InvalidDataException("DLC management returned an invalid result.");
+        var json = stdout.Trim();
+        json = json[(json.LastIndexOf('\n') + 1)..];
+        var result = json.StartsWith('{')
+            ? JsonSerializer.Deserialize<DlcResult>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            : null;
+        if (process.ExitCode != 0 || result?.Error is not null)
+            throw new InvalidOperationException(result?.Error ?? (string.IsNullOrWhiteSpace(stderr) ? "DLC management stopped." : stderr.Trim()));
+        return result ?? throw new InvalidDataException("DLC management returned an invalid result.");
     }
 
     private void ApplyDlcResult(DlcResult result)
     {
         DlcList.ItemsSource = result.Packages;
         DlcEmptyText.Visibility = result.Packages.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var udlc = result.Packages.Find(package => package.PackageId == "4D5309C900000729");
+        var traffic = result.Packages.Exists(package => package.PackageId == "4D5309C900000732");
+        UdlcStatusText.Text = udlc is null
+            ? "Not installed. Download from ModDB opens the UDLC page in your browser and installs it when the download finishes; Install UDLC takes a zip you already have."
+            : $"UDLC is {(udlc.Enabled ? "on" : "off")}. Traffic Car Unlocker is {(traffic ? "installed" : "not installed")}.";
     }
 
     public sealed class DlcResult
     {
         public List<DlcPackage> Packages { get; set; } = [];
+        public string? Error { get; set; }
     }
 
     public sealed class DlcPackage
@@ -2329,6 +2484,10 @@ public partial class MainWindow : Window
         [JsonPropertyName("display_name")] public string DisplayName { get; set; } = "";
         public bool Enabled { get; set; }
         public string Status { get; set; } = "";
+        public string Source { get; set; } = "";
+        public string? Author { get; set; }
+        public string CommunityText => Source == "community"
+            ? string.IsNullOrWhiteSpace(Author) ? "Community" : $"Community, by {Author}" : "";
         [JsonPropertyName("rally_assets_cached")] public bool RallyAssetsCached { get; set; }
         public bool CanToggle => Status == "gameplay_unverified" ||
             (Enabled && (Status == "missing" || Status == "metadata_invalid"));
@@ -2476,14 +2635,15 @@ public partial class MainWindow : Window
     private void GraphicsChoice_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         UpdateResolutionLine();
 
-    // The resolution line's verb for an output scaling tag. FSR 2 and 3 need
-    // AMD's FidelityFX runtime beside the game; without it they run as FSR 1.
+    // The resolution line's verb for an output scaling tag. The build stages
+    // AMD's FidelityFX runtime and NVIDIA's DLSS runtime beside the game; DLSS
+    // needs an RTX GPU and otherwise runs as FSR 1, as the in-game line says.
     private static string UpscalerVerb(string? scaling) => scaling switch
     {
         "fsr" => "FSR 1 upscales",
         "fsr2" => "FSR 2 upscales",
         "fsr3" => "FSR 3 upscales",
-        "dlss" => "DLSS upscales",
+        "dlss" => "DLSS (FSR 1 without an RTX GPU) upscales",
         _ => "stretched",
     };
 
@@ -2652,14 +2812,18 @@ public partial class MainWindow : Window
         [property: JsonPropertyName("exit_code")] long ExitCode,
         [property: JsonPropertyName("config")] string? Config = null,
         [property: JsonPropertyName("graphics_driver")] string? GraphicsDriver = null,
-        [property: JsonPropertyName("graphics_memory")] bool GraphicsMemory = false);
+        [property: JsonPropertyName("graphics_memory")] bool GraphicsMemory = false,
+        [property: JsonPropertyName("disc_read_error")] bool DiscReadError = false,
+        [property: JsonPropertyName("missing_file")] string? MissingFile = null);
     private sealed record CrashReport(
         [property: JsonPropertyName("crash_id")] string CrashId,
         [property: JsonPropertyName("bundle")] string Bundle,
         [property: JsonPropertyName("issue_url")] string IssueUrl,
         [property: JsonPropertyName("exit_code_hex")] string? ExitCodeHex,
         [property: JsonPropertyName("graphics_driver")] string? GraphicsDriver = null,
-        [property: JsonPropertyName("graphics_memory")] bool GraphicsMemory = false);
+        [property: JsonPropertyName("graphics_memory")] bool GraphicsMemory = false,
+        [property: JsonPropertyName("disc_read_error")] bool DiscReadError = false,
+        [property: JsonPropertyName("missing_file")] string? MissingFile = null);
     private sealed record GraphicsResult(
         [property: JsonPropertyName("backup_path")] string? BackupPath,
         [property: JsonPropertyName("settings")] GraphicsSettings Settings,

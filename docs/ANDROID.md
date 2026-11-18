@@ -2,9 +2,9 @@
 
 ## FH4Droid Android-only fork
 
-FH4Droid focuses on Android only. The `0.6.8-r7` testing build uses application ID `ph.xhyn.fh4droid`. Install the APK and choose your own supported USA retail ISO or complete extracted game folder; the phone does not compile the game. See the [fork release notes](releases/fh4droid-0.6.8-r7.md) for requirements and limitations. The r7 integration has not been tested on a physical Android device. The [current Android guide](../site/pages/android.md) describes the launcher, drawer, settings, profiles, controls and reports; the upstream sections below retain their named historical measurements.
+FH4Droid focuses on Android and keeps application ID `ph.xhyn.fh4droid`. The current source is based on Pinyon Shift 0.9.1. Choose a supported USA retail ISO or complete extracted game folder on the device. The [current Android guide](../site/pages/android.md) covers the launcher, settings, controls, profiles, and reports. The upstream sections below retain their historical measurements.
 
-The current minimum is Android 12/API 31 with ARMv8-A. Vulkan 1.1/1.2, Mali and Xclipse are experimental capability paths, not qualified gameplay claims. The [70-item review](releases/fh4droid-0.6.8-r7-review.md) lists unresolved bugs and device tests.
+The current minimum is Android 13/API 33 with an ARMv8.2-A CPU. Vulkan 1.1/1.2, Mali and Xclipse remain experimental. The [70-item review](releases/fh4droid-0.6.8-r7-review.md) lists unresolved bugs and device tests.
 
 The developer build instructions and historical measurements below are inherited from upstream. Current FH4Droid source uses local ISO/folder import; its PC discovery, pairing, Wi-Fi transfer and network app-update client have been removed. Its private-build distribution policy describes upstream Pinyon Shift; this fork's prebuilt APK release is separate and contains compiled game translations. Raw game files, generated source, native build products and signing keys remain excluded from the source repository.
 
@@ -30,7 +30,7 @@ notice is in `android/drivers/turnip-gen8-v37/NOTICE.txt`) and installs it
 into `files/state/drivers` at start. SETTINGS > GRAPHICS > GPU DRIVER picks
 the Vulkan driver loaded at the next start (`android_gpu_driver`): AUTO, the
 default, loads the one recommended for the GPU (Turnip Gen8 V37 on Adreno
-7xx and 8xx, the system's elsewhere), SYSTEM the device's own, and every
+7xx and 8xx except 730, which uses the system driver; system elsewhere), SYSTEM the device's own, and every
 folder under `files/state/drivers` by name. IMPORT DRIVER (.ZIP) opens the
 system's file picker for an adrenotools package (a `.zip` with `meta.json`
 and the driver `.so`), which is unpacked into a folder named after the zip.
@@ -239,6 +239,92 @@ Clicking both sticks (LS + RS) shows or hides the performance panel, F3 on a
 keyboard; SETTINGS > CONTROLLER > PERFORMANCE PANEL changes the buttons
 (`pad_chord_debug_overlay`).
 
+## HDR calibration
+
+**SETTINGS > DISPLAY > HDR CALIBRATION** sends known signal levels through
+the HDR10 presentation path. Paper white is the signal level of white menus
+and the HUD; peak is the target used by the highlight expansion. HIGHLIGHTS
+controls the strength of that expansion, independently of the calibration.
+The patterns replace the guest image and its HUD mask, so the minimap or a
+menu frame cannot cover the chart. They temporarily suspend HDR COMPARE
+without changing its current choice; leaving calibration restores the comparison.
+
+The pattern uses the selected peak, without substituting Android's advertised
+maximum; the advertised levels are used for HDR10 metadata. The peak pattern
+compares a square at the selected peak with a 10,000-nit
+reference field. It finds a clipping threshold only when the display path
+clips those signals. A compositor which tone-maps them can keep the square
+visible throughout the range. In that case, do not keep raising the peak
+until it looks right: keep the existing value pending a measured calibration.
+Reported HDR capabilities are desired content levels, not a measurement of
+what the panel emits at the current brightness or display mode. Neither
+HDR10 metadata nor a PQ swapchain guarantees an unmodified signal at the
+panel ([Android HDR](https://source.android.com/docs/core/display/hdr),
+[Vulkan HDR metadata](https://docs.vulkan.org/refpages/latest/refpages/source/VkHdrMetadataEXT.html)).
+
+For a device qualification or an incorrect calibration report:
+
+1. Use a private copy of a pinned render seed. Keep the installed save and
+   normal configuration intact, and retain the installed APK before replacing
+   it so it can be restored. Keep the device cool and the room lighting fixed.
+2. Record the device/ROM, display color mode, refresh rate, brightness and
+   adaptive-brightness setting. Disable adaptive brightness, night light and
+   optional display enhancements for the comparison; restore them afterwards.
+3. Repeat with SYSTEM and the bundled Turnip driver after restarting each
+   time. Use identical paper white, peak, gamma and highlight settings.
+   Record all three calibration steps with HDR COMPARE both on and off.
+   [fh1-android-hdr-calibration.fh1test](../config/render-tests/fh1-android-hdr-calibration.fh1test)
+   cycles the steps at fixed 200-nit white and 1000-nit peak signal levels;
+   it does not derive or approve those settings for the device.
+4. Retain `runtime.log`: `Android display environment` records the launch
+   brightness/mode snapshot (`brightness_mode=0` is manual, `1` automatic),
+   `Android display HDR` the advertised luminance, `Vulkan device` the actual
+   driver, and `Created ... swapchain` its format, color space and transform.
+   `HDR10 metadata` records the submitted levels, and `HDR calibration pattern`
+   records the tested signal values when the step, white, peak or gamma changes.
+   The launch snapshot does not track later system setting changes.
+5. While the pattern is visible, save `adb shell dumpsys display` and
+   `adb shell dumpsys SurfaceFlinger`. Inspect the game's layer data space,
+   composition path and display HDR mode for both drivers. A screenshot is
+   tone-mapped and cannot establish panel luminance. Measure black, paper
+   white and clipping with a luminance meter at the same patch size and
+   brightness/mode; retain those conditions with the readings.
+
+Issue [#566](https://github.com/arcanite24/pinyon-shift/issues/566) remains an
+Astra qualification gate. The AYN Odin 2 Portal reports 420 / 210.1615 /
+0.323 cd/m² (maximum / average / minimum) in `dumpsys display`; these are
+advertised values, not new measured limits. There is no established Astra
+peak or correction curve, so the shared 200-nit paper-white and 1000-nit
+peak defaults have not been replaced with a guessed device preset.
+
+Visibility baseline (2026-10-18): the Odin's installed v4 APK 0.5.1 completed
+this route through frame 1680 on both SYSTEM (0x802A4035) and Turnip
+(0x6802063). Each run used a private copy of `odin-graphics-20261006` plus
+verified pinned title-update-v4 files; a base-only state cannot boot that
+installed v4 APK. The raw brightness setting stayed at 141 in manual mode,
+and both refresh-rate settings at 120.00001 Hz. Both drivers used format 64,
+a 10-bit buffer marked PQ, pre-transform 2 and the same 420 / 210.1615 /
+0.323 metadata. Host-UI screenshots reproduce the guest menu image covering
+the paper-white chart; Turnip also reproduces it with compare off. This
+establishes the old renderer's chart contamination, not emitted luminance. The normal user trees retained all
+36 file hashes; the APK and settings were unchanged and private states removed.
+
+The updated base 0.6.0 build passed the same private route on both drivers.
+Host-UI screenshots taken when the pattern-change logs appeared show the
+square and gray steps instead of the guest menu. The paper-white chart band
+has identical decoded RGB pixels with compare on and off, both within each
+driver and between SYSTEM and Turnip; leaving calibration restores the
+comparison divider. Startup logs include the raw display settings, and the
+six step transitions log their 200-nit white / 1000-nit peak signal values.
+This verifies chart visibility and signal routing, not physical luminance.
+The test-only repack used the installed version code 501, with native
+libraries and Java bytecode identical to the normal build. The original
+0.5.1 APK was restored by exact SHA-256; all 36 user-file hashes and the
+recorded brightness/refresh settings were unchanged. The APK, private states
+and captures stay local; the Astra measurement gate remains open.
+
+
+
 ## Troubleshooting
 
 | Symptom | Cause |
@@ -304,15 +390,28 @@ the updated Odin run produces no corresponding native crash record.
 ## Current mobile presentation
 
 The launcher shows the existing transparent FH4Droid logo without a backing box.
-Settings use Graphics, Controls, Audio, Interface, Gameplay and Advanced sections;
-Android Back opens Resume, Settings, Controls, More and Quit. The touch editor
+The race-grid launcher uses the approved B dashboard: Play on the left and
+Settings, Controls, Game files and More in a two-by-two grid on the right.
+Narrow displays or larger text stack Play above the grid. More groups content, drivers, saves,
+achievements, reports and About into a six-card management grid. The existing
+road background and transparent logo remain. Profile is available in the header;
+Cheats is in the Mods tab. Focus settles over 160 ms and pages slide/fade over
+220 ms, with reduced motion respected. Native rendering and navigation checks
+are documented in [tests/android/ui](../tests/android/ui/README.md).
+
+Settings use Graphics, Audio, Controls, Interface, Gameplay and Advanced sections;
+Descriptions stay on the right at both tested landscape sizes. Focus updates
+the explanation; Left/Right adjusts choice rows, including render resolution.
+The game uses a small menu icon at the upper right and text-only menu actions.
+Android Back also opens that menu. It offers Resume, Settings, Touch controls,
+Controller, Diagnostics, Achievements, Profile, More and Quit. The touch editor
 uses the whole window for placement, with a separate full-window Properties
 view and Save, Cancel, Test and Hide tools actions. The active custom layout is
 kept until the player explicitly applies a preset or saves an edited draft.
 
-`config/touch-artwork.json` generates the PNG loaded by Android and embedded
+`config/touch-artwork.json` generates the text-label PNG loaded by Android and embedded
 byte-for-byte in the native overlay. `tools/generate-touch-artwork.py --check`
-validates both consumers without Pillow. Regeneration uses Pillow 11.3.0 and CairoSVG 2.8.2 from `tools/requirements-touch-artwork.txt`. The source SVGs use square 24-unit viewports, with proportions preserved. Lucide/Feather license notices ship in the Android resources and are available through More → About → Control artwork credits. The
+validates both consumers without Pillow. Regeneration uses Pillow 11.3.0 and CairoSVG 2.8.2 from `tools/requirements-touch-artwork.txt`. The retained SVG sources are unused by the current text-only driving labels. Lucide/Feather license notices ship in the Android resources and are available through More → About → Control artwork credits. The
 production mesh readback test covers all 20 symbols, captions, classic letters,
 pressed state and stick knobs; its optional PPM output is a software artwork
 proof, not an Android gameplay screenshot. Phone layout and legibility still
@@ -323,8 +422,8 @@ in the [Android player guide](../site/pages/android.md#fractional-resolution-lin
 The fix changes intermediate untiled-band clears only; guest texture layouts
 and 100% resolution remain unchanged.
 
-The current driving artwork uses thin utility symbols and translucent pedal
-faces with bevel highlights and grip grooves. Accelerator, brake and clutch
-use their pedal silhouette directly; the touch targets retain their saved size.
-Pressed modern pedals receive the same warm tint in native rendering and the
-editor. SVG gradients reference only definitions inside the same source file.
+The current driving artwork uses text action names or controller button codes,
+with translucent targets and pink pressed feedback. The same PNG is consumed by
+the native overlay and the full-screen editor. Edit offers a grid, optional
+snapping and 16/24/32 dp grid spacing. Placement is clamped inside safe-area
+bounds. Properties fills the window; Hide tools frees the canvas.

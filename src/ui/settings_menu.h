@@ -10,6 +10,7 @@
 
 #include "config/host_config.h"
 #include "save_backups.h"
+#include "save_sync.h"
 #include "ui/hostui/host_ui.h"
 #include "ui/hostui/menu.h"
 
@@ -22,10 +23,15 @@ namespace pinyon_shift::ui {
 // before the first save of the session.
 // What the settings screen can reach besides the settings file.
 struct SettingsServices {
+  // The presenter's frame generators (UP-8.2); no FRAME GENERATION row
+  // without one available.
+  std::function<std::vector<rex::ui::UpscalerInfo>()> frame_generators;
   // Builds the ACHIEVEMENTS page; no page without it.
   std::function<std::unique_ptr<hostui::MenuScreen>()> achievements;
   // Lists and restores save backups under PROFILE; no rows without it.
   SaveBackups* save_backups = nullptr;
+  // Save sync (docs/SAVE_SYNC.md); no SAVE SYNC row without it.
+  SaveSync* save_sync = nullptr;
   // <state>/mods: the MODS page lists its folders; no page when empty.
   std::filesystem::path mods_root;
   // The draw resolution scale the renderer uses (0 when unknown). With it,
@@ -43,6 +49,9 @@ struct SettingsServices {
   // without it. With the trainer, TRAINER (F10) opens it while cheats are
   // on. Both reach a controller-only or touch-only player (AP-4.4).
   std::function<void()> save_photo;
+  // QUIT GAME: closes the window the way its close button does, so photos,
+  // save backups and mods finish first; no row without it.
+  std::function<void()> quit;
   bool trainer = false;
 };
 

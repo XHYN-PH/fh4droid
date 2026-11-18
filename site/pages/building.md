@@ -12,8 +12,9 @@ The launcher runs these same scripts. Use a checkout when you're changing host o
 ## Requirements
 
 - Windows 10 or 11, x64, PowerShell 5.1 or newer.
-- Visual Studio 2022 C++ Build Tools 17.1 or newer. Setup installs them if missing.
-- A supported Vulkan GPU, an internet connection and about 30 GB free. Android targets API 31 and ARMv8-A; Vulkan 1.1/1.2 capability paths are experimental. See [Android requirements](android.md#r7-changes-and-limits).
+- Microsoft's C++ libraries and Windows SDK. With the prebuilt ShiftGlue kit, and once you accept [Microsoft's licence](https://go.microsoft.com/fwlink/?LinkId=2179911) (`PINYON_SHIFT_ACCEPT_MICROSOFT_LICENSE=1`, the launcher's checkbox), setup fetches only those with `xwin` (about 770 MB, no administrator rights). Otherwise it uses Visual Studio 2022 C++ Build Tools 17.1 or newer and installs them if missing. The kit carries the Visual C++ runtime DLLs that `xwin` and the ShiftGlue tools need, so a PC without the Visual C++ Redistributable can build too. `PINYON_SHIFT_MSVC_SYSROOT=0` always uses the Build Tools; building ShiftGlue from source needs them.
+- A GPU with Vulkan 1.3, an internet connection and about 30 GB free.
+- FH4Droid targets Android API 33 and ARMv8-A. See [Android requirements](android.md#current-changes-and-limits).
 
 Setup checks the C++ library and the Windows SDK before building, and stops with compiler diagnostics if they're too old.
 
@@ -45,6 +46,21 @@ After changing host or ShiftGlue code:
 .\tools\build-preview.ps1
 ```
 
+Base and v4 builds regenerate changed translations and refresh their source
+lists before compiling. Ordinary updates do not need `-CleanGenerated`.
+If an older build failed to link a facade DLL with undefined
+`PPCFoldedRanges` or `PPCFoldedHash`, update the source and rerun the build.
+See [Building](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/BUILDING.md)
+for the build and update procedure.
+
+Within an existing packaged source directory, setup keeps the managed SDK
+checkout and unchanged dependency objects when its exact pin changes. CMake
+still rebuilds changed inputs and flags. A new launcher `source/<version>`
+directory does not reuse the previous version's objects. The small Windows
+and SteamOS fixture checks are described in
+[Local build cost](https://github.com/arcanite24/pinyon-shift/blob/dev/docs/LOCAL_BUILD_COST.md);
+first-install time and disk requirements remain unchanged.
+
 ## The pinyon.py command line
 
 `tools/pinyon.py` works without PowerShell and is the launcher for Linux builds.
@@ -68,3 +84,9 @@ The package holds a self-contained launcher and a source archive. It excludes th
 ## Contributing
 
 Read [CONTRIBUTING.md](https://github.com/arcanite24/pinyon-shift/blob/dev/CONTRIBUTING.md) first. Repository checks reject disc images, executables, generated translations, extracted assets and build products. Commit subjects follow Conventional Commits.
+
+## Generated module completeness
+
+Build from the complete manifest, including SpeechFacade and XMediaFacade. A main-only translation cannot launch this game. If fresh main translations are combined with retained compatible facade translations, their module registry and the entrypoint's `register_modules` callback must also be retained. Configuration rejects an incomplete connection and Android packaging checks the actual linked registry and both registration exports.
+
+On a Linux or macOS base build with private translations present, build `pinyon_shift_recompiled_module_tests`. Run it with a game root, a new private test-state directory, the SpeechFacade library and the XMediaFacade library. It uses the actual generated entrypoint metadata and the SDK dispatcher to check both registry paths, module layouts, registration exports, every function mapping and the reported base-game startup targets. It does not launch gameplay or qualify an Android GPU.

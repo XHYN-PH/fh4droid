@@ -155,8 +155,8 @@ final class MobileDriveAssist implements SensorEventListener {
       centred = true;
     }
     SharedPreferences prefs = activity.getSharedPreferences("mobile", 0);
-    float target = DrivingMath.tilt(
-        angle, centre, prefs.getInt("tilt_range", 35), prefs.getInt("tilt_deadzone", 3) / 100f);
+    float target = DrivingMath.phoneTilt(
+        angle, centre, prefs.getInt("tilt_range", 35), prefs.getInt("tilt_deadzone", 3) / 100f, prefs.getBoolean("tilt_invert", false));
     filtered += .22f * (target - filtered);
     steering.accept(filtered);
   }

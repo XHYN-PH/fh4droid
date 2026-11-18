@@ -39,7 +39,7 @@ final class GraphicsProfiles {
         // Keep these paths at their original settings until lower-detail
         // variants have been qualified on phones. Reduced raster resolution
         // and AA are sufficient to distinguish the performance profiles.
-        values.put("vulkan_texture_max_size", "0");
+        values.put("vulkan_texture_max_size", budget ? "512" : "0");
         values.put("pinyon_shift_fh1_shadows", budget ? "false" : "true");
         values.put("disable_bloom", budget ? "true" : "false");
         values.put("disable_motion_blur", "true");
