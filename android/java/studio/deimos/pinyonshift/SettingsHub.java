@@ -535,8 +535,19 @@ final class SettingsHub {
       FestivalUi.action(
           a, rows, "Record a performance comparison", () -> ProblemReports.capture(a));
     }
-    if (page.equals("Gameplay"))
+    if (page.equals("Gameplay")) {
+      if (!(a instanceof PinyonShiftActivity)) {
+        FestivalUi.toggle(a, rows, "Save folder sync · next launch",
+            "Share the normal save and achievements through the app's media folder. "
+                + "Point your folder-sync app at Android/media/ph.xhyn.fh4droid/sync.",
+            () -> a.getSharedPreferences("mobile", 0).getBoolean("save_folder_sync", false),
+            on -> {
+              a.getSharedPreferences("mobile", 0).edit().putBoolean("save_folder_sync", on).apply();
+              UiPreferences.save(a);
+            });
+      }
       FestivalUi.action(a, rows, "Cheats · separate profile", () -> TrainerPage.show(a, runtime));
+    }
   }
   static void pref(Activity a, LinearLayout rows, String title, String key, boolean fallback) {
     FestivalUi.toggle(

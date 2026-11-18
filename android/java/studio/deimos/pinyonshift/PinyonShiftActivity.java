@@ -283,7 +283,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         File[] media = getExternalMediaDirs();
         if (media == null || media.length == 0 || media[0] == null) return null;
         File sync = new File(media[0], "sync");
-        if (!sync.isDirectory() && !sync.mkdirs()) {
+        if (!sync.isDirectory() && !sync.mkdirs() && !sync.isDirectory()) {
             Log.w(TAG, "Cannot create the save sync folder " + sync);
             return null;
         }
@@ -300,12 +300,17 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         // Save sync (docs/SAVE_SYNC.md): Android/media/<package>/sync, unlike
         // the files folder under Android/data, is open to a sync app with
         // all-files access (Syncthing-Fork), so pointing one at it shares the
-        // save. First, so the intent's args or a --pinyon_shift_sync_folder=
+        // save. The launcher only selects that folder after the player enables sync.
+        // Set it first so the intent's args or a --pinyon_shift_sync_folder=
         // line in the arguments file override it (an empty value turns sync
         // off); scripted routes turn it off in the game.
-        File sync = syncFolder();
-        if (sync != null) arguments.add("--pinyon_shift_sync_folder=" + sync.getAbsolutePath());
-        arguments.add("--pinyon_shift_device_name=" + Build.MODEL);
+        if (getSharedPreferences("mobile", 0).getBoolean("save_folder_sync", false)) {
+            File sync = syncFolder();
+            if (sync != null) {
+                arguments.add("--pinyon_shift_sync_folder=" + sync.getAbsolutePath());
+                arguments.add("--pinyon_shift_device_name=" + Build.MODEL);
+            }
+        }
         if (given != null) Collections.addAll(arguments, given);
         File external = getExternalFilesDir(null);
         File file = new File(external != null ? external : getFilesDir(), SetupActivity.ARGUMENTS_FILE);

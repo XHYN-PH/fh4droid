@@ -7,6 +7,10 @@ launcher) and Android (the game's folder argument). Code:
 and `SaveSyncStatus.cs`, and `syncFolder()` in `PinyonShiftActivity.java`.
 Test: `tests/save/save_sync_test.cpp` (below).
 
+On FH4Droid, enable **Save folder sync** under **Settings → Gameplay** before
+starting a session. Sync is off by default. The media path uses the FH4Droid
+application ID, `Android/media/ph.xhyn.fh4droid/sync`.
+
 **Goal.** A player who already runs a folder-sync app (Syncthing,
 Syncthing-Fork on Android, Dropbox, OneDrive, Google Drive for desktop,
 Nextcloud, a NAS share, or a USB stick) points Pinyon Shift at a folder that
