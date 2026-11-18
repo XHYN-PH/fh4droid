@@ -314,7 +314,7 @@ target_link_libraries(pinyon_shift_save_backups_tests PRIVATE rex::runtime)
 # Save sync's two-device test (docs/SAVE_SYNC.md).
 add_executable(pinyon_shift_save_sync_tests EXCLUDE_FROM_ALL
     tests/save/save_sync_test.cpp src/save_sync.cpp src/save_backups.cpp
-    src/config/host_config.cpp)
+    src/config/host_config.cpp src/platform/host_platform.cpp)
 target_include_directories(pinyon_shift_save_sync_tests PRIVATE src)
 target_link_libraries(pinyon_shift_save_sync_tests PRIVATE rex::runtime)
 
