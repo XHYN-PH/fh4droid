@@ -34,6 +34,31 @@ public class UiPolishTest {
   @Test @Config(qualifiers="w640dp-h360dp-land-xxhdpi") public void compactDetailsRemainOnRight()throws Exception{Activity a=activity();RacingLauncherView root=shell(a);LinearLayout settings=settings(a,"Graphics");root.showContent("Settings",settings,false);render(root,1920,1080,"test5-settings-compact");Rect d=new Rect(),s=new Rect();assertTrue(settings.findViewWithTag("details-panel").getGlobalVisibleRect(d));assertTrue(settings.findViewWithTag("settings-scroll").getGlobalVisibleRect(s));assertTrue(d.left>=s.right);}
   @Test public void gameMenuSingleTapAndTextOnlyActions()throws Exception{Activity a=activity();List<String> actions=new ArrayList<>();GameMenuView menu=new GameMenuView(a,actions::add);a.setContentView(menu);render(menu,1250,850,"test5-game-menu");Button settings=menu.findViewWithTag("Settings");assertFalse(settings.hasFocus());long t=android.os.SystemClock.uptimeMillis();for(int action:new int[]{MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP}){MotionEvent e=MotionEvent.obtain(t,t+30,action,settings.getWidth()/2f,settings.getHeight()/2f,0);settings.dispatchTouchEvent(e);e.recycle();}ShadowLooper.idleMainLooper();assertEquals(Collections.singletonList("Settings"),actions);for(String title:new String[]{"Resume","Settings","Touch controls","Controller","Diagnostics","Achievements","Profile","More","Quit to launcher"}){Button b=menu.findViewWithTag(title);assertNotNull(b);for(android.graphics.drawable.Drawable icon:b.getCompoundDrawables())assertNull(icon);Rect r=new Rect();assertTrue(b.getGlobalVisibleRect(r));assertEquals(b.getHeight(),r.height());}}
   @Test public void uiPreferencesSurviveProcessHandoff(){Activity a=activity();a.getSharedPreferences("mobile",0).edit().putString("app_language","fil").putBoolean("tilt_invert",true).commit();UiPreferences.save(a);a.getSharedPreferences("mobile",0).edit().clear().commit();UiPreferences.load(a);assertEquals("fil",a.getSharedPreferences("mobile",0).getString("app_language",""));assertTrue(a.getSharedPreferences("mobile",0).getBoolean("tilt_invert",false));}
+  public static class SaveSyncActivity extends PinyonShiftActivity {
+    File mediaDirectory;
+
+    @Override public File[] getExternalMediaDirs() {
+      return new File[] {mediaDirectory};
+    }
+  }
+
+  @Test public void saveSyncRequiresOptInAfterProcessHandoff() {
+    SaveSyncActivity game = Robolectric.buildActivity(SaveSyncActivity.class).get();
+    game.setIntent(new android.content.Intent());
+    game.mediaDirectory = new File(game.getCacheDir(), "media");
+    assertTrue(game.mediaDirectory.mkdirs());
+    File sync = new File(game.mediaDirectory, "sync");
+    game.getSharedPreferences("mobile", 0).edit().clear().commit();
+    assertFalse(Arrays.stream(game.getArguments()).anyMatch(arg -> arg.startsWith("--pinyon_shift_sync_folder=")));
+    assertFalse(sync.exists());
+
+    game.getSharedPreferences("mobile", 0).edit().putBoolean("save_folder_sync", true).commit();
+    UiPreferences.save(game);
+    game.getSharedPreferences("mobile", 0).edit().clear().commit();
+    UiPreferences.load(game);
+    assertTrue(Arrays.asList(game.getArguments()).contains("--pinyon_shift_sync_folder=" + sync.getAbsolutePath()));
+    assertTrue(sync.isDirectory());
+  }
   @Test public void adreno730AutomaticUsesSystem()throws Exception{Method m=PinyonShiftActivity.class.getDeclaredMethod("recommendedDriver",String.class);m.setAccessible(true);assertNull(m.invoke(null,"730"));assertNull(m.invoke(null,(Object)null));assertEquals("turnip-gen8-v37",m.invoke(null,"740"));}
   @Test public void profileAndAchievementsUseCompactPages()throws Exception{
     Activity a=activity();org.json.JSONArray achievements=new org.json.JSONArray();for(int i=0;i<13;i++)achievements.put(new org.json.JSONObject().put("id",i).put("name",String.format("Achievement %02d",i)).put("score",10).put("unlocked",i%2==0));AchievementsPage.show(a,new org.json.JSONObject().put("achievements",achievements).toString());android.app.Dialog dialog=org.robolectric.shadows.ShadowDialog.getLatestDialog();assertNotNull(dialog);View root=dialog.getWindow().getDecorView();arrange(root,2400,1080);assertTrue(text(root).contains("Achievement 00"));assertFalse(text(root).contains("Achievement 06"));TextView next=find(root,"Next");assertNotNull(next);next.performClick();assertTrue(text(root).contains("Achievement 06"));assertFalse(text(root).contains("Achievement 00"));find(root,"Unlocked").performClick();assertTrue(text(root).contains("Achievement 00"));assertFalse(text(root).contains("Achievement 01"));dialog.dismiss();
