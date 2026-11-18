@@ -4,7 +4,7 @@
 
 FH4Droid focuses on Android and keeps application ID `ph.xhyn.fh4droid`. The current source is based on Pinyon Shift 0.9.1. Choose a supported USA retail ISO or complete extracted game folder on the device. The [current Android guide](../site/pages/android.md) covers the launcher, settings, controls, profiles, and reports. The upstream sections below retain their historical measurements.
 
-The current minimum is Android 13/API 33 with ARMv8-A. Vulkan 1.1/1.2, Mali and Xclipse are experimental capability paths, not qualified gameplay claims. The [70-item review](releases/fh4droid-0.6.8-r7-review.md) lists unresolved bugs and device tests.
+The current minimum is Android 13/API 33 with an ARMv8.2-A CPU. Vulkan 1.1/1.2, Mali and Xclipse remain experimental. The [70-item review](releases/fh4droid-0.6.8-r7-review.md) lists unresolved bugs and device tests.
 
 The developer build instructions and historical measurements below are inherited from upstream. Current FH4Droid source uses local ISO/folder import; its PC discovery, pairing, Wi-Fi transfer and network app-update client have been removed. Its private-build distribution policy describes upstream Pinyon Shift; this fork's prebuilt APK release is separate and contains compiled game translations. Raw game files, generated source, native build products and signing keys remain excluded from the source repository.
 

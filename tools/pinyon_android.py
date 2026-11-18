@@ -760,17 +760,17 @@ def _dirty(status: str) -> str:
     return "unknown" if status == "unknown" else str(bool(status)).lower()
 
 
-def _cpu_baseline() -> str:
+def _cpu_baseline(build_dir: Path) -> str:
     # Read the actual configured native build, including explicit optimized builds.
-    cache = ROOT / "out" / "build" / CONFIG["configure_preset"] / "CMakeCache.txt"
+    cache = build_dir / "CMakeCache.txt"
     if cache.is_file():
         match = re.search(r"(?m)^PINYON_SHIFT_ANDROID_MARCH:STRING=([^\r\n]+)$", cache.read_text(encoding="utf-8"))
         if match:
             return match.group(1)
-    return CONFIG.get("cpu_baseline", "armv8-a")
+    return CONFIG["cpu_baseline"]
 
 
-def _build_manifest(tools: Tools, version_name: str, libraries: list[Path]) -> dict:
+def _build_manifest(build_dir: Path, version_name: str, libraries: list[Path]) -> dict:
     """The provenance the game logs at start and puts in crash reports
     (AP-6.4), as tools/build-preview.ps1 writes it beside the executable."""
     sdk = rexsdk_dir()
@@ -780,7 +780,7 @@ def _build_manifest(tools: Tools, version_name: str, libraries: list[Path]) -> d
         "configuration": "Release",
         "platform": "android-arm64",
         "version": version_name,
-        "cpu_baseline": _cpu_baseline(),
+        "cpu_baseline": _cpu_baseline(build_dir),
         "ndk": CONFIG["android_sdk"]["ndk"],
         "min_sdk": CONFIG["min_sdk"],
         "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -934,7 +934,7 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
         raise AndroidError(str(error)) from error
 
     # Reports must identify the bytes shipped in the APK, after stripping.
-    manifest = _build_manifest(tools, version_name, stripped)
+    manifest = _build_manifest(directory, version_name, stripped)
     manifest["validation_layer"] = validation is not None
     if validation is not None:
         manifest["validation_layer_sha256"] = hashlib.sha256(validation.read_bytes()).hexdigest()

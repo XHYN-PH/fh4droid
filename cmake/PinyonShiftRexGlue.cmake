@@ -189,15 +189,6 @@ if(REXSDK_DIR)
     set(REXGLUE_OUTPUT_DIRECTORY
         "${CMAKE_CURRENT_BINARY_DIR}/rexglue-artifacts"
         CACHE PATH "ReXGlue artifacts for the Pinyon Shift host build" FORCE)
-    # Budget ARM64 devices may lack LSE/RDM. Keep the public build at ARMv8-A;
-    # an explicitly selected ARMv8.2 build must record that stronger baseline.
-    # Apply the same architecture to the SDK and every bundled dependency.
-    if(ANDROID)
-        set(PINYON_SHIFT_ANDROID_MARCH "armv8-a" CACHE STRING
-            "-march for every Android target, the SDK and its libraries included")
-        add_compile_options(-march=${PINYON_SHIFT_ANDROID_MARCH})
-        set(REXGLUE_ARM64_MARCH ${PINYON_SHIFT_ANDROID_MARCH})
-    endif()
     include("${PROJECT_SOURCE_DIR}/cmake/PinyonShiftAndroidSdkPatch.cmake")
     add_subdirectory("${REXSDK_DIR}" rexglue-sdk EXCLUDE_FROM_ALL)
     # NN-3.6: calls inside the runtime libraries bind locally instead of

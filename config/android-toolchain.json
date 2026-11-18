@@ -63,5 +63,5 @@
     }
   },
   "configure_preset": "android-arm64-release",
-  "cpu_baseline": "armv8-a"
+  "cpu_baseline": "armv8.2-a"
 }
