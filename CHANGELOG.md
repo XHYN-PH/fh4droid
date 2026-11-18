@@ -1,5 +1,12 @@
 # Changelog
 
+## FH4Droid 0.9.1 - 2026-11-19
+
+- Prepare known shaders and pipelines before gameplay and save the Vulkan cache.
+- Show LB, RB and both sticks in photo mode. Add an invisible right-half look control and LB/RB navigation in launcher tabs.
+- Verify game files with progress, use readable extracted folders in place, and manage individual save backups. Exclude installed DLC from save exports.
+- Add the 0.5.1-style audio comparison, collision-file checks and incident captures. See the [Android release notes](docs/releases/fh4droid-0.9.1.md).
+
 ## 0.9.1 - 2026-11-17
 
 - Fixed: setup stopped on the first build after updating to 0.9.0 with

@@ -14,7 +14,7 @@
 
 **FH4Droid focuses on Android only.** It brings the original Xbox 360 **Forza Horizon (2012)** to compatible phones and handhelds.
 
-**Testing build: 0.9.1-upstream-test1.** Based on [Pinyon Shift 0.9.1](docs/releases/0.9.1.md). Android gameplay validation is pending.
+**Current release: FH4Droid 0.9.1.** Based on [Pinyon Shift 0.9.1](docs/releases/0.9.1.md). See the [Android release notes](docs/releases/fh4droid-0.9.1.md) for changes and validation.
 
 **You must provide your own legally obtained game files.** Use the supported USA Xbox 360 base-game ISO or complete extracted folder. Game files and game-download links are not provided here.
 
@@ -29,7 +29,7 @@
 - Opt-in sustained mode, driver diagnostics, graphics-cache management and labelled performance reports.
 - Save export, import, backups and restoration from your phone.
 - A graphics-driver test before launch, system-driver recovery and shareable problem reports.
-- Direct ISO loading or verified game-folder import with resume and repair.
+- Direct ISO or extracted-folder loading where Android permits it, with verified folder copying as a fallback.
 - Installs separately from the original Pinyon Shift app.
 
 ## Requirements
@@ -50,7 +50,7 @@ Support and performance depend on the phone and graphics driver. Other devices a
 2. Choose your supported game **ISO**, or choose the **complete extracted folder**.
 3. Wait for the game-file checks and any copying to finish.
 4. Open **Settings** to choose graphics, audio and controls. Restart labels show what applies on the next launch.
-5. Tap **Play**. The app tests the selected graphics driver before starting.
+5. Tap **Play**. The app tests the selected graphics driver and prepares known shaders and pipelines before starting.
 
 Local import uses an ISO or extracted folder already on the device; the app has no PC pairing or Wi-Fi transfer flow. Copy a folder over USB when needed.
 
