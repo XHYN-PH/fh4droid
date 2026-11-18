@@ -31,6 +31,10 @@ Restart Windows after a Build Tools install, free the space the error lists for 
 
 When the Visual Studio Installer stops, the error gives its exit code and, for the common ones, the reason: the installer or Visual Studio is already open, or another installation is running. The installer's own logs, the `dd_*.log` files in `%TEMP%`, explain the other codes. The launcher copies the ones from the failed attempt to `.local/logs/build-tools-installer`; attach them with `setup-error.json`. If the installer keeps failing, open **Visual Studio Installer** from the Start menu, repair or remove an incomplete Build Tools install, and restart Windows. Or install the Build Tools yourself with **Desktop development with C++**; the launcher uses an existing install.
 
+## "Modified since the precompiled header" after an update
+
+0.9.0's setup could stop on its first build after an update with `file '…' has been modified since the precompiled header '…cmake_pch.hxx.pch' was built` (the file is a ShiftGlue header, or an MSVC header when Windows updated the Build Tools). The kit's files are unpacked with a fixed 1980 date, so the build tool saw nothing newer than the old build and reused a precompiled header made from the previous kit or compiler. Setup now dates freshly unpacked kit files to the install time and deletes the precompiled headers when the kit, the compiler or the MSVC version changes, so the next build makes them again. With 0.9.0 itself, delete the build folder the error names, such as `out/build/win-amd64-release` (`linux-amd64-release` or `macos-arm64-release` on Linux and Macs, `win-amd64-v4` for the title update build; on a Mac, Finder hides `.local`, so press Cmd+Shift+. to show it), and start setup again.
+
 ## A portable install can't start or build
 
 - **"Portable folder is not writable"**: move the folder somewhere you own, such as `D:\Games\PinyonShift`, or delete `portable.txt`.
@@ -80,11 +84,15 @@ Vulkan prepares shaders during setup, and stores any new ones it meets during pl
 
 ## The picture tears
 
-With **F6 > DISPLAY > VSYNC** on, the game presents without tearing on both Vulkan and Direct3D 12, and the change applies at once. With it off, Vulkan presents as soon as a frame is ready and may tear. On a G-SYNC or FreeSync display keep VSYNC on as well: with it off and **FRAME RATE LIMIT** at the display's refresh rate (120 at 120 Hz), frames that come a little early are above the variable-refresh range and tear. Overlays that hook the game's presentation, such as RivaTuner or OBS's game capture, can add tearing or hitches of their own: close them to compare.
+With **F6 > DISPLAY > VSYNC** on, the game presents without tearing on both Vulkan and Direct3D 12, and the change applies at once. With it off, Vulkan presents as soon as a frame is ready and may tear. On a G-SYNC or FreeSync display keep VSYNC on as well: with it off and **FRAME RATE** at the display's refresh rate (120 at 120 Hz), frames that come a little early are above the variable-refresh range and tear. Overlays that hook the game's presentation, such as RivaTuner or OBS's game capture, can add tearing or hitches of their own: close them to compare.
 
 ## A resolution scale error at startup
 
 The renderer supports 1x, 2x, 3x and 4x, the same horizontally and vertically. Pick a supported scale in the launcher, or delete `pinyon_shift.toml` to reset.
+
+## Settings ignored at startup
+
+The game reads `pinyon_shift.toml` as TOML, and a file that does not parse applies none of its settings: the game starts on the built-in defaults (no FRAME RATE limit, 1x scale, presents capped at 60), which on a 120 Hz display renders 120 frames and shows 60. The log now says so (`Config ... does not parse`, with the line). Development builds from 2026-11-16 wrote **FRAME GENERATION** as `present_frame_generation = off` without quotes, which caused this; the game now quotes that line at startup and keeps the old file as `pinyon_shift.toml.framegeneration.bak`.
 
 ## A hang after changing display or graphics settings
 

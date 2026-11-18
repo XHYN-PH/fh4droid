@@ -6,9 +6,11 @@ description: FH4Droid launcher, game files, settings, controls and troubleshooti
 ---
 
 
-FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source targets the 0.8.2-ui-polish-test5 preview APK, integrating stable Pinyon Shift 0.8.2. An uploaded vivo V2425A report covers one r7 session; the unreleased follow-up below has not been gameplay-tested on a physical device. This test build includes the approved race-grid launcher; 0.8.2-polish-test3 retains its earlier launcher. Upstream measurements describe their named devices and builds; they are not benchmarks for this build.
+FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source integrates Pinyon Shift 0.9.1 and retains the race-grid launcher, Android input, and save management from 0.8.2-ui-polish-test5. Upstream measurements describe their named devices and builds. This integration awaits Android gameplay testing.
 
 ## Current changes and limits
+
+Pinyon Shift 0.9.1 updates the build tooling and includes 0.9.0 runtime changes, such as faster file lookups and changes to audio scheduling. Upstream frame generation targets desktop platforms. FH4Droid continues to use its own Android raster resolution setting.
 
 Android 13 or newer is required. Snapdragon 845/Adreno 630, Mali-G52 and Xclipse need device qualification; an Android 10 stock phone does not meet this OS floor. Start Mali/Xclipse with the system Vulkan driver. Turnip controls are Adreno-only, and PanVK is not a universal Mali fallback.
 
@@ -140,7 +142,7 @@ An intentional native window close records a clean exit before the runtime's har
 
 ## Build and implementation notes
 
-The pinned ShiftGlue SDK is 101ad468, matching upstream 0.8.2. Reviewed runtime changes and regenerated Vulkan helpers are stored in cmake/patches and applied idempotently before configuring the source SDK. This avoids a submodule commit unavailable from the upstream remote. Regenerate helpers with compile-fh1-native.sh (SPIRV_ONLY=1 and GLSLANG set), then run tools/update-android-sdk-patch.py after reviewing the SDK worktree.
+The pinned ShiftGlue SDK is 537b2b64, matching upstream 0.9.1. Reviewed runtime changes and regenerated Vulkan helpers are stored in cmake/patches and applied idempotently before configuring the source SDK. This avoids a submodule commit unavailable from the upstream remote. Regenerate helpers with compile-fh1-native.sh (SPIRV_ONLY=1 and GLSLANG set), then run tools/update-android-sdk-patch.py after reviewing the SDK worktree.
 
 The current minimum is Android 13/API 33 and the native CPU baseline is ARMv8-A. Vulkan 1.1/1.2 capability paths, Mali/Immortalis and Samsung Xclipse are experimental; a GPU name or API version does not qualify gameplay. Packaging reads the configured CPU baseline so an optimized ARMv8.2 build cannot be labelled ARMv8-A. 16 KiB native/ZIP alignment remains required. Run tools/test-android-mobile.py and the renderer/parser host tests before packaging. No physical-device or sustained performance claim follows from compilation or SPIR-V validation.
 
