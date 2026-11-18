@@ -151,7 +151,7 @@ final class ModStore {
         }finally{ContentFiles.delete(stage);}
     }
     private static File baseDatabase(Context c,File stage)throws Exception{
-        File file=ContentFiles.treeFile(new File(MobileConfig.base(c),"game/base"),"media/db/gamedb.slt");if(file!=null)return file;
+        File file=ContentFiles.treeFile(GameFiles.root(c),"media/db/gamedb.slt");if(file!=null)return file;
         String uri=c.getSharedPreferences("mobile",0).getString("iso_uri","");if(uri.isEmpty())throw new IOException("Game database is missing. Import the complete game folder.");
         GameFiles.Expected expected=GameFiles.catalog(c).get("media/db/gamedb.slt");File cached=new File(stage,"base-gamedb.slt");
         try(android.os.ParcelFileDescriptor fd=c.getContentResolver().openFileDescriptor(android.net.Uri.parse(uri),"r")){

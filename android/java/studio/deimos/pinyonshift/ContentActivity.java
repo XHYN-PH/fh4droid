@@ -50,10 +50,18 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
             runOnUiThread(()->{if(generation!=scanGeneration||isFinishing()||isDestroyed())return;loading=false;modItems=snapshot.mods;dlcItems=snapshot.dlc;modOptions=snapshot.options;enabledMods=snapshot.enabled;optionsProblem=snapshot.problem;rebuild();});
         }catch(Exception error){runOnUiThread(()->{if(generation!=scanGeneration||isFinishing()||isDestroyed())return;loading=false;pages.clear();LinearLayout retry=FestivalUi.column(this);retry.addView(FestivalUi.text(this,"Content could not be loaded: "+error.getMessage(),14,FestivalUi.TEXT));FestivalUi.action(this,retry,"Try again",this::refresh);showPanel("Mods and DLC",retry);});}});
     }
+    private void selectTab(int index) {
+        if (busy || loading) return;
+        tab = Math.floorMod(index, 3);
+        selectedMod = "";
+        selectedDlc = "";
+        rebuild();
+    }
     private void rebuild(){
         FestivalUi.rememberTree(host);Page oldRoot=pages.peekFirst(),oldDetail=pages.size()>1?pages.peekLast():null;
         pages.clear();LinearLayout body=FestivalUi.column(this);LinearLayout tabs=new LinearLayout(this);body.addView(tabs);
-        String[] names={"Mods","DLC","Shaders"};for(int i=0;i<names.length;i++){final int selected=i;Button button=FestivalUi.button(this,names[i],false);button.setSelected(tab==i);tabs.addView(button,new LinearLayout.LayoutParams(0,-2,1));button.setOnClickListener(v->{if(!busy&&!loading){tab=selected;selectedMod="";selectedDlc="";rebuild();}});}
+        String[] names={"Mods","DLC","Shaders"};for(int i=0;i<names.length;i++){final int selected=i;Button button=FestivalUi.button(this,names[i],false);button.setSelected(tab==i);tabs.addView(button,new LinearLayout.LayoutParams(0,-2,1));button.setOnClickListener(v->selectTab(selected));}
+        ControllerPrompts.tabs(body, direction -> selectTab(tab + direction));
         try{if(tab==0)mods(body);else if(tab==1)dlc(body);else shaders(body);}
         catch(Exception error){body.addView(FestivalUi.text(this,"Content could not be loaded: "+error.getMessage(),14,FestivalUi.MUTED));}
         if(oldRoot!=null)FestivalUi.transferPageState(oldRoot.body,body);showPanel("Mods and DLC",body);
@@ -130,7 +138,7 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
         File file=ShaderPreparation.installed(this);body.addView(FestivalUi.text(this,file.isFile()?"A prepared free-roam pipeline list is installed.":"No prepared free-roam pipeline list is installed.",15,FestivalUi.TEXT));
         body.addView(FestivalUi.text(this,"Prepare the pipeline list with the updated PC setup from your own game files, then import the .xpso file here. The renderer checks its shader hashes while loading it.",13,FestivalUi.MUTED));
         FestivalUi.action(this,body,"Import prepared pipeline list",()->pick(SHADERS,false,false));
-        String current=MobileConfig.get(this,"vulkan_pipeline_prewarm_background","false");FestivalUi.action(this,body,"Preparation: "+(current.equals("true")?"during the title":"before play"),()->FestivalUi.choose(this,"Prepare pipelines",new String[]{"Before play · longer startup","During the title · earlier startup"},current.equals("true")?1:0,index->perform("Saving shader preparation…",()->ContentFiles.locked(this,()->{MobileConfig.put(this,"vulkan_pipeline_prewarm_background",index==1?"true":"false");return "Shader preparation setting saved.";}))));
+        body.addView(FestivalUi.text(this,"Stored and imported pipelines are prepared before the game starts.",13,FestivalUi.MUTED));
     }
     private void pick(int request,boolean folder,boolean multiple){if(!available())return;Intent intent=new Intent(folder?Intent.ACTION_OPEN_DOCUMENT_TREE:Intent.ACTION_OPEN_DOCUMENT);if(!folder){intent.addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,multiple);}intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);try{startActivityForResult(intent,request);}catch(ActivityNotFoundException error){error("No file picker is available.");}}
     @Override protected void onActivityResult(int request,int result,Intent data){

@@ -7,6 +7,20 @@ final class FileOperation implements AutoCloseable {
     interface Listener { void progress(String name,long done,long total); }
     private static final ThreadLocal<FileOperation> CURRENT=new ThreadLocal<>();
     private final Listener listener;private volatile boolean cancelled;private volatile Thread thread;private long last;
+    private String segmentName;
+    private long segmentOffset, segmentTotal;
+    static void segment(String name, long offset, long total) {
+        FileOperation current = CURRENT.get();
+        if (current != null) {
+            current.segmentName = name;
+            current.segmentOffset = offset;
+            current.segmentTotal = total;
+        }
+    }
+    static void clearSegment() {
+        FileOperation current = CURRENT.get();
+        if (current != null) current.segmentName = null;
+    }
     FileOperation(Listener listener){this.listener=listener;}
     FileOperation attach()throws InterruptedIOException{thread=Thread.currentThread();CURRENT.set(this);try{check();return this;}catch(InterruptedIOException error){close();throw error;}}
     void cancel(){cancelled=true;Thread worker=thread;if(worker!=null)worker.interrupt();}
@@ -17,7 +31,9 @@ final class FileOperation implements AutoCloseable {
     }
     static void progress(String name,long done,long total)throws InterruptedIOException{
         check();FileOperation op=CURRENT.get();if(op==null||op.listener==null)return;
-        long now=System.nanoTime();if(done!=total&&now-op.last<200000000L)return;op.last=now;op.listener.progress(name,done,total);
+        long now=System.nanoTime();if(done!=total&&now-op.last<200000000L)return;op.last=now;
+        if (op.segmentName == null) op.listener.progress(name,done,total);
+        else op.listener.progress(op.segmentName,op.segmentOffset+done,op.segmentTotal);
     }
     public void close(){if(CURRENT.get()==this)CURRENT.remove();thread=null;Thread.interrupted();}
 }

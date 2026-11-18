@@ -63,6 +63,44 @@ final class GraphicsCache {
       }
     });
   }
+  private static List<File> driverCaches(File cache) {
+    List<File> result = new ArrayList<>();
+    File[] roots = cache.listFiles(candidate -> graphicsDirectory(cache, candidate)
+        && candidate.isDirectory() && !Files.isSymbolicLink(candidate.toPath()));
+    if (roots == null) return result;
+    for (File root : roots) {
+      File shaders = root.getName().equals("shaders") ? root : new File(root, "shaders");
+      if (Files.isSymbolicLink(shaders.toPath())) continue;
+      File[] blobs = shaders.listFiles(file -> file.isFile() && !Files.isSymbolicLink(file.toPath())
+          && file.getName().matches("(?i)[0-9a-f]{8}\\.vkpipelinecache\\.[0-9a-f]+_[0-9a-f]+_[0-9a-f]+\\.bin"));
+      if (blobs != null) Collections.addAll(result, blobs);
+    }
+    result.sort(Comparator.comparing(File::getPath));
+    return result;
+  }
+  private static void repairDriverCache(Activity activity, File cache, File selected, TextView status) {
+    if (GameFiles.running(activity)) {
+      FestivalUi.explain(activity, "Game is running", "Quit to the launcher before repairing a graphics cache.");
+      return;
+    }
+    new AlertDialog.Builder(activity).setTitle("Rebuild this driver cache?")
+        .setMessage("Only this driver's compiled pipeline file will be removed. Shader lists and other driver caches are kept.")
+        .setNegativeButton("Cancel", null).setPositiveButton("Rebuild next launch", (dialog, which) -> {
+          new Thread(() -> {
+            try {
+              ContentFiles.locked(activity, () -> {
+                if (Files.isSymbolicLink(cache.toPath()) || !driverCaches(cache).contains(selected))
+                  throw new IOException("This driver cache is no longer available.");
+                Files.delete(selected.toPath());
+                return null;
+              });
+              activity.runOnUiThread(() -> status.setText("Driver cache cleared. It will be prepared on the next launch."));
+            } catch (Exception error) {
+              activity.runOnUiThread(() -> { if (!activity.isDestroyed()) SettingsHub.error(activity, error); });
+            }
+          }, "DriverCacheRepair").start();
+        }).show();
+  }
   static void show(Activity a) {
     LinearLayout body = FestivalUi.column(a);
     body.addView(FestivalUi.text(a,
@@ -78,6 +116,7 @@ final class GraphicsCache {
         File cache = root(a);
         File[] children = cache.listFiles();
         List<File> found = new ArrayList<>();
+        List<File> driverFiles = driverCaches(cache);
         List<Long> sizes = new ArrayList<>();
         if (children != null)
           for (File file : children)
@@ -91,6 +130,16 @@ final class GraphicsCache {
             return;
           status.setText(found.isEmpty() ? "No graphics cache has been created yet."
                                          : "Select only the cache you want to rebuild.");
+          if (!driverFiles.isEmpty()) FestivalUi.action(a, body, "Repair one driver cache", () -> {
+            String[] labels = new String[driverFiles.size()];
+            for (int index = 0; index < labels.length; index++) {
+              File result = driverFiles.get(index);
+              labels[index] = cache.toPath().relativize(result.toPath()) + " · "
+                  + android.text.format.Formatter.formatFileSize(a, result.length());
+            }
+            FestivalUi.choose(a, "Select a driver cache", labels, -1,
+                index -> repairDriverCache(a, cache, driverFiles.get(index), status));
+          });
           for (int i = 0; i < found.size(); i++) {
             File selected = found.get(i);
             long bytes = sizes.get(i);

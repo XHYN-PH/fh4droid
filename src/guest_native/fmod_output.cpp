@@ -95,6 +95,9 @@ static inline __attribute__((always_inline)) std::chrono::steady_clock::time_poi
 
 namespace pinyon_shift::guest_native {
 namespace {
+#if defined(__ANDROID__)
+std::atomic<bool> mobile_native_output_active{false};
+#endif
 
 constexpr bool kV4 = pinyon_shift::fh1::kTitleUpdateV4;
 
@@ -950,6 +953,9 @@ class FmodFrameSource final : public rex::audio::HostFrameSource {
   }
 
   void LogMode(const PendingEvent& event) {
+#if defined(__ANDROID__)
+    mobile_native_output_active.store(std::string_view(event.mode) == "native", std::memory_order_relaxed);
+#endif
     if (mode_events_ >= kMaxModeEvents) return;
     ++mode_events_;
     State& s = S();
@@ -1038,6 +1044,11 @@ const bool frame_source_registered = [] {
 }();
 
 }  // namespace
+#if defined(__ANDROID__)
+bool MobileNativeAudioOutputActive() {
+  return mobile_native_output_active.load(std::memory_order_relaxed);
+}
+#endif
 }  // namespace pinyon_shift::guest_native
 
 PINYON_GUEST_NATIVE(830B0A38, 83171D10, ::pinyon_shift::guest_native::get_state_replacement)

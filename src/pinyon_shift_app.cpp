@@ -1968,8 +1968,19 @@ void PinyonShiftApp::OnPostLaunchModule(rex::system::XThread* thread) {
       window(), [this] { OnWindowCloseRequested(); });
 }
 
+#if defined(__ANDROID__)
+extern "C" void rex_android_preparation_progress(uint64_t* values);
+#endif
+
 bool PinyonShiftApp::ShouldStartModuleThread() {
-#if !defined(__ANDROID__)
+#if defined(__ANDROID__)
+  uint64_t preparation[5]{};
+  rex_android_preparation_progress(preparation);
+  if (preparation[4] == 3) {
+    REXLOG_ERROR("Graphics preparation failed before gameplay");
+    return false;
+  }
+#else
   if (REXCVAR_GET(fh1_frame_inspector_replay)) return false;
 #endif
   // A frame replay drives the GPU on its own; the title stays suspended.

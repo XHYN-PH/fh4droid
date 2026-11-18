@@ -6,6 +6,7 @@
 #include <rex/perf/counter.h>
 #include <rex/ui/vulkan/android_gpu_driver.h>
 
+#include <array>
 #include <filesystem>
 #include <atomic>
 #include <fstream>
@@ -20,6 +21,13 @@
 extern "C" __attribute__((used, visibility("default")))
 const char fh4droid_native_bridge_abi[] = "fh4droid-native-bridge:r7-budget-controls-v1";
 extern "C" void rex_android_preparation_progress(uint64_t* values);
+namespace pinyon_shift::guest_native {
+bool MobileNativeAudioOutputActive();
+}
+extern "C" JNIEXPORT jboolean JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeAudioOutputActive(JNIEnv*, jclass) {
+  return pinyon_shift::guest_native::MobileNativeAudioOutputActive();
+}
 namespace {
 std::mutex bridge_mutex;
 std::atomic<int> coarse_shading_available{-1};
@@ -202,10 +210,23 @@ extern "C" JNIEXPORT jint JNICALL
 Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeCoarseShadingSupport(JNIEnv*,jclass){return coarse_shading_available.load(std::memory_order_acquire);}
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativePreparation(JNIEnv* env,jclass) {
-  uint64_t progress[4]{};rex_android_preparation_progress(progress);
-  jlong values[4];for(size_t i=0;i<4;i++)values[i]=jlong(progress[i]);
-  auto out=env->NewLongArray(4);if(out)env->SetLongArrayRegion(out,0,4,values);return out;
+  uint64_t progress[5]{};rex_android_preparation_progress(progress);
+  jlong values[5];for(size_t i=0;i<5;i++)values[i]=jlong(progress[i]);
+  auto out=env->NewLongArray(5);if(out)env->SetLongArrayRegion(out,0,5,values);return out;
 }
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeFrameHistory(JNIEnv* env, jclass) {
+  constexpr size_t kFrames = 360;
+  constexpr size_t kFields = rex::perf::kAndroidFrameHistoryFields;
+  std::array<int64_t, kFrames * kFields> history;
+  const size_t count = rex::perf::CopyAndroidFrameHistory(history.data(), kFrames);
+  std::array<jlong, kFrames * kFields> values;
+  for (size_t i = 0; i < count * kFields; ++i) values[i] = jlong(history[i]);
+  auto output = env->NewLongArray(jsize(count * kFields));
+  if (output) env->SetLongArrayRegion(output, 0, jsize(count * kFields), values.data());
+  return output;
+}
+
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativePerformance(JNIEnv *env,jclass) {
   const jlong values[] = {

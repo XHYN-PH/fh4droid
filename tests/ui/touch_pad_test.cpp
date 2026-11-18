@@ -308,6 +308,21 @@ int main() {
   Press(pad,26,"RS");auto rs=Find(pad,"RS");Access::Touch(pad,26,Action::kMove,rs.x+rs.radius*.8f,rs.y);CHECK(pad.State().thumb_rx>10000);Release(pad,26);
   pad.SetMenuContext(false);pad.SetPhoneSteering(0,false);
   CHECK(Has(pad,"RT")&&!Has(pad,"A")&&!Has(pad,"B")&&pad.State().buttons==0);
+
+  // The photo camera can be active even when the main view looks like driving.
+  { std::ofstream out(layout); out << "steering arrows\nright_mode 2\n"
+      "LB 0.07 0.20 0.075 1\nRB 0.93 0.20 0.075 1\nmap LB X\nmap RB Y\n"; }
+  pad.LoadLayout(layout);
+  Access::AgeAll(pad, 30);
+  pad.SetPhotoContext(true);
+  CHECK(pad.Visible() && Has(pad,"LS") && Has(pad,"RS") && Has(pad,"LT") && Has(pad,"RT"));
+  CHECK(Find(pad,"LB").opacity == 1.f && Find(pad,"RB").opacity == 1.f);
+  Press(pad, 1, "LB"); Press(pad, 2, "RB");
+  CHECK(pad.State().buttons == (rex::input::X_INPUT_GAMEPAD_LEFT_SHOULDER |
+                                rex::input::X_INPUT_GAMEPAD_RIGHT_SHOULDER));
+  pad.SetPhotoContext(false);
+  CHECK(!Has(pad,"LB") && !Has(pad,"RB") && Has(pad,"LEFT") && pad.State().buttons == 0);
+
   {std::ofstream out(layout);out<<"idle_seconds 0\nmap A Y\nmap Y A\nmap LS RT\n";}
   pad.LoadLayout(layout);Press(pad,10,"Y");CHECK(pad.State().buttons==rex::input::X_INPUT_GAMEPAD_Y);
   CHECK(pad.PressedControls()=="Y");Release(pad,10);

@@ -64,11 +64,6 @@ final class MobileSettings {
               + "the game. More workers can finish preparation sooner but compete "
               + "with gameplay.",
           "-1", "1", "2", "4"),
-      o("Performance", "vulkan_pipeline_prewarm_background", "Prepare shaders while playing",
-          "false", true,
-          "Off completes cached pipeline preparation before play. On reaches "
-              + "the title sooner but may cause early stutters.",
-          "false", "true"),
       o("Performance", "vulkan_aot_prewarm_threads", "Background preparation workers", "-1", true,
           "Automatic uses one worker on low-memory or four-core devices, two otherwise. Prepared free-roam pipelines run below normal priority, leaving title and audio work ahead of speculative preparation.", "-1", "1", "2", "4"),
       o("Performance", "host_present_fps_limit", "Additional display limit", "0", false,

@@ -12,7 +12,11 @@ final class SaveArchive {
     private static final int FILES=8192, DEPTH=64;
     private static final String V1="FH4Droid base-game saves v1\n", V2="FH4Droid base-game saves v2\n";
     // Installed Marketplace payloads are content, never save progress.
-    private static final String[] CONTENT={"4D5309C9/00000002","4D5309C9/Disabled/00000002","4D5309C9/Headers/00000002"};
+    private static final String[] CONTENT = {
+        "0000000000000000/4D5309C9/00000002", "0000000000000000/4D5309C9/Disabled/00000002",
+        "0000000000000000/4D5309C9/Headers/00000002",
+        "4D5309C9/00000002", "4D5309C9/Disabled/00000002", "4D5309C9/Headers/00000002"
+    };
     private static boolean contentPath(String relative){for(String path:CONTENT)if(relative.equalsIgnoreCase(path)||relative.toLowerCase(Locale.ROOT).startsWith(path.toLowerCase(Locale.ROOT)+"/"))return true;return false;}
     static final String NORMAL="user", MODDED="user-modded", BOTH="both";
     private static List<String> scopes(String scope)throws IOException{
@@ -152,6 +156,83 @@ final class SaveArchive {
                 try{switchRoots(state,stage,Collections.singletonList(NORMAL));}
                 catch(IOException error){File old=new File(stage,NORMAL);if(old.exists())move(old,backup);throw error;}
             }finally{File[] remaining=stage.listFiles();if(remaining!=null&&remaining.length==0)delete(stage);}
+        }
+    }
+    static final class Backup {
+        final File folder;
+        final String label;
+        final boolean nativeSlot;
+        Backup(File folder, String label, boolean nativeSlot) {
+            this.folder = folder;
+            this.label = label;
+            this.nativeSlot = nativeSlot;
+        }
+    }
+    private static boolean directory(File file) {
+        return Files.isDirectory(file.toPath(), LinkOption.NOFOLLOW_LINKS);
+    }
+    static List<Backup> backups(File state) {
+        List<Backup> result = new ArrayList<>();
+        File parent = new File(state, "backups");
+        if (!directory(parent)) return result;
+        File[] imports = parent.listFiles(file -> directory(file)
+            && file.getName().matches("android-import-[0-9]{13}(?:-[A-Za-z0-9-]+)?"));
+        if (imports != null) for (File folder : imports) {
+            result.add(new Backup(folder, "Before import or restore", false));
+        }
+        File nativeParent = new File(parent, "saves");
+        if (directory(nativeParent)) {
+            File[] slots = nativeParent.listFiles(file -> directory(file)
+                && file.getName().matches("[0-9]{8}T[0-9]{6}Z(?:-[A-Za-z0-9-]+)?")
+                && directory(new File(file, NORMAL)));
+            if (slots != null) for (File folder : slots) result.add(new Backup(folder, "Normal profile", true));
+        }
+        result.sort((a, b) -> Long.compare(b.folder.lastModified(), a.folder.lastModified()));
+        return result;
+    }
+    private static Backup checkedBackup(File state, Backup selected) throws IOException {
+        for (Backup backup : backups(state)) if (backup.folder.equals(selected.folder)) return backup;
+        throw new IOException("This backup is no longer available.");
+    }
+    static void exportBackup(File state, Backup selected, OutputStream output) throws IOException {
+        Backup backup = checkedBackup(state, selected);
+        if (backup.nativeSlot) {
+            export(new File(backup.folder, NORMAL), output);
+        } else {
+            File payload = new File(backup.folder, "payload");
+            if (directory(payload)) exportState(payload, BOTH, output);
+            else if (!new File(backup.folder, "roots.txt").exists()) export(backup.folder, output);
+            else throw new IOException("The backup has no save data.");
+        }
+    }
+    static void restoreBackup(File state, Backup selected) throws IOException {
+        Path archive = Files.createTempFile(state.toPath(), "backup-restore-", ".zip");
+        try {
+            try (OutputStream output = Files.newOutputStream(archive)) { exportBackup(state, selected, output); }
+            try (InputStream input = Files.newInputStream(archive)) { importInto(state, input); }
+        } finally {
+            Files.deleteIfExists(archive);
+        }
+    }
+    static void deleteBackup(File state, Backup selected) throws IOException {
+        Backup backup = checkedBackup(state, selected);
+        // A pending native restore still needs the selected slot.
+        if (backup.nativeSlot && new File(backup.folder.getParentFile(), "restore-pending.txt").exists()) {
+            throw new IOException("Finish or cancel the queued restore first.");
+        }
+        delete(backup.folder);
+    }
+    static synchronized void resetProfiles(File state, String scope) throws IOException {
+        List<String> roots = scopes(scope);
+        if (roots.stream().noneMatch(name -> directory(new File(state, name)))) {
+            throw new IOException("No saves found in the selected profiles.");
+        }
+        File stage = Files.createTempDirectory(state.toPath(), "save-reset-").toFile();
+        try {
+            FileOperation.check();
+            switchRoots(state, stage, roots);
+        } finally {
+            delete(stage);
         }
     }
     static void delete(File file)throws IOException{

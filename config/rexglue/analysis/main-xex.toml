@@ -1022,6 +1022,13 @@ address = 0x8284EF94
 name = "PinyonShiftCameraFieldOfView"
 registers = ["f1"]
 
+# The photo camera's movement update also runs when the view looks like a
+# gameplay projection. Observe it independently of widescreen switching.
+[[midasm_hook]]
+address = 0x8285BFE0
+name = "PinyonShiftObservePhotoCamera"
+registers = []
+
 # #443: sub_82857B00 updates one camera physics layer (r31) each
 # frame: it stores the layer's input through its curve and noise at
 # [r1+96], then multiplies the layer's Param by it. The immersive camera

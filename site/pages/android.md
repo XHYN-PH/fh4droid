@@ -30,7 +30,7 @@ Reports refresh live state every five seconds and on pause/view changes, priorit
 
 The app uses fixed landscape orientation for the launcher, local import, touch editor, driver probe and game. SDL window requests retain the landscape lock.
 
-The launcher uses the approved B dashboard: Play on the left, with Settings, Controls, Game files and More in a two-by-two grid on the right. The supplied transparent logo and road background stay in place. Play uses an ivory card; the focused action has a pink outline. On narrow landscape screens or with larger text, Play stacks above that grid. Directional controller movement follows the visible card positions. Local profile is in the header. More opens a six-card management grid for Mods & DLC, Graphics drivers, Save backups, Achievements, Problem reports and About. Cheats remain available in the Mods tab of Mods & DLC.
+The launcher uses the approved B dashboard: Play on the left, with Settings, Controls, Game files and More in a two-by-two grid on the right. The supplied transparent logo and road background stay in place. Play uses an ivory card; the focused action has a pink outline. On narrow landscape screens or with larger text, Play stacks above that grid. Directional controller movement follows the visible card positions. LB and RB cycle settings, content and achievement tabs. Local profile is in the header. More opens a six-card management grid for Mods & DLC, Graphics drivers, Save backups, Achievements, Problem reports and About. Cheats remain available in the Mods tab of Mods & DLC.
 
 Settings, controls, files and profile open matching category pages. Detailed settings, imports, backups and driver choices use the same dark surfaces, thin icons and pink focus feedback. Back returns through open tools to their category and restores scroll and focus. The footer retains plain YouTube, Telegram and GitHub links, controller hints and the installed package version/build. Large text uses a two-column management grid and a two-line footer on compact screens.
 
@@ -46,9 +46,11 @@ Graphics cache management lists only recognized shader and raster caches, and re
 
 ## Game files
 
-Use Game files → Choose game ISO or Choose extracted game folder, with the player's own supported USA base-game dump. The ISO stays in place with persistent document permission and a seekable descriptor held by the game process. The game mounts the SDK's read-only disc-image device. Only executables and host UI/audio support files (about 100 MB, allow 150 MB free) are copied locally. Keep the ISO accessible while playing. The bounded Java inspector and native reader reject truncated directories and cycles.
+Use Game files with your own supported USA base-game dump. **Choose game ISO** keeps a seekable disc image in place with persistent document permission. The game mounts the SDK's read-only disc-image device. Only executables and host UI/audio support files (about 100 MB, allow 150 MB free) are copied locally. Keep the ISO accessible while playing. The bounded Java inspector and native reader reject truncated directories and cycles.
 
-Folder import compares all catalogued paths and sizes, verifies the executables before replacing an installation, verifies SHA-256 on copied/resumed files and checks space for the files still needing a copy. A partial import remains marked incomplete. Check installed game files performs a complete content check; it can take several minutes.
+Choose **Use extracted folder in place** for a local folder Android lets the runtime read directly. The app checks the supported files and keeps permission across restarts. If the provider only grants access through its file picker, choose **Copy extracted folder**. The app copies the catalogued files and resumes completed copies after an interruption.
+
+The installation status card shows the current file, byte progress and phase when copying or checking files. **Check collision sound files** verifies only the collision and glass banks. Storage lists local game files, DLC, mods, graphics caches, saves and backups. ISO and linked source data stay at their selected locations.
 
 Import/check screens show current-file progress and offer cooperative cancellation between reads. Completed files are kept; choose the same source folder to resume a stopped copy. Successful folder copies clear the previous ISO selection only after the copy finishes. Cancellation may wait for a file-provider read to return. In ISO mode, the existing content check covers the disc image; it does not also check the locally cached support files.
 
@@ -70,7 +72,7 @@ The DLC tab accepts original Marketplace packages, folders and ZIPs nested at mo
 
 Content discovery runs on a worker and preserves the open detail page, scroll and focus after changes. Invalid options do not hide mod recovery. Durable publication journals recover interrupted mod/DLC/Rally changes before import or Play. Space checks cover expansion/staging, and unknown-size copies check free space while reading. Picker names remain readable in import results.
 
-The Shaders tab imports a compatible prepared `.xpso` pipeline list from the player's files. Preparation can run before play or during the title screen. Import checks structure and version; the renderer validates shader hashes. It cannot eliminate all shader-compilation pauses. A small in-game status shows actual cached-pipeline preparation counts; reports retain failures/cancellation. Automatic shader concurrency uses one worker on low-memory/four-core devices and up to two otherwise. Background preparation retains its lower priority.
+The Shaders tab imports a compatible `.xpso` pipeline list prepared from the player's files. Android translates the available shaders, builds stored and imported pipelines, and saves the driver cache before starting the game. The startup screen shows the number of pipelines prepared. A failed preparation returns the player to the launcher for driver or cache recovery. New scenes can still introduce pipelines the installed lists and cache have never seen. The Graphics cache page can rebuild a single driver blob while retaining the imported pipeline list and other driver caches.
 
 The game menu opens upstream's achievement screen with categories, counted progress, nearest unlocks, tracking and notifications. The launcher keeps its offline summary. Live chase-camera controls and the 80–200% global FOV setting are in Settings. Graceful Quit to launcher requests the upstream shutdown path. None of these features supplies Xbox LIVE service access.
 
@@ -98,7 +100,9 @@ The editor canvas fills the window. Edit offers gridlines, optional snapping and
 
 New layouts start with the compact Modern racing preset. Existing layouts keep their saved positions and visibility. Apply Modern racing, Full controller or a handed preset explicitly to replace positions. Steering has Arrows and Stick choices; floating, fixed and invisible modes remain available for each stick. The optional manual group shows clutch and both gear controls together.
 
-**Steering: Arrows / Stick** is available both in Touch settings and the editor. Switching preserves positions for both. The left and right sticks each offer floating, fixed and invisible modes. Invisible sticks use the corresponding lower screen region; visible buttons take priority. The independent D-pad and look stick remain available. Older layouts retain their positions, including the hotfix's separate D-pad and steering controls.
+**Steering: Arrows / Stick** is available both in Touch settings and the editor. Switching preserves positions for both. The left and right sticks each offer floating, fixed and invisible modes. The invisible look stick uses the right half of the safe screen area, with visible buttons taking priority. The independent D-pad and look stick remain available. Older layouts retain their positions, including the hotfix's separate D-pad and steering controls.
+
+The base game's photo camera shows LB, RB and both sticks at their saved positions, even if they are hidden, set to invisible or faded out while driving. Photo controls use their original button bindings. Returning to driving restores the saved layout.
 
 Local named layouts, left/right-handed templates, compact driving and full-controller templates help configure the pad. Full controller selects stick steering and Xbox labels; driving templates use arrows and racing artwork. Switching between driving and controller styles remembers each style separately. Layout document import/export is not provided.
 
@@ -124,9 +128,13 @@ The selected-driver probe exposes BC and fragment-shading-rate availability. Coa
 
 ## Saves
 
-Saves exports Normal, Modded or Both base-game save trees. Imports validate the entire archive in staging, reject path escapes/duplicates and retain selected previous trees before replacement. Multi-tree failures roll back and Restore keeps the current trees so the operation is reversible. Installed DLC payloads, disabled packages and licence headers are excluded from exports and preserved during import/restore. Older archives containing DLC are rejected before save replacement; re-export saves with this version. Legacy normal-only save archives remain readable. Quit the game before save management. The page shows backup status and configured profile selection. Base-game and TU4 saves are incompatible; guided Xenia import refuses detected TU4 data for this APK.
+Saves exports Normal, Modded or Both base-game save trees. Manage backups lets the player export, restore, or delete an individual backup while the game is closed. Reset selected save type keeps a rollback backup and retains installed DLC. Imports validate the entire archive in staging, reject path escapes/duplicates and retain selected previous trees before replacement. Multi-tree failures roll back and Restore keeps the current trees so the operation is reversible. Installed DLC payloads, disabled packages and licence headers are excluded from exports and preserved during import/restore. Older archives containing DLC are rejected before save replacement; re-export saves with this version. Legacy normal-only save archives remain readable. Quit the game before save management. The page shows backup status and configured profile selection. Base-game and TU4 saves are incompatible; guided Xenia import refuses detected TU4 data for this APK.
 
 ## Reports and recovery
+
+**Settings → Audio → 0.5.1-style audio** uses the guest XAudio2 output, original FMOD mixer and EQ, inline XMA decoding, and per-frame audio updates on the next launch. The current decoder and Android output driver still provide their fixes. The switch lets the same phone compare current audio with the major game-side audio settings from Pinyon Shift 0.5.1.
+
+**In-game menu → Diagnostics → Capture a problem** saves recent frame times, audio counters, page recoveries and active settings. Capturing a white car or blank tile also tries to save the visible game frame. Export a problem report to include these captures. Diagnostic launches record opens of the collision, glass and festival audio banks.
 
 Settings → Advanced → Record a performance comparison launches a session with bounded native CSV logging. Drive the same route for each configuration, then use More → Diagnostics / Reports (or the in-game action). Normal play keeps detailed profiling off.
 

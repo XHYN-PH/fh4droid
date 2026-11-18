@@ -73,6 +73,25 @@ public final class ProfileArchiveTest {
             SaveArchive.importInto(state,new ByteArrayInputStream(small));check(Files.size(dlc)==600L*1024*1024&&Files.readAllBytes(disabled)[0]==17&&Files.readAllBytes(header)[0]==42,"save import retains active, disabled and licensed DLC");
             SaveArchive.restore(state);check(Files.size(dlc)==600L*1024*1024&&Files.readAllBytes(header)[0]==42,"save restore retains installed DLC");
             boolean legacyDlc=false;try{SaveArchive.importInto(state,new ByteArrayInputStream(archive("FH4Droid base-game saves v2\n","user/profile/save","user/4D5309C9/00000002/old/data")));}catch(IOException expected){legacyDlc=true;}check(legacyDlc&&Files.size(dlc)==600L*1024*1024,"old archives containing packages cannot overwrite installed DLC");
+
+            File installed = temp.resolve("installed-content-state").toFile();
+            put(installed, SaveArchive.NORMAL, "normal");
+            put(installed, SaveArchive.MODDED, "modded");
+            Path packagePath = installed.toPath().resolve("user/" + DlcStore.TITLE + "/00000002/example/payload");
+            Files.createDirectories(packagePath.getParent());
+            try (RandomAccessFile large = new RandomAccessFile(packagePath.toFile(), "rw")) {
+                large.setLength(600L * 1024 * 1024);
+            }
+            check(export(installed, SaveArchive.BOTH).length < 10000, "current DLC path stays outside both-profile exports");
+            SaveArchive.resetProfiles(installed, SaveArchive.NORMAL);
+            check(!new File(installed, "user/profile/save").exists() && get(installed, SaveArchive.MODDED).equals("modded")
+                    && Files.size(packagePath) == 600L * 1024 * 1024, "normal reset preserves DLC and modded progress");
+            SaveArchive.Backup backup = SaveArchive.backups(installed).get(0);
+            SaveArchive.restoreBackup(installed, backup);
+            check(get(installed, SaveArchive.NORMAL).equals("normal") && get(installed, SaveArchive.MODDED).equals("modded")
+                    && Files.size(packagePath) == 600L * 1024 * 1024, "restore a selected reset backup without replacing DLC");
+            SaveArchive.deleteBackup(installed, backup);
+            check(!backup.folder.exists() && get(installed, SaveArchive.NORMAL).equals("normal"), "backup deletion keeps live progress");
             System.out.println("PASS: "+checks+" profile identity and scoped save archive checks");
         }finally{SaveArchive.delete(temp.toFile());}
     }

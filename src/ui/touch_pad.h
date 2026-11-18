@@ -50,6 +50,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
   void LoadLayout(const std::filesystem::path& path);
   void SetPhysicalController(bool connected);
   void SetMenuContext(bool menu);
+  void SetPhotoContext(bool photo);
   bool MenuContext() const;
   // Refresh before drawing as well as on input, so the first frame uses the
   // same safe area as the fullscreen editor.
@@ -134,8 +135,10 @@ class TouchPad final : public rex::ui::WindowInputListener {
   float Radius(const Layout& control, float width, float height) const;
   void Place(const Layout& control, float width, float height, float& x, float& y) const;
   Control Hit(float x, float y, float width, float height) const;
-  bool Enabled(Control control) const;
-  static bool MenuControl(Control control);
+  void SetContext(bool& context, bool enabled);
+  bool UsesMenuControls() const { return menu_context_ || photo_context_; }
+  bool Available(size_t index, Control control) const;
+  bool Shown(size_t index, Control control) const;
   static bool IsDpad(Control control);
   float Alpha(size_t index) const;
   // Event adapter and tests share the same state transitions; mutex_ is held.
@@ -149,6 +152,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
   float safe_left_ = 0.0f, safe_top_ = 0.0f, safe_right_ = 0.0f, safe_bottom_ = 0.0f;
   bool suspended_ = false;
   bool menu_context_ = false;
+  bool photo_context_ = false;
   std::chrono::steady_clock::time_point last_touch_{};
   std::function<void()> changed_;
 };

@@ -21,6 +21,7 @@ final class PerformancePolicy {
         return g == 0 ? h : h == 0 ? g : Math.min(g, h);
     }
     private static float rate(String text) {
+        if (text == null) return 0;
         try { float n = Float.parseFloat(text); return Float.isFinite(n) ? Math.max(0, Math.min(240, n)) : 0; }
         catch (NumberFormatException error) { return 0; }
     }

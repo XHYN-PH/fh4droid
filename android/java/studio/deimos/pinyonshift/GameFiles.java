@@ -1,6 +1,10 @@
 package studio.deimos.pinyonshift;
 import android.app.ActivityManager;
 import android.content.Context;
+import android.net.Uri;
+import android.os.storage.StorageManager;
+import android.os.storage.StorageVolume;
+import android.provider.DocumentsContract;
 import java.io.*;
 import java.util.*;
 import org.json.*;
@@ -19,8 +23,46 @@ final class GameFiles {
         if(processes!=null)for(ActivityManager.RunningAppProcessInfo p:processes)if(p.processName.equals(c.getPackageName()+":game"))return true;
         return false;
     }
-    static boolean ready(Context c){
-        File base=MobileConfig.base(c);return new File(base,"game/base/default.xex").isFile()&&!new File(base,"game/.copy-incomplete").exists();
+    static final String LINKED_FOLDER = "linked_game_folder";
+    static boolean linked(Context context) {
+        return !context.getSharedPreferences("mobile", 0).getString(LINKED_FOLDER, "").isEmpty();
+    }
+    static File root(Context context) throws IOException {
+        String folder = context.getSharedPreferences("mobile", 0).getString(LINKED_FOLDER, "");
+        if (folder.isEmpty()) return new File(MobileConfig.base(context), "game/base");
+        Uri tree = Uri.parse(folder);
+        boolean permitted = context.getContentResolver().getPersistedUriPermissions().stream()
+            .anyMatch(permission -> permission.isReadPermission() && tree.equals(permission.getUri()));
+        if (!permitted) throw new IOException("Access to the linked folder expired. Choose it again in Game files.");
+        return directFolder(context, tree);
+    }
+    static File directFolder(Context context, Uri tree) throws IOException {
+        if (!"com.android.externalstorage.documents".equals(tree.getAuthority())
+                || !DocumentsContract.isTreeUri(tree)) {
+            throw new IOException("This provider needs a copy. Choose Copy extracted folder instead.");
+        }
+        String[] id = DocumentsContract.getTreeDocumentId(tree).split(":", 2);
+        if (id.length != 2 || id[1].isEmpty() || id[1].startsWith("/")) {
+            throw new IOException("Choose the folder containing default.xex.");
+        }
+        StorageManager storage = context.getSystemService(StorageManager.class);
+        if (storage == null) throw new IOException("Local storage is unavailable.");
+        for (StorageVolume volume : storage.getStorageVolumes()) {
+            String identifier = volume.isPrimary() ? "primary" : volume.getUuid();
+            File directory = volume.getDirectory();
+            if (directory == null || !id[0].equalsIgnoreCase(identifier)) continue;
+            File volumeRoot = directory.getCanonicalFile();
+            File folder = new File(volumeRoot, id[1]).getCanonicalFile();
+            if (folder.toPath().startsWith(volumeRoot.toPath()) && !folder.equals(volumeRoot)
+                    && folder.isDirectory() && folder.canRead() && folder.canExecute()) return folder;
+        }
+        throw new IOException("Android cannot read this folder directly. Choose Copy extracted folder instead.");
+    }
+    static boolean ready(Context context) {
+        try {
+            return new File(root(context), "default.xex").isFile() &&
+                (linked(context) || !new File(MobileConfig.base(context), "game/.copy-incomplete").exists());
+        } catch (IOException | SecurityException error) { return false; }
     }
     static final class Expected {
         final String path,hash;final long size;
@@ -39,30 +81,74 @@ final class GameFiles {
         try{java.security.MessageDigest d=java.security.MessageDigest.getInstance("SHA-256");byte[] b=new byte[65536];for(int n;(n=in.read(b))!=-1;)d.update(b,0,n);return DiscImage.hex(d.digest());}
         catch(java.security.NoSuchAlgorithmException e){throw new AssertionError(e);}
     }
-    static void verifyComplete(Context c)throws IOException{
-        String uri=c.getSharedPreferences("mobile",0).getString("iso_uri","");
-        if(!uri.isEmpty()){
-            try(android.os.ParcelFileDescriptor fd=c.getContentResolver().openFileDescriptor(android.net.Uri.parse(uri),"r")){
-                if(fd==null)throw new IOException("The ISO is unavailable.");
-                try(FileInputStream in=new FileInputStream(fd.getFileDescriptor())){DiscImage disc=new DiscImage(in.getChannel());
-                    for(Expected e:catalog(c).values())if(!disc.hash(e.path).equalsIgnoreCase(e.hash))throw new IOException("Missing or damaged "+e.path);}
+    static void verifyComplete(Context context) throws IOException {
+        verifyCatalog(context, catalog(context).values());
+    }
+    static void verifyCollisionAudio(Context context) throws IOException {
+        List<Expected> files = new ArrayList<>();
+        for (Expected expected : catalog(context).values()) {
+            if (expected.path.startsWith("media/audio/collisions/")) files.add(expected);
+        }
+        if (files.isEmpty()) throw new IOException("The collision audio catalog is unavailable.");
+        verifyCatalog(context, files);
+    }
+    private static void verifyCatalog(Context context, Collection<Expected> files) throws IOException {
+        String uri = context.getSharedPreferences("mobile", 0).getString("iso_uri", "");
+        if (uri.isEmpty()) {
+            verifyFolder(root(context), files);
+            return;
+        }
+        try (android.os.ParcelFileDescriptor fd = context.getContentResolver().openFileDescriptor(Uri.parse(uri), "r")) {
+            if (fd == null) throw new IOException("The ISO is unavailable.");
+            try (FileInputStream input = new FileInputStream(fd.getFileDescriptor())) {
+                DiscImage disc = new DiscImage(input.getChannel());
+                verifyFiles(files, expected -> disc.hash(expected.path));
             }
-        }else for(Expected e:catalog(c).values()){
-            File f=new File(MobileConfig.base(c),"game/base/"+e.path);
-            if(!f.isFile()||f.length()!=e.size||!DiscImage.hash(f).equals(e.hash))throw new IOException("Missing or damaged "+e.path+". Import the folder again to repair it.");
         }
     }
+    static void verifyFolder(File folder, Collection<Expected> files) throws IOException {
+        File canonical = folder.getCanonicalFile();
+        verifyFiles(files, expected -> {
+            File file = new File(canonical, expected.path);
+            if (!file.getCanonicalFile().equals(file) || !file.isFile() || file.length() != expected.size) {
+                throw new IOException("Missing or damaged " + expected.path + ". Check the selected folder.");
+            }
+            return DiscImage.hash(file);
+        });
+    }
+    private interface HashFile { String hash(Expected expected) throws IOException; }
+    private static void verifyFiles(Collection<Expected> files, HashFile hash) throws IOException {
+        long total = 0;
+        for (Expected expected : files) total += expected.size;
+        long complete = 0;
+        int number = 0;
+        try {
+            for (Expected expected : files) {
+                String title = "Checking " + (++number) + " / " + files.size() + " · " + expected.path;
+                FileOperation.segment(title, complete, total);
+                FileOperation.progress(title, 0, expected.size);
+                if (!hash.hash(expected).equalsIgnoreCase(expected.hash)) {
+                    throw new IOException("Missing or damaged " + expected.path + ". Check the source files.");
+                }
+                complete += expected.size;
+            }
+        } finally {
+            FileOperation.clearSegment();
+        }
+        FileOperation.check();
+    }
     static void verify(Context c)throws IOException{
-        File base=MobileConfig.base(c);if(new File(base,"game/.copy-incomplete").exists())throw new IOException("Game import is incomplete. Resume it in Game files.");
+        File game=root(c);
+        if(!linked(c)&&new File(MobileConfig.base(c),"game/.copy-incomplete").exists())throw new IOException("Game import is incomplete. Resume it in Game files.");
         for(Map.Entry<String,String> entry:EXECUTABLES.entrySet()){
-            File file=new File(base,"game/base/"+entry.getKey());
+            File file=new File(game,entry.getKey());
             if(!file.isFile())throw new IOException("Missing "+entry.getKey()+". Import your complete game.");
             if(!DiscImage.hash(file).equals(entry.getValue()))throw new IOException("Unsupported or damaged "+entry.getKey()+". This build uses the supported base-game disc.");
         }
         String iso=c.getSharedPreferences("mobile",0).getString("iso_uri","");
         if(iso.isEmpty()){
             for(String path:new String[]{"media/db/gamedb.slt","media/gamemodes.zip","media/ui/Fonts.zip"}){
-                Expected expected=catalog(c).get(path.toLowerCase(Locale.ROOT));File file=new File(base,"game/base/"+path);
+                Expected expected=catalog(c).get(path.toLowerCase(Locale.ROOT));File file=new File(game,path);
                 if(!file.isFile()||file.length()!=expected.size)throw new IOException("Missing or incomplete "+path+". Import the complete game folder.");
             }
         }else{

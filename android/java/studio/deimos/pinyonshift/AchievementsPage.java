@@ -53,7 +53,29 @@ final class AchievementsPage {
       search.setSingleLine(true);
       LinearLayout toolbar=new LinearLayout(a);toolbar.setGravity(android.view.Gravity.CENTER_VERTICAL);body.addView(toolbar);
       int[] mode={0},page={0};Runnable[] update={null};
-      for(int i=0;i<3;i++){final int selected=i;Button filter=FestivalUi.button(a,new String[]{"All","Unlocked","Locked"}[i],false);filter.setTextSize(12);toolbar.addView(filter);filter.setOnClickListener(v->{mode[0]=selected;page[0]=0;update[0].run();});}
+      Button[] filters = new Button[3];
+      java.util.function.IntConsumer setFilter = selected -> {
+        mode[0] = selected;
+        page[0] = 0;
+        for (int index = 0; index < filters.length; index++) filters[index].setSelected(index == selected);
+        update[0].run();
+      };
+      String[] filterNames = {"All", "Unlocked", "Locked"};
+      for (int i = 0; i < filters.length; i++) {
+        final int selected = i;
+        Button filter = FestivalUi.button(a, filterNames[i], false);
+        filters[i] = filter;
+        filter.setTextSize(12);
+        filter.setSelected(i == 0);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
+        params.rightMargin = FestivalUi.dp(a, 6);
+        toolbar.addView(filter, params);
+        filter.setOnClickListener(view -> setFilter.accept(selected));
+      }
+      ControllerPrompts.tabs(body, direction -> {
+        setFilter.accept(Math.floorMod(mode[0] + direction, filters.length));
+        filters[mode[0]].requestFocus();
+      });
       search.setTextSize(12);toolbar.addView(search,new LinearLayout.LayoutParams(0,-2,1));
       LinearLayout paging=new LinearLayout(a);paging.setGravity(android.view.Gravity.RIGHT|android.view.Gravity.CENTER_VERTICAL);body.addView(paging);
       Button previous=FestivalUi.button(a,"Previous",false),next=FestivalUi.button(a,"Next",false);paging.addView(previous);TextView count=FestivalUi.text(a,"",12,FestivalUi.TEXT);paging.addView(count);paging.addView(next);

@@ -51,6 +51,9 @@
 #include "pinyon_shift_diagnostics.h"
 #include "head_tracking/head_tracking.h"
 #include "ui/view_policy.h"
+#if defined(__ANDROID__)
+#include "ui/touch_pad.h"
+#endif
 #include "fh1_guest_address.h"
 #include "camera_tuning.h"
 #include "platform/host_platform.h"
@@ -8151,15 +8154,34 @@ namespace {
 std::atomic<uint64_t> g_title_frames{0};
 std::atomic<uint64_t> g_map_view_frame{0};
 std::atomic<uint64_t> g_game_view_frame{0};
+#if defined(__ANDROID__)
+std::atomic<uint64_t> g_photo_camera_frame{0};
+#endif
 std::atomic<bool> g_narrow_view{false};
 std::mutex g_map_view_mutex;
 std::function<void(bool)> g_map_view_callback;
 
 }  // namespace
 
+void PinyonShiftObservePhotoCamera() {
+#if defined(__ANDROID__)
+  g_photo_camera_frame.store(g_title_frames.load(std::memory_order_relaxed),
+                             std::memory_order_relaxed);
+#endif
+}
+
 static void UpdateMapView() {
   static pinyon_shift::ui::ViewPolicy policy;
   const uint64_t frame=g_title_frames.fetch_add(1,std::memory_order_relaxed)+1;
+#if defined(__ANDROID__)
+  const uint64_t photo = g_photo_camera_frame.load(std::memory_order_relaxed);
+  const bool photo_recent = photo != 0 && frame - photo <= 3;
+  static bool photo_controls = false;
+  if (photo_recent != photo_controls) {
+    photo_controls = photo_recent;
+    pinyon_shift::ui::TouchPad::Get().SetPhotoContext(photo_controls);
+  }
+#endif
   const uint64_t map=g_map_view_frame.load(std::memory_order_relaxed);
   const uint64_t game=g_game_view_frame.load(std::memory_order_relaxed);
   const bool game_recent=game!=0 && frame-game<=2;

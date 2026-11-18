@@ -96,6 +96,14 @@ final class SettingsHub {
     };
     for(String section:PAGES){Button button=FestivalUi.button(a,section,false);button.setCompoundDrawables(null,null,null,null);button.setTextSize(12);button.setPadding(0,0,0,0);button.setMinHeight(0);button.setMinimumHeight(0);LinearLayout.LayoutParams tab=new LinearLayout.LayoutParams(0,-1,1);tab.rightMargin=FestivalUi.dp(a,6);tabs.addView(button,tab);button.setOnClickListener(v->select.accept(section));buttons.put(section,button);}
     LinearLayout header=new LinearLayout(a);root.setTag(FestivalUi.HEADER_ACTIONS,header);Button search=FestivalUi.button(a,"Search / favourites",false);header.addView(search,new LinearLayout.LayoutParams(-2,FestivalUi.dp(a,32)));search.setTextSize(11);search.setMinHeight(0);search.setMinimumHeight(0);search.setOnClickListener(v->select.accept("All settings"));Button reset=FestivalUi.button(a,"Reset / undo",false);LinearLayout.LayoutParams resetParams=new LinearLayout.LayoutParams(-2,FestivalUi.dp(a,32));resetParams.leftMargin=FestivalUi.dp(a,8);header.addView(reset,resetParams);reset.setTextSize(11);reset.setMinHeight(0);reset.setMinimumHeight(0);reset.setOnClickListener(v->{PopupMenu popup=new PopupMenu(a,reset);popup.getMenu().add("Reset this section").setOnMenuItemClickListener(i->{resetSection(a,selected[0],runtime,()->FestivalUi.refreshTree(root));return true;});popup.getMenu().add("Undo last change").setOnMenuItemClickListener(i->{undo(a,runtime);FestivalUi.refreshTree(root);return true;});popup.show();});
+    ControllerPrompts.tabs(root, direction -> {
+      String section = selected[0];
+      if (Arrays.asList("Touch", "Phone", "Controller").contains(section)) section = "Controls";
+      int current = Arrays.asList(PAGES).indexOf(section);
+      String next = PAGES[Math.floorMod(current < 0 ? (direction > 0 ? 0 : -1) : current + direction, PAGES.length)];
+      select.accept(next);
+      buttons.get(next).requestFocus();
+    });
     select.accept(first);return root;
   }
   private static void bindDetails(View view,TextView title,TextView help,TextView value){
@@ -350,6 +358,15 @@ final class SettingsHub {
   private static void extras(
       Activity a, LinearLayout rows, String page, MobileSettings.Runtime runtime, Runnable editor,
       Runnable resolutionDetails) {
+    if (page.equals("Audio")) {
+      FestivalUi.toggle(a, rows, "0.5.1-style audio · next launch",
+          "Compare the original XAudio2 output and mixer with current audio. Applies after restarting the game.",
+          () -> a.getSharedPreferences("mobile", 0).getBoolean("audio_compatibility", false),
+          on -> {
+            a.getSharedPreferences("mobile", 0).edit().putBoolean("audio_compatibility", on).apply();
+            UiPreferences.save(a);
+          });
+    }
     if(page.equals("Audio"))FestivalUi.action(a,rows,"Use my music player",()->new AlertDialog.Builder(a).setTitle("Use external music?").setMessage("Turn off the game radio and menu music at the next launch, keeping engine, tyres and effects. This app does not request exclusive Android audio focus. Start your music player normally.").setNegativeButton("Cancel",null).setPositiveButton("Turn game music off",(d,w)->apply(a,runtime,Collections.singletonMap("pinyon_shift_mix_music","0"),true)).show());
     if (page.equals("Graphics")) {
       SettingRow resolution=new SettingRow(a,"Render resolution");resolution.setTag("fh1_render_scale_percent");rows.addView(resolution,new LinearLayout.LayoutParams(-1,FestivalUi.dp(a,44)));

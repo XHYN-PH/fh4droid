@@ -99,7 +99,7 @@ public final class TouchEditorActivity extends Activity {
             FestivalUi.action(this,body,"Left-handed racing preset",()->{TouchLayout left=new TouchLayout();left.modernDefaults(this);for(float[] value:left.values)value[0]=1-value[0];chooseLayout(left);});
             String[] modes={"Floating","Fixed","Invisible"};
             FestivalUi.action(this,body,"Left stick: "+modes[layout.leftMode],()->FestivalUi.choose(this,"Left stick",modes,layout.leftMode,n->{layout.leftMode=n;buildProperties();changed();}));
-            FestivalUi.action(this,body,"Look stick: "+modes[layout.rightMode],()->FestivalUi.choose(this,"Look stick",modes,layout.rightMode,n->{layout.rightMode=n;buildProperties();changed();}));
+            FestivalUi.action(this,body,"Look stick: "+modes[layout.rightMode],()->FestivalUi.choose(this,"Look stick",new String[]{"Floating", "Fixed", "Invisible · right half"},layout.rightMode,n->{layout.rightMode=n;buildProperties();changed();}));
         }else if(page==2){
             FestivalUi.action(this,body,"Steering: "+(layout.steering.equals("arrows")?"Arrows":"Stick"),()->FestivalUi.choose(this,"Steering",new String[]{"Arrows","Stick"},layout.steering.equals("arrows")?0:1,n->{layout.steering=n==0?"arrows":"stick";buildProperties();changed();}));
             FestivalUi.action(this,body,"Arrow response: "+layout.steeringResponseMs+" ms",()->FestivalUi.choose(this,"Arrow response",new String[]{"Immediate","Gentle · 120 ms","Smooth · 240 ms"},Arrays.asList(0,120,240).indexOf(layout.steeringResponseMs),n->{layout.steeringResponseMs=new int[]{0,120,240}[n];buildProperties();changed();}));

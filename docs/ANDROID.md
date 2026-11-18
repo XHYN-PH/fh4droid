@@ -8,6 +8,12 @@ The current minimum is Android 13/API 33 with an ARMv8.2-A CPU. Vulkan 1.1/1.2, 
 
 The developer build instructions and historical measurements below are inherited from upstream. Current FH4Droid source uses local ISO/folder import; its PC discovery, pairing, Wi-Fi transfer and network app-update client have been removed. Its private-build distribution policy describes upstream Pinyon Shift; this fork's prebuilt APK release is separate and contains compiled game translations. Raw game files, generated source, native build products and signing keys remain excluded from the source repository.
 
+## Android comparison runs
+
+The Android experiment planner at `tools/android-performance-suite.py` includes matched free-roam, race, showroom and impact routes. Capture cold and warm starts, compare 30, 40 and 60 FPS at the same display refresh, then repeat sustained driving for 15 minutes. Storage, GPU pass timing, thread waits, paint and audio each have their own trial settings. Compare the 95th and 99th percentile frame times before choosing a change. Measured scale trials can suggest a smaller scene scale for the next launch. Live scale changes need separate qualification because rebuilding the Android raster path can interrupt play.
+
+The **0.5.1-style audio** switch compares the older game-side audio configuration with the current one. Both use the current SDK and Android audio driver. The 0.5.1 SDK already configured 48 kHz stereo output on Android. The newer game-side settings include native FMOD output, forced stereo inside FMOD, native EQ, worker XMA decoding, and a lower update cadence at higher frame rates. Compare one setting at a time after reproducing an audible difference. [Pinyon Shift 0.5.1](releases/0.5.1.md)
+
 ## Upstream Android status
 
 **Status: alpha, for developers.** The game builds for Android, installs and

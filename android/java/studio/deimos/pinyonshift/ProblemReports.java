@@ -51,7 +51,10 @@ final class ProblemReports {
             long budget=16L*1024*1024;int count=0;
             for(File file:files){
                 if(count>=18||budget<=0)break;int limit=(int)Math.min(file.getName().endsWith(".csv")&&latest.equals(ReportFiles.sessionName(file.getName()))?8L*1024*1024:2L*1024*1024,budget);long original=file.length();if(original<=0)continue;
-                byte[] data=ReportFiles.tail(file,limit);if(data.length==0)continue;
+                boolean image = file.getName().equals("android-incident-frame.png");
+                if (image && original > limit) continue;
+                byte[] data = image ? java.nio.file.Files.readAllBytes(file.toPath()) : ReportFiles.tail(file, limit);
+                if (data.length == 0 || data.length > limit) continue;
                 String session=ReportFiles.sessionName(file.getName());boolean sameBuild=session!=null&&builds.containsKey(session)&&!appCommit.equals("unknown")&&appCommit.equals(builds.get(session).optString("pinyon_shift_commit"));String kind=session==null?"shared":session.equals(latest)&&sameBuild?"current":"history";
                 String name="logs/"+kind+"/"+(++count)+"-"+file.getName().replaceAll("[^a-zA-Z0-9._-]","_");entry(zip,name,data);budget-=data.length;
                 try{org.json.JSONObject record=new org.json.JSONObject();record.put("entry",name);record.put("original_bytes",original);record.put("exported_bytes",data.length);record.put("tail_truncated",data.length<original);record.put("session",session==null?org.json.JSONObject.NULL:session);record.put("category",kind);
@@ -66,7 +69,7 @@ final class ProblemReports {
     private static void collect(File dir,List<File> out,int depth){
         if(depth>3||out.size()>300||java.nio.file.Files.isSymbolicLink(dir.toPath()))return;File[] files=dir.listFiles();if(files==null)return;
         for(File f:files){if(java.nio.file.Files.isSymbolicLink(f.toPath()))continue;if(f.isDirectory())collect(f,out,depth+1);
-            else if(f.getName().matches(".*\\.(log|txt|csv|json|jsonl)$"))out.add(f);}
+            else if(f.getName().matches(".*\\.(log|txt|csv|json|jsonl)$") || f.getName().equals("android-incident-frame.png"))out.add(f);}
     }
     private static String reason(int reason){
         switch(reason){

@@ -22,15 +22,21 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         PanelPage(String title,View body){this(title,body,null);}
         PanelPage(String title,View body,java.util.function.Supplier<View> builder){this.title=title;this.body=body;this.builder=builder;}
     }
-    private static final int ISO=310,SAVE_OUT=311,SAVE_IN=312,DRIVER_ZIP=313,PROBE=314,PROFILE_PIC=315,XENIA_IN=316;
+    private static final int ISO=310,SAVE_OUT=311,SAVE_IN=312,DRIVER_ZIP=313,PROBE=314,PROFILE_PIC=315,XENIA_IN=316,BACKUP_OUT=317;
     private boolean busy;
+    private InstallationStatus installationStatus;
+    private String pendingBackupPath;
+    private Button cancelInstallation;
+    private String installationResult;
     private String pendingDriver,pendingSaveScope=SaveArchive.BOTH;private boolean playAfterProbe;private AlertDialog progress;private FileOperation operation;
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);UiPreferences.load(this);if(state!=null){pendingDriver=state.getString("driver");playAfterProbe=state.getBoolean("play_after_probe");pendingSaveScope=state.getString("save_scope",SaveArchive.BOTH);restoredPage=state.getString("launcher_page","home");restoredFocus=state.getString("launcher_focus","play");restoredHomeFocus=state.getString("launcher_home_focus","play");}
+        super.onCreate(state);UiPreferences.load(this);
+        if (state != null) pendingBackupPath = state.getString("backup_path");
+        if(state!=null){pendingDriver=state.getString("driver");playAfterProbe=state.getBoolean("play_after_probe");pendingSaveScope=state.getString("save_scope",SaveArchive.BOTH);restoredPage=state.getString("launcher_page","home");restoredFocus=state.getString("launcher_focus","play");restoredHomeFocus=state.getString("launcher_home_focus","play");}
         build();FestivalUi.immersive(this);
         new Thread(()->{try{DriverStore.installBundled(this);}catch(IOException ignored){}},"BundledDrivers").start();
     }
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("driver",pendingDriver);state.putBoolean("play_after_probe",playAfterProbe);state.putString("save_scope",pendingSaveScope);if(launcher!=null){state.putString("launcher_page",launcher.page());state.putString("launcher_focus",launcher.navigationFocus());state.putString("launcher_home_focus",launcher.homeFocus());}}
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("backup_path",pendingBackupPath);state.putString("driver",pendingDriver);state.putBoolean("play_after_probe",playAfterProbe);state.putString("save_scope",pendingSaveScope);if(launcher!=null){state.putString("launcher_page",launcher.page());state.putString("launcher_focus",launcher.navigationFocus());state.putString("launcher_home_focus",launcher.homeFocus());}}
     @Override protected void onResume(){super.onResume();UiPreferences.load(this);if(Math.abs(builtScale-FestivalUi.scale(this))>.001f)build();refresh();rebuildTop();recovery();}
     @Override public void onConfigurationChanged(android.content.res.Configuration config){super.onConfigurationChanged(config);build();refresh();FestivalUi.immersive(this);}
     @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus){UiPreferences.load(this);if(Math.abs(builtScale-FestivalUi.scale(this))>.001f)build();FestivalUi.immersive(this);refresh();if(launcher!=null)FestivalUi.refreshTree(launcher);}}
@@ -53,7 +59,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         switch(action){
             case "play":case "resume":play(false);break;
             case "choose-game":case "choose-game-files":files();break;
-            case "verify":if(canManage())work("Checking all game files…",()->GameFiles.verifyComplete(this),()->toast("All supported game files verified."));break;
+            case "verify":files();verifyInstallation();break;
             case "storage":openPage("Storage",this::storagePage);break;
             case "touch-layout":controls();break;
             case "controller":settingPage("Controller");break;
@@ -101,7 +107,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     }
     /** Refresh data after a picker or driver probe without losing the page's position. */
     private void rebuildTop(){
-        if(launcher==null||panels.isEmpty()||panels.peek().builder==null)return;
+        if(busy||launcher==null||panels.isEmpty()||panels.peek().builder==null)return;
         PanelPage top=panels.pop();FestivalUi.rememberTree(launcher);View body=top.builder.get();
         FestivalUi.transferPageState(top.body,body);panels.push(new PanelPage(top.title,body,top.builder));renderPanel(false);
     }
@@ -141,25 +147,94 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         long interrupted=GameSession.interrupted(this);
         if(interrupted==0||busy||getSharedPreferences("mobile",0).getLong("recovery_seen",0)==interrupted)return;
         getSharedPreferences("mobile",0).edit().putLong("recovery_seen",interrupted).apply();
-        new AlertDialog.Builder(this).setTitle("The last game stopped unexpectedly")
-            .setMessage("This may be a driver problem, a game crash or Android freeing memory. A report can help identify the cause.")
-            .setNegativeButton("Back",null).setNeutralButton("Share report",(d,w)->ProblemReports.share(this))
-            .setPositiveButton("Recovery options",(d,w)->{String[] choices=GraphicsProfilePage.lastGood(this).isFile()?new String[]{"Use system driver","Restore last working graphics"}:new String[]{"Use system driver"};FestivalUi.choose(this,"Recovery",choices,-1,index->{try{if(index==1)GraphicsProfilePage.restoreForRecovery(this);else MobileConfig.put(this,"android_gpu_driver","\"\"");toast("Recovery settings saved. Tap Play to try them.");}catch(IOException e){error(e.getMessage());}});}).show();
+        showRecovery("The last game stopped unexpectedly", "A report can help identify the cause.", true);
+    }
+    private void showRecovery(String title, String message, boolean launch) {
+        LinearLayout options = FestivalUi.column(this);
+        options.addView(FestivalUi.text(this, message, 14, FestivalUi.MUTED));
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(title).setView(options)
+            .setNegativeButton("Back", null).create();
+        FestivalUi.action(this, options, launch ? "Retry with system driver" : "Test system driver", () -> {
+            dialog.dismiss();
+            if (!launch || GameFiles.ready(this)) {
+                work("Checking the game executables…", () -> {
+                    if (launch) { ContentFiles.recoverForLaunch(this); GameFiles.verify(this); }
+                }, () -> probe("", launch));
+            } else files();
+        });
+        if (GraphicsProfilePage.lastGood(this).isFile()) {
+            FestivalUi.action(this, options, "Restore last working graphics", () -> {
+                dialog.dismiss();
+                try {
+                    GraphicsProfilePage.restoreForRecovery(this);
+                    toast("Graphics restored for the next launch.");
+                    refresh();
+                } catch (IOException failure) { error(failure.getMessage()); }
+            });
+        }
+        FestivalUi.action(this, options, "Export report", () -> { dialog.dismiss(); ProblemReports.share(this); });
+        dialog.show();
     }
     private boolean canManage(){if(busy)return false;if(GameFiles.running(this)){toast("Quit the game before changing files, saves or drivers.");return false;}return true;}
-    private void work(String message,Task task,Runnable success){
-        if(busy)return;busy=true;refresh();LinearLayout p=FestivalUi.column(this);TextView detail=FestivalUi.text(this,message,16,FestivalUi.TEXT);p.addView(detail);
-        ProgressBar bar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);bar.setMax(1000);bar.setIndeterminate(true);p.addView(bar);
-        operation=new FileOperation((name,done,total)->runOnUiThread(()->{if(isFinishing()||isDestroyed())return;
-            detail.setText(name+"\n"+(done/(1024*1024))+" / "+Math.max(1,total/(1024*1024))+" MB");bar.setIndeterminate(total<=0);if(total>0)bar.setProgress((int)Math.min(1000,done*1000/total));}));
-        final FileOperation current=operation;
-        progress=new AlertDialog.Builder(this).setTitle("Please wait").setView(p).setNegativeButton("Cancel",null).create();progress.setCancelable(false);progress.show();
-        progress.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v->{current.cancel();v.setEnabled(false);detail.setText("Stopping after the current read. Completed files are kept.");});
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        new Thread(()->{try(FileOperation scope=current.attach()){task.run();runOnUiThread(()->{endWork();if(isFinishing()||isDestroyed())return;success.run();refresh();});}
-            catch(Exception e){runOnUiThread(()->{endWork();if(isFinishing()||isDestroyed())return;if(current.isCancelled()||e instanceof InterruptedIOException)toast(FileOperation.cancelMessage());else error(e.getMessage());});}},"FH4DroidFiles").start();
+    private void work(String message, Task task, Runnable success) {
+        work(message, task, success, null);
     }
-    private void endWork(){busy=false;refresh();operation=null;if(!isDestroyed())getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);if(progress!=null){progress.dismiss();progress=null;}if(!isDestroyed()&&!isFinishing())rebuildTop();}
+    private void work(String message, Task task, Runnable success, InstallationStatus inline) {
+        if (busy) return;
+        busy = true;
+        refresh();
+        InstallationStatus status = inline != null ? inline : new InstallationStatus(this, "Operation progress", message);
+        status.update(message, 0, 0);
+        FileOperation current = new FileOperation((name, done, total) -> runOnUiThread(() -> {
+            if (!isFinishing() && !isDestroyed()) status.update(name, done, total);
+        }));
+        operation = current;
+        Button cancel;
+        if (inline != null) {
+            cancel = cancelInstallation;
+            cancel.setVisibility(View.VISIBLE);
+        } else {
+            progress = new AlertDialog.Builder(this).setTitle("Please wait").setView(status)
+                .setCancelable(false).setNegativeButton("Cancel", null).create();
+            progress.show();
+            cancel = progress.getButton(AlertDialog.BUTTON_NEGATIVE);
+        }
+        cancel.setEnabled(true);
+        cancel.setOnClickListener(view -> {
+            current.cancel();
+            view.setEnabled(false);
+            status.update("Stopping after the current read. Completed files are kept.", 0, 0);
+        });
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        new Thread(() -> {
+            try (FileOperation scope = current.attach()) {
+                task.run();
+                runOnUiThread(() -> {
+                    if (inline != null) installationResult = "Installation verified.";
+                    endWork();
+                    if (!isFinishing() && !isDestroyed()) success.run();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    boolean cancelled = current.isCancelled() || error instanceof InterruptedIOException;
+                    String detail = cancelled ? FileOperation.cancelMessage()
+                        : error.getMessage() == null ? "The operation could not finish." : error.getMessage();
+                    if (inline != null) installationResult = detail;
+                    endWork();
+                    if (inline != null || isFinishing() || isDestroyed()) return;
+                    if (cancelled) toast(detail); else error(detail);
+                });
+            }
+        }, "FH4DroidFiles").start();
+    }
+    private void endWork() {
+        busy = false;
+        operation = null;
+        if (cancelInstallation != null) cancelInstallation.setVisibility(View.GONE);
+        if (!isDestroyed()) getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (progress != null) { progress.dismiss(); progress = null; }
+        if (!isDestroyed() && !isFinishing()) { refresh(); rebuildTop(); }
+    }
     interface Task{void run()throws Exception;}
     private void play(boolean logging){
         if(busy)return;if(!GameFiles.ready(this)){files();return;}
@@ -174,26 +249,83 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         i.putExtra("env.PINYON_SHIFT_ANDROID_LAUNCHER","1");startActivity(i);
     }
     private void files(){openPage("Game files",this::filesPage);}
-    private View filesPage(){
-        LinearLayout p=FestivalUi.column(this);boolean ready=GameFiles.ready(this);boolean partial=new File(MobileConfig.base(this),"game/.copy-incomplete").exists();
-        FestivalUi.listRow(this,p,"file","Choose game ISO","Select the Forza Horizon game ISO file.",()->{if(canManage())pick(ISO,"*/*",false);});
-        FestivalUi.listRow(this,p,"folder","Choose extracted folder","Select the extracted game folder instead.",()->{if(canManage())startActivity(new Intent(this,SetupActivity.class).putExtra("setup",true).putExtra("choose_folder",true));});
-        FestivalUi.statusCard(this,p,"download","Installation status",
-            ready?"Game files ready to play.":partial?"Import incomplete. Choose the same source again to resume.":"No game files installed yet.",
-            ready?100:0,ready?"Game detected · Tap to verify all files":"No game detected",
-            ()->{if(canManage())work("Checking all game files. Large games can take several minutes…",()->GameFiles.verifyComplete(this),()->toast("All supported game files verified."));});
-        TextView help=FestivalUi.text(this,"Use your own Xbox 360 copy of Forza Horizon (2012). This build uses base-game executables; TU4 saves require a separate TU4 build.",13,FestivalUi.MUTED);help.setPadding(FestivalUi.dp(this,4),FestivalUi.dp(this,10),FestivalUi.dp(this,4),0);p.addView(help);
-        return p;
+    private View filesPage() {
+        LinearLayout body = FestivalUi.column(this);
+        boolean ready = GameFiles.ready(this);
+        boolean linked = GameFiles.linked(this);
+        boolean partial = new File(MobileConfig.base(this), "game/.copy-incomplete").exists();
+        String detail = ready ? linked ? "Linked extracted folder ready." : "Game files ready to play."
+            : linked ? "Linked folder unavailable. Choose it again or copy it into app storage."
+            : partial ? "Import incomplete. Choose the same source again to resume."
+            : "No game files installed yet.";
+        installationStatus = new InstallationStatus(this, installationResult == null ? detail : installationResult);
+        body.addView(installationStatus);
+        cancelInstallation = FestivalUi.action(this, body, "Cancel", () -> {});
+        cancelInstallation.setVisibility(View.GONE);
+        FestivalUi.listRow(this, body, "file", "Choose game ISO", "Play from the disc image.",
+            () -> { if (canManage()) pick(ISO, "*/*", false); });
+        FestivalUi.listRow(this, body, "folder", "Copy extracted folder", "Allow about 8 GB in app storage.",
+            () -> chooseExtracted(false));
+        FestivalUi.listRow(this, body, "folder", "Use extracted folder in place", "Use an accessible local folder without a duplicate copy.",
+            () -> chooseExtracted(true));
+        if (ready) {
+            FestivalUi.action(this, body, "Check installation", this::verifyInstallation);
+            FestivalUi.action(this, body, "Check collision sound files", () -> {
+                if (canManage()) work("Checking collision and glass audio…", () -> GameFiles.verifyCollisionAudio(this),
+                    () -> { installationResult = "Collision and glass audio files verified."; rebuildTop(); }, installationStatus);
+            });
+        }
+        return body;
+    }
+    private void chooseExtracted(boolean link) {
+        if (!canManage()) return;
+        installationResult = null;
+        startActivity(new Intent(this, SetupActivity.class).putExtra("setup", true)
+            .putExtra("choose_folder", true).putExtra("link_folder", link));
+    }
+    private void verifyInstallation() {
+        if (canManage() && GameFiles.ready(this)) {
+            work("Checking supported game files…", () -> GameFiles.verifyComplete(this), () -> {}, installationStatus);
+        }
     }
     private void controls(){startActivity(new Intent(this,TouchEditorActivity.class));}
     private View storagePage(){
         LinearLayout body=FestivalUi.column(this);
         long free=MobileConfig.base(this).getUsableSpace();
         FestivalUi.card(this,body,"Game storage",free>0?android.text.format.Formatter.formatFileSize(this,free)+" available on this storage volume.":"Storage availability is reported in Android settings.");
-        body.addView(FestivalUi.text(this,"Disc images are read from their selected location. Extracted folders are copied into app storage. Keep save backups before clearing app data in Android.",14,FestivalUi.MUTED));
+        TextView usage = FestivalUi.text(this, "Measuring installed data…", 14, FestivalUi.TEXT);
+        body.addView(usage);
+        FestivalUi.action(this, body, "Manage graphics cache", () -> GraphicsCache.show(this));
+        new Thread(() -> {
+            try {
+                File base = MobileConfig.base(this);
+                File state = new File(base, "state");
+                long game = GraphicsCache.size(new File(base, "game/base"));
+                File title = new File(state, "user/" + DlcStore.TITLE);
+                long dlc = GraphicsCache.size(new File(title, "00000002"))
+                    + GraphicsCache.size(new File(title, "Disabled/00000002"))
+                    + GraphicsCache.size(new File(title, "Headers/00000002"));
+                long saves = Math.max(0, GraphicsCache.size(new File(state, SaveArchive.NORMAL))
+                    + GraphicsCache.size(new File(state, SaveArchive.MODDED)) - dlc);
+                long graphics = 0;
+                File cache = GraphicsCache.root(this);
+                File[] directories = cache.listFiles(file -> GraphicsCache.graphicsDirectory(cache, file));
+                if (directories != null) for (File directory : directories) graphics += GraphicsCache.size(directory);
+                String text = storageLine("Local game files", game) + "\n" + storageLine("DLC", dlc)
+                    + "\n" + storageLine("Mods", GraphicsCache.size(new File(state, "mods")))
+                    + "\n" + storageLine("Graphics caches", graphics) + "\n" + storageLine("Saves", saves)
+                    + "\n" + storageLine("Backups", GraphicsCache.size(new File(state, "backups")));
+                runOnUiThread(() -> { if (!isDestroyed()) usage.setText(text); });
+            } catch (IOException | SecurityException error) {
+                runOnUiThread(() -> { if (!isDestroyed()) usage.setText("Could not measure installed data."); });
+            }
+        }, "StorageUsage").start();
         FestivalUi.listRow(this,body,"folder","Game files","Choose or check your installation.",this::files);
         FestivalUi.action(this,body,"Open Android storage settings",()->{try{startActivity(new Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS));}catch(ActivityNotFoundException error){toast("Storage settings are not available on this device.");}});
         return body;
+    }
+    private String storageLine(String label, long bytes) {
+        return label + " · " + android.text.format.Formatter.formatFileSize(this, bytes);
     }
     private void saves(){openPage("Saves",this::savesPage);}
     private View savesPage(){
@@ -207,9 +339,75 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         FestivalUi.listRow(this,p,"user","Import a Xenia profile","Add a base-game Xenia save from a ZIP.",()->{if(canManage())new AlertDialog.Builder(this).setTitle("Import a base-game Xenia save").setMessage("Choose a ZIP containing content/<XUID>/4D5309C9 with the original folders. Imports beside your current normal save and selects that original XUID for next launch. Existing profiles are kept, settings are backed up, and title-update-v4 saves are refused. Modded mode keeps using its separate save tree.").setNegativeButton("Cancel",null).setPositiveButton("Choose ZIP",(d,w)->pick(XENIA_IN,"application/zip",false)).show();});
         FestivalUi.listRow(this,p,"save","Restore previous saves","Go back to the copy kept before the last change.",()->{if(canManage())new AlertDialog.Builder(this).setTitle("Restore previous saves?").setMessage("Your current saves are also kept before the restore.")
             .setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->work("Restoring saves…",()->SaveArchive.restore(new File(MobileConfig.base(this),"state")),()->toast("Previous saves restored."))).show();});
+        FestivalUi.listRow(this, p, "save", "Manage backups", "Export, restore, or delete an individual backup.",
+            () -> openPage("Save backups", this::backupPage));
+        FestivalUi.listRow(this, p, "trash", "Reset selected save type", "Move the selected live saves to a local backup.", this::confirmResetSaves);
         TextView help=FestivalUi.text(this,"The save type applies to exports. Imports and restores keep normal and modded profiles separate and retain a rollback copy. Quit the game before changing saves.",13,FestivalUi.MUTED);help.setPadding(FestivalUi.dp(this,4),FestivalUi.dp(this,10),FestivalUi.dp(this,4),0);p.addView(help);
         TextView next=FestivalUi.text(this,"Next launch: "+LocalProfile.configuredProfile(MobileConfig.read(this))+"\n"+LocalProfile.backupStatus(MobileConfig.read(this)),13,FestivalUi.ORANGE);next.setPadding(FestivalUi.dp(this,4),FestivalUi.dp(this,6),FestivalUi.dp(this,4),0);p.addView(next);
         return p;
+    }
+    private File saveState() { return new File(MobileConfig.base(this), "state"); }
+    private View backupPage() {
+        LinearLayout body = FestivalUi.column(this);
+        List<SaveArchive.Backup> backups = SaveArchive.backups(saveState());
+        if (backups.isEmpty()) body.addView(FestivalUi.text(this, "No save backups yet.", 14, FestivalUi.MUTED));
+        java.text.DateFormat dates = java.text.DateFormat.getDateTimeInstance();
+        for (SaveArchive.Backup backup : backups) {
+            String date = dates.format(new java.util.Date(backup.folder.lastModified()));
+            FestivalUi.listRow(this, body, "save", backup.label, date, () -> showBackup(backup, date));
+        }
+        return body;
+    }
+    private void showBackup(SaveArchive.Backup backup, String date) {
+        if (!canManage()) return;
+        LinearLayout actions = FestivalUi.column(this);
+        TextView description = FestivalUi.text(this, date, 14, FestivalUi.MUTED);
+        actions.addView(description);
+        new Thread(() -> {
+            try {
+                long bytes = GraphicsCache.size(backup.folder);
+                runOnUiThread(() -> { if (!isDestroyed()) description.setText(date + " · " + android.text.format.Formatter.formatFileSize(this, bytes)); });
+            } catch (IOException ignored) {}
+        }, "SaveBackupSize").start();
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(backup.label).setView(actions)
+            .setNegativeButton("Back", null).create();
+        FestivalUi.action(this, actions, "Export backup", () -> {
+            dialog.dismiss();
+            pendingBackupPath = backup.folder.getPath();
+            pick(BACKUP_OUT, "application/zip", true);
+        });
+        FestivalUi.action(this, actions, "Restore backup", () -> {
+            dialog.dismiss(); new AlertDialog.Builder(this).setTitle("Restore this backup?")
+                .setMessage("Current saves will be backed up first. Installed DLC stays in place.")
+                .setNegativeButton("Cancel", null).setPositiveButton("Restore", (ignored, which) -> {
+                    if (canManage()) work("Restoring backup…", () -> ContentFiles.locked(this, () -> {
+                        SaveArchive.restoreBackup(saveState(), backup); return null;
+                    }), () -> toast("Backup restored."));
+                }).show();
+        });
+        FestivalUi.action(this, actions, "Delete backup", () -> {
+            dialog.dismiss(); new AlertDialog.Builder(this).setTitle("Delete this backup?")
+                .setMessage("Your current saves stay in place.").setNegativeButton("Cancel", null)
+                .setPositiveButton("Delete", (ignored, which) -> {
+                    if (canManage()) work("Removing backup…", () -> ContentFiles.locked(this, () -> {
+                        SaveArchive.deleteBackup(saveState(), backup); return null;
+                    }), () -> toast("Backup removed."));
+                }).show();
+        });
+        dialog.show();
+    }
+    private void confirmResetSaves() {
+        if (!canManage()) return;
+        String scope = pendingSaveScope;
+        String label = SaveArchive.BOTH.equals(scope) ? "normal and modded saves"
+            : SaveArchive.NORMAL.equals(scope) ? "normal saves" : "modded saves";
+        new AlertDialog.Builder(this).setTitle("Reset " + label + "?")
+            .setMessage("The selected saves will be moved to a backup. Installed DLC stays in place.")
+            .setNegativeButton("Cancel", null).setPositiveButton("Back up and reset", (dialog, which) -> {
+                if (canManage()) work("Backing up saves…", () -> ContentFiles.locked(this, () -> {
+                    SaveArchive.resetProfiles(saveState(), scope); return null;
+                }), () -> toast("Saves moved to a backup."));
+            }).show();
     }
     void openDrivers(){drivers();}
     private void drivers(){openPage("Graphics drivers",this::driverPage);}
@@ -253,11 +451,25 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     @Override protected void onActivityResult(int request,int result,Intent data){
         super.onActivityResult(request,result,data);
         if(request==PROBE){probeResult(result,data);return;}
+        String backupPath = pendingBackupPath;
+        if (request == BACKUP_OUT) pendingBackupPath = null;
         if(result!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();
         if(!canManage())return;
         if(request==ISO){try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(SecurityException e){error("This file provider cannot keep access. Choose an ISO in local storage.");return;}
-            work("Inspecting your disc and verifying the game…",()->installIso(uri),()->toast("Disc image ready."));}
+            work("Inspecting your disc and verifying the game…",()->installIso(uri),()->toast("Disc image ready."),installationStatus);}
         else if(request==SAVE_OUT)work("Exporting saves…",()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new IOException("Cannot create backup.");SaveArchive.exportState(new File(MobileConfig.base(this),"state"),pendingSaveScope,out);}},()->toast("Saves exported."));
+        else if (request == BACKUP_OUT) {
+            work("Exporting backup…", () -> {
+                File state = saveState();
+                SaveArchive.Backup backup = SaveArchive.backups(state).stream()
+                    .filter(item -> item.folder.getPath().equals(backupPath)).findFirst()
+                    .orElseThrow(() -> new IOException("This backup is no longer available."));
+                try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                    if (out == null) throw new IOException("Cannot create backup export.");
+                    SaveArchive.exportBackup(state, backup, out);
+                }
+            }, () -> toast("Backup exported."));
+        }
         else if(request==SAVE_IN)work("Importing saves…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open backup.");SaveArchive.importInto(new File(MobileConfig.base(this),"state"),in);}},()->toast("Saves imported."));
         else if(request==XENIA_IN)work("Checking Xenia profile…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open Xenia ZIP.");try(XeniaSaveImport.Prepared prepared=XeniaSaveImport.prepare(new File(MobileConfig.base(this),"state"),in)){XeniaSaveImport.install(new File(MobileConfig.base(this),"state"),prepared);}}},()->toast("Xenia profile imported; original XUID selected for the next launch."));
         else if(request==PROFILE_PIC)work("Preparing gamer picture…",()->ProfilePage.importPicture(this,uri),()->toast("Gamer picture saved for the next launch."));
@@ -272,8 +484,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
             getSharedPreferences("mobile",0).edit().putString("verified_driver",json.optString("effective_driver","")).commit();
             if(launch)startGame(getSharedPreferences("mobile",0).getBoolean("next_debug",false));else toast("Driver passed and selected for the next launch.");
         }catch(Exception e){
-            new AlertDialog.Builder(this).setTitle("Graphics driver could not start").setMessage(e.getMessage()+"\nTry the device's system driver.")
-                .setNegativeButton("Back",null).setPositiveButton("Test system driver",(d,w)->probe("",launch)).show();
+            showRecovery("Graphics driver could not start", e.getMessage(), launch);
         }
         refresh();rebuildTop();
     }
@@ -302,7 +513,10 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
                 File to=new File(game,path);to.getParentFile().mkdirs();Files.move(new File(stage,path).toPath(),to.toPath(),StandardCopyOption.REPLACE_EXISTING);
             }
             // Persist only after all supported executables have been checked.
-            getSharedPreferences("mobile",0).edit().putString("iso_uri",uri.toString()).commit();
+            if (!getSharedPreferences("mobile", 0).edit().remove(GameFiles.LINKED_FOLDER)
+                    .putString("iso_uri", uri.toString()).commit()) {
+                throw new IOException("Could not save the selected ISO.");
+            }
             new File(base,"game/.copy-incomplete").delete();
         }finally{SaveArchive.delete(stage);}
     }

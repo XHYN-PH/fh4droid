@@ -56,7 +56,7 @@ what = """`disablephotomodecollisiondetection` (+4921) is read after `launch_opt
 how = """Option visitor `sub_824F8150` paired with the name strings in the image (each call's r4 and r5 at its `bl`); v4 offset from the same call order in `sub_82563570`; byte-load scan for readers; `fh1-photo-camera-walls` route with and without the flag."""
 confidence = """confirmed"""
 issue = """#488"""
-source = """src/dev_options.cpp; config/render-tests/fh1-photo-camera-walls.fh1test"""
+source = """src/dev_options.cpp; config/render-tests/fh1-photo-camera-walls.fh1test; the base-game entry at 0x8285BFE0 also drives Android photo controls in src/pinyon_shift_runtime_hooks.cpp and config/rexglue/analysis/main-xex.toml"""
 
 [[finding]]
 group = """Launch options"""
