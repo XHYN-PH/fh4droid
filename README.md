@@ -14,7 +14,7 @@
 
 **FH4Droid focuses on Android only.** It brings the original Xbox 360 **Forza Horizon (2012)** to compatible phones and handhelds.
 
-**Current release: FH4Droid 0.9.2.** Based on [Pinyon Shift 0.9.1](docs/releases/0.9.1.md). See the [Android release notes](docs/releases/fh4droid-0.9.2.md) for changes and validation.
+**Current release: FH4Droid 0.9.3.** Based on [Pinyon Shift 0.9.1](docs/releases/0.9.1.md). See the [Android release notes](docs/releases/fh4droid-0.9.3.md) for changes and validation.
 
 **You must provide your own legally obtained game files.** Use the supported USA Xbox 360 base-game ISO or complete extracted folder. Game files and game-download links are not provided here.
 
