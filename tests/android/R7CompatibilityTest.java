@@ -12,6 +12,8 @@ public final class R7CompatibilityTest {
             String prefix="content/"+id+"/4D5309C9/00000001/ForzaProfile/";
             zip.putNextEntry(new ZipEntry(prefix+"ForzaProfile"));zip.write(new byte[]{1,2,3});zip.closeEntry();
             zip.putNextEntry(new ZipEntry(prefix+"VersionFlags"));byte[] flags=new byte[12];System.arraycopy("cmss".getBytes(StandardCharsets.US_ASCII),0,flags,0,4);if(v4)flags[7]=4;zip.write(flags);zip.closeEntry();
+            zip.putNextEntry(new ZipEntry("content/0000000000000000/4D5309C9/00000002/legacy-dlc"));
+            zip.write(1);zip.closeEntry();
             if(unsafe){zip.putNextEntry(new ZipEntry(prefix+"../outside"));zip.write(1);zip.closeEntry();}
         }return out.toByteArray();
     }
@@ -41,6 +43,7 @@ public final class R7CompatibilityTest {
             File nativeSave=new File(state,"user/B13EBABEBABEBABE/4D5309C9/old");Files.createDirectories(nativeSave.toPath().getParent());Files.write(nativeSave.toPath(),new byte[]{8});
             try(XeniaSaveImport.Prepared save=XeniaSaveImport.prepare(temp.toFile(),new ByteArrayInputStream(zip("E030000012345678",false,false)))){XeniaSaveImport.install(state,save);}
             check(new File(state,"user/E030000012345678/4D5309C9/00000001/ForzaProfile/ForzaProfile").isFile()&&nativeSave.isFile(),"Xenia import is beside current native save");
+            check(!new File(state,"user/E030000012345678/4D5309C9/00000002").exists(),"shared Xenia DLC is skipped");
             check(MobileConfig.readFile(config).get("user_xuid").equals("E030000012345678")&&MobileConfig.readFile(config).get("user_name").equals("Keep Me"),"only selected XUID changes");
             File[] backups=new File(state,"backups").listFiles();check(backups!=null&&backups.length==1&&new File(backups[0],"pinyon_shift.toml").isFile(),"previous configuration backed up before selecting profile");
             boolean refused=false;try(XeniaSaveImport.Prepared save=XeniaSaveImport.prepare(temp.toFile(),new ByteArrayInputStream(zip("E030000012345678",false,false)))){XeniaSaveImport.install(state,save);}catch(IOException expected){refused=true;}check(refused&&nativeSave.isFile(),"existing Xenia profiles are not overwritten");

@@ -14,6 +14,12 @@ public final class ContentRecoveryTest {
     private static void killed(File root,String point)throws Exception{
         ContentTransaction.run(root,()->{
             ContentTransaction transaction=ContentTransaction.current();
+            if(point.equals("save-swap")){
+                transaction.move(new File(root,"user/4D5309C9/00000002"),new File(root,"incoming/user/4D5309C9/00000002"));
+                transaction.move(new File(root,"user"),new File(root,"backups/payload/user"));
+                transaction.move(new File(root,"incoming/user"),new File(root,"user"));
+                Runtime.getRuntime().halt(17);
+            }
             File metadata=new File(root,"config/options.json");transaction.watch(metadata);
             if(point.equals("watch"))Runtime.getRuntime().halt(17);
             transaction.replace(new File(root,"staged"),new File(root,"installed"));
@@ -42,6 +48,19 @@ public final class ContentRecoveryTest {
                 check(new File(root,committed?"enabled/data":"disabled/data").isFile(),"DLC move mismatch after "+point);
                 check(!new File(root,".android-content-transaction").exists(),"journal was not cleaned after "+point);
             }
+            File save=new File(parent,"save-swap");
+            write(new File(save,"user/profile/save"),"earlier");
+            write(new File(save,"incoming/user/profile/save"),"incoming");
+            write(new File(save,"user/4D5309C9/00000002/package"),"installed");
+            Process saveChild=new ProcessBuilder(new File(System.getProperty("java.home"),"bin/java").getPath(),
+                    "-cp",System.getProperty("java.class.path"),ContentRecoveryTest.class.getName(),
+                    "child",save.getPath(),"save-swap").inheritIO().start();
+            if(!saveChild.waitFor(20,TimeUnit.SECONDS)){saveChild.destroyForcibly();throw new AssertionError("save swap child hung");}
+            check(saveChild.exitValue()==17,"save swap did not reach the interruption point");
+            ContentTransaction.recover(save);
+            check(ContentFiles.text(new File(save,"user/profile/save"),100).equals("earlier"),"interrupted import lost the original save");
+            check(ContentFiles.text(new File(save,"user/4D5309C9/00000002/package"),100).equals("installed"),"interrupted import lost installed DLC");
+            check(ContentFiles.text(new File(save,"incoming/user/profile/save"),100).equals("incoming"),"interrupted import did not roll back the new save");
             check(ContentFiles.requiredSpace(100)==100+64L*1024*1024,"staging margin missing");
             File isolated=new File(parent,"concurrent"),config=new File(isolated,"config/settings.toml");write(config,"enabled_mods = \"old\"\nvsync = true\n");
             try{ContentTransaction.run(isolated,()->{ContentTransaction.current().watchSetting(config,"enabled_mods");MobileConfig.putFile(config,Collections.singletonMap("enabled_mods","\"new\""));MobileConfig.putFile(config,Collections.singletonMap("vsync","false"));throw new IOException("publication failed");});throw new AssertionError("failed publication committed");}catch(IOException expected){checks++;}

@@ -23,6 +23,7 @@ final class ContentFiles {
             FileChannel channel=file.getChannel();FileLock lock=channel.tryLock()){
             if(lock==null)throw new IOException("A content operation is running. Wait for it to finish before playing.");
             ContentTransaction.recover(state);
+            SaveArchive.clearAbandonedStages(state);
         }catch(OverlappingFileLockException error){throw new IOException("A content operation is running.",error);}
     }
     static long treeBytes(File root)throws IOException{
@@ -44,6 +45,7 @@ final class ContentFiles {
             if(lock==null)throw new IOException("Another content operation is running.");
             if(GameFiles.running(c))throw new IOException("Quit the game before changing mods or DLC.");
             ContentTransaction.recover(state);
+            SaveArchive.clearAbandonedStages(state);
             return work.run();
         }catch(OverlappingFileLockException error){throw new IOException("Another content operation is running.",error);}
     }

@@ -8,7 +8,11 @@ import java.util.zip.*;
 
 /** Profile-scoped archives, fully validated before live saves are moved. */
 final class SaveArchive {
-    private static final long LIMIT=512L*1024*1024;
+    static final long SAVE_LIMIT = 4L * 1024 * 1024 * 1024;
+    static final long SKIPPED_LIMIT = ContentFiles.MAX_BYTES;
+    private static final long SPACE_CHECK_INTERVAL = 4L * 1024 * 1024;
+    static final String IMPORT_LIMIT = "Save data expands beyond the 4 GiB import limit.";
+    static final String SKIPPED_LIMIT_MESSAGE = "Archive content outside the saves expands beyond the 8 GiB scan limit.";
     private static final int FILES=8192, DEPTH=64;
     private static final String V1="FH4Droid base-game saves v1\n", V2="FH4Droid base-game saves v2\n";
     // Installed Marketplace payloads are content, never save progress.
@@ -17,7 +21,7 @@ final class SaveArchive {
         "0000000000000000/4D5309C9/Headers/00000002",
         "4D5309C9/00000002", "4D5309C9/Disabled/00000002", "4D5309C9/Headers/00000002"
     };
-    private static boolean contentPath(String relative){for(String path:CONTENT)if(relative.equalsIgnoreCase(path)||relative.toLowerCase(Locale.ROOT).startsWith(path.toLowerCase(Locale.ROOT)+"/"))return true;return false;}
+    static boolean contentPath(String relative){for(String path:CONTENT)if(relative.equalsIgnoreCase(path)||relative.toLowerCase(Locale.ROOT).startsWith(path.toLowerCase(Locale.ROOT)+"/"))return true;return false;}
     static final String NORMAL="user", MODDED="user-modded", BOTH="both";
     private static List<String> scopes(String scope)throws IOException{
         if(NORMAL.equals(scope)||MODDED.equals(scope))return Collections.singletonList(scope);
@@ -55,12 +59,14 @@ final class SaveArchive {
             if(Files.isSymbolicLink(file.toPath()))throw new IOException("Save links are not supported.");
             if(file.isDirectory()){write(root,file,prefix,zip,budget,depth+1);continue;}
             if(!file.isFile())continue;
+            String limit = "Save data exceeds the 4 GiB export limit.";
+            if (file.length() > SAVE_LIMIT - budget[1]) throw new IOException(limit);
             budget[2]++;
             String name=prefix+"/"+root.toPath().relativize(file.toPath()).toString().replace(File.separatorChar,'/');validateName(name);
             zip.putNextEntry(new ZipEntry(name));
             try(InputStream in=new FileInputStream(file)){
                 byte[] buffer=new byte[65536];long done=0;
-                for(int n;(n=in.read(buffer))!=-1;){FileOperation.check();if((budget[1]+=n)>LIMIT)throw new IOException("Save data exceeds the export limit.");zip.write(buffer,0,n);done+=n;FileOperation.progress(file.getName(),done,file.length());}
+                for(int n;(n=in.read(buffer))!=-1;){FileOperation.check();if((budget[1]+=n)>SAVE_LIMIT)throw new IOException(limit);zip.write(buffer,0,n);done+=n;FileOperation.progress(file.getName(),done,file.length());}
             }zip.closeEntry();
         }
     }
@@ -71,10 +77,42 @@ final class SaveArchive {
         for(String part:parts)if(part.isEmpty()||part.equals(".")||part.equals("..")||part.indexOf(':')>=0)throw new IOException("Invalid save path.");
         return clean;
     }
+    /** Read and validate a full ZIP entry, staging it only when a target is supplied. */
+    static long readEntry(ZipInputStream zip, ZipEntry entry, File target, byte[] buffer,
+                          long remaining, String limitMessage) throws IOException {
+        long declared = entry.getSize();
+        if (declared > remaining) throw new IOException(limitMessage);
+        if (target != null) {
+            ContentFiles.requireSpace(target, Math.max(0, declared));
+            Files.createDirectories(target.toPath().getParent());
+        }
+        long done = 0;
+        long nextSpaceCheck = declared > 0 ? Math.min(declared, SPACE_CHECK_INTERVAL) : SPACE_CHECK_INTERVAL;
+        String name = entry.getName();
+        try (OutputStream output = target == null ? null
+                : Files.newOutputStream(target.toPath(), StandardOpenOption.CREATE_NEW)) {
+            for (int n; (n = zip.read(buffer)) != -1;) {
+                FileOperation.check();
+                if (n > remaining - done) throw new IOException(limitMessage);
+                if (output != null) {
+                    if (done + n > nextSpaceCheck) {
+                        long chunk = declared < 0 ? SPACE_CHECK_INTERVAL
+                            : Math.min(SPACE_CHECK_INTERVAL, Math.max(n, declared - done));
+                        ContentFiles.requireSpace(target, chunk);
+                        nextSpaceCheck = done + chunk;
+                    }
+                    output.write(buffer, 0, n);
+                }
+                done += n;
+                FileOperation.progress(name, done, declared);
+            }
+        }
+        return done;
+    }
     static synchronized void importInto(File state,InputStream input)throws IOException{
         Files.createDirectories(state.toPath());File stage=Files.createTempDirectory(state.toPath(),"save-import-").toFile();
         try{
-            String marker=null;long bytes=0;int count=0;Set<String> names=new HashSet<>(),roots=new LinkedHashSet<>();byte[] buffer=new byte[65536];
+            String marker=null;long bytes=0,skipped=0;int count=0;Set<String> names=new HashSet<>(),roots=new LinkedHashSet<>();byte[] buffer=new byte[65536];
             try(ZipInputStream zip=new ZipInputStream(input)){
                 for(ZipEntry e;(e=zip.getNextEntry())!=null;){
                     FileOperation.check();String name=e.getName();
@@ -88,19 +126,27 @@ final class SaveArchive {
                     }
                     String clean=validateName(name);
                     if(++count>FILES||!names.add(clean))throw new IOException("Duplicate save entry or too many files.");
-                    String root=clean.substring(0,clean.indexOf('/'));Path dest=stage.toPath().resolve(clean).normalize();
+                    int separator = clean.indexOf('/');
+                    String root = clean.substring(0, separator);
+                    if (contentPath(clean.substring(separator + 1))) {
+                        skipped += readEntry(zip, e, null, buffer, SKIPPED_LIMIT - skipped, SKIPPED_LIMIT_MESSAGE);
+                        continue;
+                    }
+                    Path dest=stage.toPath().resolve(clean).normalize();
                     if(!dest.startsWith(stage.toPath()))throw new IOException("Invalid save path.");
-                    if(e.isDirectory()){Files.createDirectories(dest);continue;}
-                    Files.createDirectories(dest.getParent());
-                    try(OutputStream out=Files.newOutputStream(dest,StandardOpenOption.CREATE_NEW)){
-                        for(int n;(n=zip.read(buffer))!=-1;){FileOperation.check();if((bytes+=n)>LIMIT)throw new IOException("Save archive is too large.");out.write(buffer,0,n);}
-                    }roots.add(root);
+                    if (e.isDirectory()) {
+                        readEntry(zip, e, null, buffer, 0, "Invalid save directory.");
+                        Files.createDirectories(dest);
+                        continue;
+                    }
+                    bytes += readEntry(zip, e, dest.toFile(), buffer, SAVE_LIMIT - bytes, IMPORT_LIMIT);
+                    roots.add(root);
                 }
             }
             if(marker==null||bytes==0||roots.isEmpty())throw new IOException("The archive contains no compatible saves.");
             if(V1.equals(marker)&&!roots.equals(Collections.singleton(NORMAL)))throw new IOException("A legacy archive can contain only the normal profile.");
             FileOperation.check();switchRoots(state,stage,new ArrayList<>(roots));
-        }finally{delete(stage);}
+        }finally{if(!ContentTransaction.pending(state))delete(stage);}
     }
     private static File newBackup(File state)throws IOException{
         File parent=new File(state,"backups");
@@ -111,9 +157,6 @@ final class SaveArchive {
         }
         return Files.createTempDirectory(parent.toPath(),"android-import-"+stamp+"-").toFile();
     }
-    private static void move(File from,File to)throws IOException{
-        Files.createDirectories(to.toPath().getParent());Files.move(from.toPath(),to.toPath(),StandardCopyOption.ATOMIC_MOVE);
-    }
     private static void switchRoots(File state,File stage,List<String> roots)throws IOException{
         if(Files.isSymbolicLink(state.toPath())||Files.isSymbolicLink(stage.toPath()))throw new IOException("Linked save roots are not supported.");
         for(String root:roots)if(!rootName(root)||Files.isSymbolicLink(new File(state,root).toPath())||Files.isSymbolicLink(new File(stage,root).toPath()))throw new IOException("Invalid or linked profile folder.");
@@ -122,41 +165,51 @@ final class SaveArchive {
         for(String root:roots)for(String path:CONTENT)if(Files.exists(new File(stage,root+"/"+path).toPath(),LinkOption.NOFOLLOW_LINKS))throw new IOException("This backup contains installed DLC. Export saves using the current app first.");
         List<String> retained=new ArrayList<>();
         for(String root:roots)for(String path:CONTENT){File live=new File(state,root+"/"+path);if(Files.exists(live.toPath(),LinkOption.NOFOLLOW_LINKS)){if(Files.isSymbolicLink(live.toPath())||!live.isDirectory())throw new IOException("Invalid installed content folder.");for(File f=live;f!=null&&f.toPath().startsWith(state.toPath());f=f.getParentFile())if(Files.isSymbolicLink(f.toPath()))throw new IOException("Linked installed content is not supported.");File parent=new File(stage,root+"/"+path).getParentFile();for(File f=parent;f!=null&&f.toPath().startsWith(stage.toPath());f=f.getParentFile())if(Files.exists(f.toPath(),LinkOption.NOFOLLOW_LINKS)&&(Files.isSymbolicLink(f.toPath())||!f.isDirectory()))throw new IOException("Invalid save content parent.");retained.add(root+"/"+path);}}
-        File backup=newBackup(state),payload=new File(backup,"payload");List<String> moved=new ArrayList<>(),installed=new ArrayList<>(),preserved=new ArrayList<>();
+        File backup=newBackup(state),payload=new File(backup,"payload");
+        File marker=new File(backup,"roots.txt");
         try{
-            Files.write(new File(backup,"roots.txt").toPath(),String.join("\n",roots).getBytes(StandardCharsets.UTF_8));
-            for(String root:roots){File live=new File(state,root);if(live.exists()){move(live,new File(payload,root));moved.add(root);}}
-            for(String root:roots){File incoming=new File(stage,root);if(incoming.exists()){move(incoming,new File(state,root));installed.add(root);}}
-            for(String path:retained){move(new File(payload,path),new File(state,path));preserved.add(path);}
+            ContentTransaction.run(state,()->{
+                ContentTransaction transaction=ContentTransaction.current();
+                transaction.watch(marker);
+                ContentFiles.atomic(marker,String.join("\n",roots).getBytes(StandardCharsets.UTF_8));
+                // Move DLC out of the old roots before publishing either side of the swap.
+                for(String path:retained)transaction.move(new File(state,path),new File(stage,path));
+                for(String root:roots){
+                    File live=new File(state,root);
+                    if(live.exists())transaction.move(live,new File(payload,root));
+                }
+                for(String root:roots){
+                    File incoming=new File(stage,root);
+                    if(incoming.exists())transaction.move(incoming,new File(state,root));
+                }
+                return null;
+            });
         }catch(IOException error){
-            boolean rolledBack=true;Collections.reverse(installed);Collections.reverse(moved);Collections.reverse(preserved);
-            for(String path:preserved)try{move(new File(state,path),new File(payload,path));}catch(IOException rollback){error.addSuppressed(rollback);rolledBack=false;}
-            for(String root:installed)try{move(new File(state,root),new File(stage,root));}catch(IOException rollback){error.addSuppressed(rollback);rolledBack=false;}
-            for(String root:moved)try{move(new File(payload,root),new File(state,root));}catch(IOException rollback){error.addSuppressed(rollback);rolledBack=false;}
-            if(rolledBack)delete(backup);else throw new IOException("Save rollback needs recovery from "+backup.getName()+". Existing backups were retained.",error);
+            if(!ContentTransaction.pending(state))delete(backup);
             throw error;
+        }catch(Exception error){
+            throw new IOException("Could not publish the save changes.",error);
         }
+    }
+    private static boolean hasBackupData(File folder){
+        File marker=new File(folder,"roots.txt");
+        if(Files.exists(marker.toPath(),LinkOption.NOFOLLOW_LINKS))
+            return Files.isRegularFile(marker.toPath(),LinkOption.NOFOLLOW_LINKS);
+        String[] files=folder.list((dir,name)->!name.equals("payload"));
+        return files!=null&&files.length>0;
     }
     static File latest(File state){
-        File[] dirs=new File(state,"backups").listFiles(f->f.isDirectory()&&!Files.isSymbolicLink(f.toPath())&&f.getName().startsWith("android-import-"));
-        if(dirs==null||dirs.length==0)return null;Arrays.sort(dirs,Comparator.comparing(File::getName));return dirs[dirs.length-1];
+        File[] dirs=new File(state,"backups").listFiles(f->directory(f)
+                &&f.getName().startsWith("android-import-")&&hasBackupData(f));
+        if(dirs==null||dirs.length==0)return null;
+        Arrays.sort(dirs,Comparator.comparing(File::getName));
+        return dirs[dirs.length-1];
     }
     static synchronized void restore(File state)throws IOException{
-        File backup=latest(state);if(backup==null)throw new IOException("No previous imported-save backup found.");File marker=new File(backup,"roots.txt");
-        if(Files.isSymbolicLink(marker.toPath()))throw new IOException("Linked backup metadata is not supported.");
-        if(marker.isFile()){
-            if(marker.length()>100)throw new IOException("Invalid backup information.");
-            List<String> roots=Files.readAllLines(marker.toPath(),StandardCharsets.UTF_8);
-            if(roots.isEmpty()||roots.size()>2||new HashSet<>(roots).size()!=roots.size())throw new IOException("Invalid backup profiles.");
-            switchRoots(state,new File(backup,"payload"),roots);delete(backup);
-        }else{
-            File stage=Files.createTempDirectory(state.toPath(),"save-restore-").toFile();
-            try{
-                move(backup,new File(stage,NORMAL));
-                try{switchRoots(state,stage,Collections.singletonList(NORMAL));}
-                catch(IOException error){File old=new File(stage,NORMAL);if(old.exists())move(old,backup);throw error;}
-            }finally{File[] remaining=stage.listFiles();if(remaining!=null&&remaining.length==0)delete(stage);}
-        }
+        File folder=latest(state);
+        if(folder==null)throw new IOException("No previous imported-save backup found.");
+        restoreBackup(state,new Backup(folder,"Before import or restore",false));
+        delete(folder);
     }
     static final class Backup {
         final File folder;
@@ -175,7 +228,7 @@ final class SaveArchive {
         List<Backup> result = new ArrayList<>();
         File parent = new File(state, "backups");
         if (!directory(parent)) return result;
-        File[] imports = parent.listFiles(file -> directory(file)
+        File[] imports = parent.listFiles(file -> directory(file) && hasBackupData(file)
             && file.getName().matches("android-import-[0-9]{13}(?:-[A-Za-z0-9-]+)?"));
         if (imports != null) for (File folder : imports) {
             result.add(new Backup(folder, "Before import or restore", false));
@@ -205,13 +258,53 @@ final class SaveArchive {
             else throw new IOException("The backup has no save data.");
         }
     }
-    static void restoreBackup(File state, Backup selected) throws IOException {
-        Path archive = Files.createTempFile(state.toPath(), "backup-restore-", ".zip");
-        try {
-            try (OutputStream output = Files.newOutputStream(archive)) { exportBackup(state, selected, output); }
-            try (InputStream input = Files.newInputStream(archive)) { importInto(state, input); }
-        } finally {
-            Files.deleteIfExists(archive);
+    private static List<String> backupRoots(File marker)throws IOException {
+        if(!Files.isRegularFile(marker.toPath(),LinkOption.NOFOLLOW_LINKS)||marker.length()>100)
+            throw new IOException("Invalid backup information.");
+        List<String> roots=Files.readAllLines(marker.toPath(),StandardCharsets.UTF_8);
+        if(roots.isEmpty()||roots.size()>2||new HashSet<>(roots).size()!=roots.size()
+                ||!roots.stream().allMatch(SaveArchive::rootName))throw new IOException("Invalid backup profiles.");
+        return roots;
+    }
+    private static void stageBackup(File source,File dir,File target,long[] budget,int depth)throws IOException {
+        FileOperation.check();
+        if(depth>DEPTH||!directory(dir))throw new IOException("Invalid save backup folder.");
+        File[] children=dir.listFiles();
+        if(children==null)throw new IOException("Cannot read save backup folder.");
+        for(File child:children){
+            String relative=source.toPath().relativize(child.toPath()).toString().replace(File.separatorChar,'/');
+            if(contentPath(relative))continue;
+            ContentFiles.safePath(relative);
+            if(directory(child)){
+                stageBackup(source,child,target,budget,depth+1);
+            }else if(Files.isRegularFile(child.toPath(),LinkOption.NOFOLLOW_LINKS)){
+                if(++budget[1]>FILES||child.length()>SAVE_LIMIT-budget[0])throw new IOException(IMPORT_LIMIT);
+                try(InputStream in=new FileInputStream(child)){
+                    budget[0]+=ContentFiles.copyToFile(in,new File(target,relative),SAVE_LIMIT-budget[0]);
+                }
+            }else throw new IOException("Invalid file in save backup.");
+        }
+    }
+    static synchronized void restoreBackup(File state, Backup selected) throws IOException {
+        Backup backup=checkedBackup(state,selected);
+        File marker=new File(backup.folder,"roots.txt");
+        boolean scoped=!backup.nativeSlot&&Files.exists(marker.toPath(),LinkOption.NOFOLLOW_LINKS);
+        List<String> roots=scoped?backupRoots(marker):Collections.singletonList(NORMAL);
+        File payload=scoped?new File(backup.folder,"payload"):backup.folder;
+        if(Files.isSymbolicLink(payload.toPath()))throw new IOException("Linked backup folders are not supported.");
+        File stage=Files.createTempDirectory(state.toPath(),"save-restore-").toFile();
+        try{
+            long[] budget={0,0};
+            for(String root:roots){
+                File source=scoped||backup.nativeSlot?new File(payload,root):payload;
+                if(Files.exists(source.toPath(),LinkOption.NOFOLLOW_LINKS))
+                    stageBackup(source,source,new File(stage,root),budget,0);
+            }
+            if(!scoped&&budget[1]==0)throw new IOException("The backup has no save data.");
+            FileOperation.check();
+            switchRoots(state,stage,roots);
+        }finally{
+            if(!ContentTransaction.pending(state))delete(stage);
         }
     }
     static void deleteBackup(File state, Backup selected) throws IOException {
@@ -232,8 +325,16 @@ final class SaveArchive {
             FileOperation.check();
             switchRoots(state, stage, roots);
         } finally {
-            delete(stage);
+            if(!ContentTransaction.pending(state))delete(stage);
         }
+    }
+    // Called with the content lock held, after the journal has recovered.
+    static void clearAbandonedStages(File state){
+        File[] stages=state.listFiles(f->directory(f)
+            &&f.getName().matches("(?:save-(?:import|restore|reset)|xenia-(?:import|publish))-[0-9]+"));
+        if(stages==null)return;
+        for(File stage:stages)try{delete(stage);}
+        catch(IOException error){android.util.Log.w("FH4Droid","Could not remove abandoned save staging",error);}
     }
     static void delete(File file)throws IOException{
         if(!Files.exists(file.toPath(),LinkOption.NOFOLLOW_LINKS))return;

@@ -72,7 +72,31 @@ public final class ProfileArchiveTest {
             byte[] small=export(state,SaveArchive.NORMAL);check(small.length<10000,"DLC is excluded before applying save archive budgets");
             SaveArchive.importInto(state,new ByteArrayInputStream(small));check(Files.size(dlc)==600L*1024*1024&&Files.readAllBytes(disabled)[0]==17&&Files.readAllBytes(header)[0]==42,"save import retains active, disabled and licensed DLC");
             SaveArchive.restore(state);check(Files.size(dlc)==600L*1024*1024&&Files.readAllBytes(header)[0]==42,"save restore retains installed DLC");
-            boolean legacyDlc=false;try{SaveArchive.importInto(state,new ByteArrayInputStream(archive("FH4Droid base-game saves v2\n","user/profile/save","user/4D5309C9/00000002/old/data")));}catch(IOException expected){legacyDlc=true;}check(legacyDlc&&Files.size(dlc)==600L*1024*1024,"old archives containing packages cannot overwrite installed DLC");
+            SaveArchive.importInto(state, new ByteArrayInputStream(archive("FH4Droid base-game saves v2\n",
+                "user/profile/save", "user/4D5309C9/00000002/old/data",
+                "user/" + DlcStore.TITLE + "/Disabled/00000002/old/data")));
+            check(get(state, SaveArchive.NORMAL).equals("imported") && Files.size(dlc) == 600L * 1024 * 1024
+                    && !new File(state, "user/4D5309C9/00000002/old").exists()
+                    && !new File(state, "user/" + DlcStore.TITLE + "/Disabled/00000002/old").exists(),
+                    "older mixed archives import save data and preserve installed DLC");
+            boolean dlcOnly = false;
+            try {
+                SaveArchive.importInto(state, new ByteArrayInputStream(archive("FH4Droid base-game saves v2\n",
+                    "user/4D5309C9/00000002/old/data")));
+            } catch (IOException expected) { dlcOnly = true; }
+            check(dlcOnly && get(state, SaveArchive.NORMAL).equals("imported"), "DLC alone never replaces live saves");
+
+            try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(archive(
+                    "FH4Droid base-game saves v2\n", "user/profile/save")))) {
+                zip.getNextEntry();
+                ZipEntry entry = zip.getNextEntry();
+                check(entry.getSize() == -1, "streamed ZIP entry size is initially unknown");
+                boolean limited = false;
+                try {
+                    SaveArchive.readEntry(zip, entry, null, new byte[4], 7, SaveArchive.IMPORT_LIMIT);
+                } catch (IOException expected) { limited = expected.getMessage().equals(SaveArchive.IMPORT_LIMIT); }
+                check(limited, "unknown expanded size is enforced while reading");
+            }
 
             File installed = temp.resolve("installed-content-state").toFile();
             put(installed, SaveArchive.NORMAL, "normal");
@@ -92,6 +116,13 @@ public final class ProfileArchiveTest {
                     && Files.size(packagePath) == 600L * 1024 * 1024, "restore a selected reset backup without replacing DLC");
             SaveArchive.deleteBackup(installed, backup);
             check(!backup.folder.exists() && get(installed, SaveArchive.NORMAL).equals("normal"), "backup deletion keeps live progress");
+            File absentState = temp.resolve("previously-absent-profile").toFile();
+            SaveArchive.importInto(absentState, new ByteArrayInputStream(archive(
+                "FH4Droid base-game saves v2\n", "user/profile/save")));
+            SaveArchive.Backup absent=SaveArchive.backups(absentState).get(0);
+            SaveArchive.restoreBackup(absentState,absent);
+            check(!new File(absentState,SaveArchive.NORMAL).exists() && absent.folder.isDirectory(),
+                "selected snapshot can restore a missing profile and retains its backup");
             System.out.println("PASS: "+checks+" profile identity and scoped save archive checks");
         }finally{SaveArchive.delete(temp.toFile());}
     }

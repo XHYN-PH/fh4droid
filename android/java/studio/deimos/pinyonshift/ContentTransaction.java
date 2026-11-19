@@ -97,6 +97,7 @@ final class ContentTransaction {
         Files.createDirectories(target.getParentFile().toPath());record("move",target,source);
         Files.move(source.toPath(),target.toPath(),StandardCopyOption.ATOMIC_MOVE);
     }
+    static boolean pending(File root){return new File(root,JOURNAL).exists();}
     static synchronized void recover(File root)throws IOException {
         root=root.getCanonicalFile();File directory=new File(root,JOURNAL);
         if(!directory.exists())return;
@@ -125,6 +126,11 @@ final class ContentTransaction {
                 File source=resolve(root,data.getProperty(prefix+"source"));
                 if(target.exists()){if(source.exists())throw new IOException("Content recovery conflicts with existing files.");Files.createDirectories(source.getParentFile().toPath());Files.move(target.toPath(),source.toPath(),StandardCopyOption.ATOMIC_MOVE);}
             }else throw new IOException("Unknown content recovery operation.");
+            // Persist the reverse cursor before an earlier operation can reuse its paths.
+            data.setProperty("count",Integer.toString(i));
+            ByteArrayOutputStream progress=new ByteArrayOutputStream();
+            data.store(progress,"FH4Droid content undo journal");
+            ContentFiles.atomic(journal,progress.toByteArray());
         }
         ContentFiles.delete(directory);
         phase(root,"true".equals(data.getProperty("committed"))?"committed cleanup":"recovered",count);
