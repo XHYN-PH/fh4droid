@@ -56,7 +56,8 @@ jobs:
     # The C++ host tests and the sample mod, built without game files
     # (PINYON_SHIFT_HOST_TESTS_ONLY): nothing from the disc is needed.
     if: github.event.repository.visibility == 'public'
-    runs-on: windows-latest
+    # Keep the VS 2022 C++ library compatible with the pinned LLVM 20.
+    runs-on: windows-2022
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v7
