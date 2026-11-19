@@ -1160,7 +1160,7 @@ bool PinyonShiftApp::EnsureHostUi() {
       pad.SetSafeArea(float(safe.left),float(safe.top),float(safe.right),float(safe.bottom));
       return pinyon_shift::ui::TouchOverlayForShapes(
           pad.Shapes(float(window()->GetActualPhysicalWidth()),
-                     float(window()->GetActualPhysicalHeight())), pad.Opacity());
+                     float(window()->GetActualPhysicalHeight())));
     });
   }
   // The tracked achievement's chip (AC-4.4), in free roam only.
@@ -1976,7 +1976,7 @@ bool PinyonShiftApp::ShouldStartModuleThread() {
 #if defined(__ANDROID__)
   uint64_t preparation[5]{};
   rex_android_preparation_progress(preparation);
-  if (preparation[4] == 3) {
+  if (preparation[4] >= 3) {
     REXLOG_ERROR("Graphics preparation failed before gameplay");
     return false;
   }

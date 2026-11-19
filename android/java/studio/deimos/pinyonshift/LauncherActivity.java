@@ -235,6 +235,9 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         if (progress != null) { progress.dismiss(); progress = null; }
         if (!isDestroyed() && !isFinishing()) { refresh(); rebuildTop(); }
     }
+    private void saveWork(String message,Task task,Runnable success){
+        work(message,()->ContentFiles.locked(this,()->{task.run();return null;}),success);
+    }
     interface Task{void run()throws Exception;}
     private void play(boolean logging){
         if(busy)return;if(!GameFiles.ready(this)){files();return;}
@@ -320,7 +323,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
                 runOnUiThread(() -> { if (!isDestroyed()) usage.setText("Could not measure installed data."); });
             }
         }, "StorageUsage").start();
-        FestivalUi.listRow(this,body,"folder","Game files","Choose or check your installation.",this::files);
+        FestivalUi.listRow(this,body,"chip","Graphics cache","Review or clear cached graphics data.",()->GraphicsCache.show(this));
         FestivalUi.action(this,body,"Open Android storage settings",()->{try{startActivity(new Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS));}catch(ActivityNotFoundException error){toast("Storage settings are not available on this device.");}});
         return body;
     }
@@ -338,7 +341,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
                 .setNegativeButton("Cancel",null).setPositiveButton("Choose ZIP",(d,w)->pick(SAVE_IN,"application/zip",false)).show();}));
         FestivalUi.listRow(this,p,"user","Import a Xenia profile","Add a base-game Xenia save from a ZIP.",()->{if(canManage())new AlertDialog.Builder(this).setTitle("Import a base-game Xenia save").setMessage("Choose a ZIP containing content/<XUID>/4D5309C9 with the original folders. Imports beside your current normal save and selects that original XUID for next launch. Existing profiles are kept, settings are backed up, and title-update-v4 saves are refused. Modded mode keeps using its separate save tree.").setNegativeButton("Cancel",null).setPositiveButton("Choose ZIP",(d,w)->pick(XENIA_IN,"application/zip",false)).show();});
         FestivalUi.listRow(this,p,"save","Restore previous saves","Go back to the copy kept before the last change.",()->{if(canManage())new AlertDialog.Builder(this).setTitle("Restore previous saves?").setMessage("Your current saves are also kept before the restore.")
-            .setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->work("Restoring saves…",()->SaveArchive.restore(new File(MobileConfig.base(this),"state")),()->toast("Previous saves restored."))).show();});
+            .setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->saveWork("Restoring saves…",()->SaveArchive.restore(new File(MobileConfig.base(this),"state")),()->toast("Previous saves restored."))).show();});
         FestivalUi.listRow(this, p, "save", "Manage backups", "Export, restore, or delete an individual backup.",
             () -> openPage("Save backups", this::backupPage));
         FestivalUi.listRow(this, p, "trash", "Reset selected save type", "Move the selected live saves to a local backup.", this::confirmResetSaves);
@@ -440,7 +443,12 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         new AlertDialog.Builder(this).setTitle("Delete imported driver?").setMessage(DriverStore.displayName(this,choice)+(current.equals(choice)?" will be removed. The system driver will be selected.":" will be removed. Your selected driver is kept."))
             .setNegativeButton("Cancel",null).setPositiveButton("Delete",(d,w)->work("Removing driver…",()->DriverStore.removeImported(this,choice),this::refresh)).show();
     }
-    private void reports(){ProblemReports.share(this);}
+    private void reports(){
+        LinearLayout body=FestivalUi.column(this);
+        FestivalUi.listRow(this,body,"pulse","Play with diagnostics","Record detailed logs for this session.",this::startDiagnosticRun);
+        ProblemReports.action(this,body,"Share problem report");
+        FestivalUi.present(this,"Problem reports",body);
+    }
     private void probe(String choice,boolean launch){
         pendingDriver=choice;playAfterProbe=launch;startActivityForResult(new Intent(this,DriverProbeActivity.class).putExtra("driver",choice),PROBE);
     }
@@ -457,9 +465,9 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         if(!canManage())return;
         if(request==ISO){try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(SecurityException e){error("This file provider cannot keep access. Choose an ISO in local storage.");return;}
             work("Inspecting your disc and verifying the game…",()->installIso(uri),()->toast("Disc image ready."),installationStatus);}
-        else if(request==SAVE_OUT)work("Exporting saves…",()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new IOException("Cannot create backup.");SaveArchive.exportState(new File(MobileConfig.base(this),"state"),pendingSaveScope,out);}},()->toast("Saves exported."));
+        else if(request==SAVE_OUT)saveWork("Exporting saves…",()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new IOException("Cannot create backup.");SaveArchive.exportState(new File(MobileConfig.base(this),"state"),pendingSaveScope,out);}},()->toast("Saves exported."));
         else if (request == BACKUP_OUT) {
-            work("Exporting backup…", () -> {
+            saveWork("Exporting backup…", () -> {
                 File state = saveState();
                 SaveArchive.Backup backup = SaveArchive.backups(state).stream()
                     .filter(item -> item.folder.getPath().equals(backupPath)).findFirst()
@@ -470,8 +478,8 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
                 }
             }, () -> toast("Backup exported."));
         }
-        else if(request==SAVE_IN)work("Importing saves…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open backup.");SaveArchive.importInto(new File(MobileConfig.base(this),"state"),in);}},()->toast("Saves imported."));
-        else if(request==XENIA_IN)work("Checking Xenia profile…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open Xenia ZIP.");try(XeniaSaveImport.Prepared prepared=XeniaSaveImport.prepare(new File(MobileConfig.base(this),"state"),in)){XeniaSaveImport.install(new File(MobileConfig.base(this),"state"),prepared);}}},()->toast("Xenia profile imported; original XUID selected for the next launch."));
+        else if(request==SAVE_IN)saveWork("Importing saves…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open backup.");SaveArchive.importInto(new File(MobileConfig.base(this),"state"),in);}},()->toast("Saves imported."));
+        else if(request==XENIA_IN)saveWork("Checking Xenia profile…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open Xenia ZIP.");try(XeniaSaveImport.Prepared prepared=XeniaSaveImport.prepare(new File(MobileConfig.base(this),"state"),in)){XeniaSaveImport.install(new File(MobileConfig.base(this),"state"),prepared);}}},()->toast("Xenia profile imported; original XUID selected for the next launch."));
         else if(request==PROFILE_PIC)work("Preparing gamer picture…",()->ProfilePage.importPicture(this,uri),()->toast("Gamer picture saved for the next launch."));
         else if(request==DRIVER_ZIP)work("Importing driver…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open driver ZIP.");pendingDriver=DriverStore.importZip(this,in);}},()->probe(pendingDriver,false));
     }
@@ -501,7 +509,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
                 for(Map.Entry<String,String> e:GameFiles.EXECUTABLES.entrySet())disc.copy(e.getKey(),new File(stage,e.getKey()),e.getValue());
                 // Only the host UI and mixer need small local support files.
                 // Guest game data continues to be read directly from the ISO.
-                for(String path:new String[]{"media/ui/Fonts.zip","media/ui/textures/Horizon.zip","media/audio/AudioEngineConfig.xml","media/audio/AudioMixerSnapshots.xml"}){
+                for(String path:GameFiles.ISO_SUPPORT){
                     GameFiles.Expected expected=GameFiles.catalog(this).get(path.toLowerCase(Locale.ROOT));
                     disc.copy(path,new File(stage,path),expected.hash);
                 }
@@ -509,7 +517,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
             FileOperation.check();
             File incomplete=new File(base,"game/.copy-incomplete");incomplete.createNewFile();
             game.mkdirs();for(String name:GameFiles.EXECUTABLES.keySet())Files.move(new File(stage,name).toPath(),new File(game,name).toPath(),StandardCopyOption.REPLACE_EXISTING);
-            for(String path:new String[]{"media/ui/Fonts.zip","media/ui/textures/Horizon.zip","media/audio/AudioEngineConfig.xml","media/audio/AudioMixerSnapshots.xml"}){
+            for(String path:GameFiles.ISO_SUPPORT){
                 File to=new File(game,path);to.getParentFile().mkdirs();Files.move(new File(stage,path).toPath(),to.toPath(),StandardCopyOption.REPLACE_EXISTING);
             }
             // Persist only after all supported executables have been checked.

@@ -82,7 +82,7 @@ int main(int argc,char** argv){
       batches=BuildTouchOverlay(discs);
     }else if(argc>2){
       auto& pad=TouchPad::Get();pad.LoadLayout(argv[2]);
-      discs=TouchOverlayForShapes(pad.Shapes(float(w),float(h)),pad.Opacity());
+      discs=TouchOverlayForShapes(pad.Shapes(float(w),float(h)));
       batches=BuildTouchOverlay(discs);
     }
     std::vector<std::array<float,3>> pixels(w*h,{16,20,25});

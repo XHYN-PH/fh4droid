@@ -801,7 +801,7 @@ index 64f46882..1f5a1389 100644
    const auto& dfn = vulkan_device->functions();
    const VkDevice device = vulkan_device->device();
 diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
-index 1f6873d9..9ebcb3d8 100644
+index 1f6873d9..5e7f6c01 100644
 --- a/src/graphics/vulkan/pipeline_cache.cpp
 +++ b/src/graphics/vulkan/pipeline_cache.cpp
 @@ -156,6 +156,41 @@ REXCVAR_DEFINE_BOOL(vulkan_tessellation_wireframe, false, "GPU/Vulkan",
@@ -869,9 +869,9 @@ index 1f6873d9..9ebcb3d8 100644
 +#if REX_PLATFORM_ANDROID
 +  struct StartupPreparation {
 +    bool active;
-+    bool ready = false;
++    uint64_t phase = 3;  // Cache storage failure unless preparation completes.
 +    ~StartupPreparation() {
-+      if (active) android_startup_preparation.store(ready ? 2 : 3, std::memory_order_release);
++      if (active) android_startup_preparation.store(phase, std::memory_order_release);
 +    }
 +  } startup{prepare_before_play};
 +  if (prepare_before_play) android_startup_preparation.store(1, std::memory_order_release);
@@ -1056,8 +1056,8 @@ index 1f6873d9..9ebcb3d8 100644
 +  if (prepare_before_play) {
 +    const bool saved = SaveVkPipelineCache();
 +    const auto failed = android_preparation_failed.load(std::memory_order_relaxed);
-+    startup.ready = saved && failed == 0;
-+    if (!startup.ready) {
++    startup.phase = failed != 0 ? 4 : saved ? 2 : 3;
++    if (startup.phase >= 3) {
 +      REXGPU_ERROR("Startup graphics preparation: {} pipeline failures, driver cache saved: {}",
 +                   failed, saved);
 +    }

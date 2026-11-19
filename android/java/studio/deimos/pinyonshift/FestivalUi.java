@@ -688,7 +688,9 @@ final class FestivalUi {
     }
     if(Boolean.TRUE.equals(body.getTag(FULL_PAGE))){
       if(body.getParent() instanceof ViewGroup)((ViewGroup)body.getParent()).removeView(body);
-      p.addView(body,new LinearLayout.LayoutParams(-1,0,1));refreshTree(body);return p;
+      p.addView(body,new LinearLayout.LayoutParams(-1,0,1));
+      body.post(() -> { if (body.getParent() == p) restorePage(body); });
+      return p;
     }
     PageState state = body.getTag(SCROLL_STATE) instanceof PageState
         ? (PageState) body.getTag(SCROLL_STATE)
@@ -766,7 +768,7 @@ final class FestivalUi {
     body.setTag(SCROLL_STATE,state);body.setTag(PAGE_SCROLL,scroll);state.restoring=true;
     scroll.setOnScrollChangeListener((v,x,y,ox,oy)->{if(!state.restoring)state.y=y;});
   }
-  static void restorePage(View body,ScrollView scroll){
+  static void restorePage(View body){
     refreshTree(body);
     if(!(body.getTag(SCROLL_STATE) instanceof PageState)){java.util.ArrayList<View> views=new java.util.ArrayList<>();body.addFocusables(views,View.FOCUS_FORWARD);if(!views.isEmpty())views.get(0).requestFocus();return;}
     PageState state=(PageState)body.getTag(SCROLL_STATE);
@@ -774,7 +776,9 @@ final class FestivalUi {
     if(focus==null&&body.getTag(DEFAULT_FOCUS) instanceof View)focus=(View)body.getTag(DEFAULT_FOCUS);
     if(focus!=null)focus.requestFocus();
     else{java.util.ArrayList<View> candidates=new java.util.ArrayList<>();body.addFocusables(candidates,View.FOCUS_FORWARD);if(!candidates.isEmpty())candidates.get(0).requestFocus();}
-    scroll.scrollTo(0,state.y);state.restoring=false;
+    if (body.getTag(PAGE_SCROLL) instanceof ScrollView)
+      ((ScrollView) body.getTag(PAGE_SCROLL)).scrollTo(0, state.y);
+    state.restoring=false;
   }
   private static String focusKey(View view){if(view.getTag(FOCUS_KEY) instanceof String)return (String)view.getTag(FOCUS_KEY);CharSequence label=view.getContentDescription();if(label==null&&view instanceof TextView)label=((TextView)view).getText();return label==null?null:label.toString();}
   private static View findFocusKey(View view,String key){

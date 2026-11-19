@@ -14,8 +14,15 @@ import java.util.*;
  * state.
  */
 final class SettingsHub {
-  static final String[] PAGES = {
-      "Graphics", "Audio", "Controls", "Interface", "Gameplay", "Advanced"};
+  static final String[][] CATEGORY_CARDS = {
+      {"graphics", "sliders", "Graphics", "Resolution, quality & FPS"},
+      {"audio", "audio", "Audio", "Volume & music"},
+      {"control-settings", "controller", "Controls", "Touch, tilt & gamepad"},
+      {"interface", "grid", "Interface", "Display & readability"},
+      {"gameplay", "flag", "Gameplay", "Camera & preferences"},
+      {"advanced", "chip", "Advanced", "Drivers & diagnostics"}
+  };
+  private static final String SEARCH = "All settings";
   private static final Set<String> ADVANCED =
       new HashSet<>(Arrays.asList("swap_post_effect_scene_only", "texture_mip_lod_bias",
           "fh1_untile_predicated_tiling", "vulkan_pipeline_creation_threads",
@@ -45,10 +52,27 @@ final class SettingsHub {
       this.restart = restart;
     }
   }
-  static void show(Activity a,MobileSettings.Runtime runtime,Runnable editor,Runnable drivers){
-    FestivalUi.present(a,"Settings",buildPage(a,"Graphics",runtime,editor));
+  static void show(Activity a, MobileSettings.Runtime runtime, Runnable editor, Runnable drivers) {
+    LinearLayout categories = FestivalUi.column(a);
+    for (int i = 0; i < CATEGORY_CARDS.length; i += 2) {
+      String[] left = CATEGORY_CARDS[i], right = CATEGORY_CARDS[i + 1];
+      FestivalUi.tileRow(a, categories,
+          FestivalUi.tile(a, left[1], left[2], left[3], () -> page(a, left[2], runtime, editor)),
+          FestivalUi.tile(a, right[1], right[2], right[3], () -> page(a, right[2], runtime, editor)));
+    }
+    FestivalUi.present(a, "Settings", categories);
   }
-  static void page(Activity a,String page,MobileSettings.Runtime runtime,Runnable editor){FestivalUi.present(a,"Settings",buildPage(a,page,runtime,editor));}
+  static void page(Activity a, String section, MobileSettings.Runtime runtime, Runnable editor) {
+    FestivalUi.present(a, pageTitle(section), buildPage(a, section, runtime, editor));
+  }
+  private static String pageTitle(String section) {
+    switch (section) {
+      case SEARCH: return "Search & favourites";
+      case "Touch": return "Touch controls";
+      case "Phone": return "Phone steering";
+      default: return section;
+    }
+  }
   private static String category(MobileSettings.Option o){
     if(ADVANCED.contains(o.key)||o.page.equals("Performance"))return "Advanced";
     if(o.page.equals("Controls"))return "Controls";
@@ -56,17 +80,20 @@ final class SettingsHub {
     return o.page;
   }
   private static boolean belongs(String page,MobileSettings.Option o){
-    if(page.equals("All settings"))return true;
+    if(page.equals(SEARCH))return true;
     if(page.equals("Touch"))return o.key.equals("pinyon_shift_touch_controls");
     if(page.equals("Controller"))return o.page.equals("Controls")&&!o.key.equals("pinyon_shift_touch_controls")&&!ADVANCED.contains(o.key);
     return page.equals(category(o));
   }
-  private static LinearLayout buildPage(Activity a,String first,MobileSettings.Runtime runtime,Runnable editor){
+  private static LinearLayout buildPage(Activity a,String section,MobileSettings.Runtime runtime,Runnable editor){
     LinearLayout root=FestivalUi.column(a);root.setTag(FestivalUi.FULL_PAGE,Boolean.TRUE);root.setClipChildren(true);
-    LinearLayout tabs=new LinearLayout(a);root.addView(tabs,new LinearLayout.LayoutParams(-1,FestivalUi.dp(a,38)));
-    View gap=new View(a);root.addView(gap,new LinearLayout.LayoutParams(1,FestivalUi.dp(a,8)));
     LinearLayout content=new LinearLayout(a);content.setClipChildren(true);root.addView(content,new LinearLayout.LayoutParams(-1,0,1));
-    FrameLayout pane=new FrameLayout(a);content.addView(pane,new LinearLayout.LayoutParams(0,-1,2));
+    ScrollView options = new ScrollView(a);
+    options.setTag("settings-scroll");
+    options.setFocusable(false);
+    options.setClipChildren(true);
+    content.addView(options, new LinearLayout.LayoutParams(0, -1, 2));
+    FestivalUi.attachPageScroll(root, options);
     LinearLayout details=FestivalUi.column(a);details.setTag("details-panel");int inset=FestivalUi.dp(a,14);details.setPadding(inset,FestivalUi.dp(a,12),inset,FestivalUi.dp(a,10));details.setBackground(FestivalUi.surface(a,FestivalUi.GLASS,8));
     TextView heading=FestivalUi.text(a,"SETTING DETAILS",10,FestivalUi.RED);details.addView(heading);
     TextView detailTitle=FestivalUi.text(a,"Choose an option",16,FestivalUi.TEXT);detailTitle.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);detailTitle.setPadding(0,FestivalUi.dp(a,8),0,FestivalUi.dp(a,8));details.addView(detailTitle);
@@ -77,34 +104,66 @@ final class SettingsHub {
     LinearLayout.LayoutParams dp=new LinearLayout.LayoutParams(0,-1,1);dp.leftMargin=FestivalUi.dp(a,8);content.addView(details,dp);
     java.util.function.Consumer<MobileSettings.Option> inspect=o->{detailTitle.setText(o.title);detailHelp.setText(o.help+(o.restart?"\n\nApplies next launch.":""));String saved=value(a,o.key,o.initial),live=active(runtime,o.key);detailValue.setText(live==null?"Saved: "+MobileSettings.label(o,saved):"Running: "+MobileSettings.label(o,live)+"\nSaved: "+MobileSettings.label(o,saved));};
     Runnable resolutionDetails=()->{detailTitle.setText("Render resolution");detailHelp.setText("Lower values reduce GPU work. Applies next launch. Left / right changes by 1% (25–100%).");String saved=value(a,"fh1_render_scale_percent","100"),live=active(runtime,"fh1_render_scale_percent");detailValue.setText(live==null?"Next launch: "+saved+"%":"Running: "+SettingValues.plain(live)+"%\nNext launch: "+saved+"%");};
-    Map<String,ScrollView> pages=new HashMap<>();Map<String,Button> buttons=new LinkedHashMap<>();String[] selected={first};
-    java.util.function.Consumer<String> select=section->{
-      selected[0]=section;pane.removeAllViews();ScrollView view=pages.get(section);
-      if(view==null){view=new ScrollView(a);view.setTag("settings-scroll");view.setClipChildren(true);view.setFillViewport(false);LinearLayout column=FestivalUi.column(a);view.addView(column);
-        if(section.equals("Controls")){
-          FestivalUi.action(a,column,"Edit touch layout",editor);
-          FestivalUi.action(a,column,"Touch buttons and steering",()->page(a,"Touch",runtime,editor));
-          FestivalUi.action(a,column,"Phone tilt and vibration",()->page(a,"Phone",runtime,editor));
-          FestivalUi.action(a,column,"Physical controller",()->page(a,"Controller",runtime,editor));
-          FestivalUi.action(a,column,"Saved layouts and presets",()->LayoutProfiles.show(a));
-        }else column.addView(createPage(a,section,runtime,editor,inspect,resolutionDetails));
-        bindDetails(column,detailTitle,detailHelp,detailValue);pages.put(section,view);
-      }
-      pane.addView(view,new FrameLayout.LayoutParams(-1,-1));detailTitle.setText("Choose an option");detailHelp.setText("Focus or select an option to see what it does and when it applies.");detailValue.setText("");if(section.equals("Graphics"))resolutionDetails.run();
-      for(Map.Entry<String,Button> entry:buttons.entrySet()){boolean on=entry.getKey().equals(section)||entry.getKey().equals("Controls")&&Arrays.asList("Touch","Phone","Controller").contains(section);entry.getValue().setSelected(on);}
-      FestivalUi.refreshTree(view);FestivalUi.slideIn(view);root.setTag(FestivalUi.DEFAULT_FOCUS,buttons.get(Arrays.asList("Touch","Phone","Controller").contains(section)?"Controls":section));
-    };
-    for(String section:PAGES){Button button=FestivalUi.button(a,section,false);button.setCompoundDrawables(null,null,null,null);button.setTextSize(12);button.setPadding(0,0,0,0);button.setMinHeight(0);button.setMinimumHeight(0);LinearLayout.LayoutParams tab=new LinearLayout.LayoutParams(0,-1,1);tab.rightMargin=FestivalUi.dp(a,6);tabs.addView(button,tab);button.setOnClickListener(v->select.accept(section));buttons.put(section,button);}
-    LinearLayout header=new LinearLayout(a);root.setTag(FestivalUi.HEADER_ACTIONS,header);Button search=FestivalUi.button(a,"Search / favourites",false);header.addView(search,new LinearLayout.LayoutParams(-2,FestivalUi.dp(a,32)));search.setTextSize(11);search.setMinHeight(0);search.setMinimumHeight(0);search.setOnClickListener(v->select.accept("All settings"));Button reset=FestivalUi.button(a,"Reset / undo",false);LinearLayout.LayoutParams resetParams=new LinearLayout.LayoutParams(-2,FestivalUi.dp(a,32));resetParams.leftMargin=FestivalUi.dp(a,8);header.addView(reset,resetParams);reset.setTextSize(11);reset.setMinHeight(0);reset.setMinimumHeight(0);reset.setOnClickListener(v->{PopupMenu popup=new PopupMenu(a,reset);popup.getMenu().add("Reset this section").setOnMenuItemClickListener(i->{resetSection(a,selected[0],runtime,()->FestivalUi.refreshTree(root));return true;});popup.getMenu().add("Undo last change").setOnMenuItemClickListener(i->{undo(a,runtime);FestivalUi.refreshTree(root);return true;});popup.show();});
-    ControllerPrompts.tabs(root, direction -> {
-      String section = selected[0];
-      if (Arrays.asList("Touch", "Phone", "Controller").contains(section)) section = "Controls";
-      int current = Arrays.asList(PAGES).indexOf(section);
-      String next = PAGES[Math.floorMod(current < 0 ? (direction > 0 ? 0 : -1) : current + direction, PAGES.length)];
-      select.accept(next);
-      buttons.get(next).requestFocus();
+    LinearLayout column;
+    if (section.equals("Controls")) {
+      column = FestivalUi.column(a);
+      FestivalUi.listRow(a,column,"touch","Edit touch layout","Move, resize or add on-screen buttons.",editor);
+      FestivalUi.listRow(a,column,"controller","Touch buttons and steering","Steering style and touch behavior.",()->page(a,"Touch",runtime,editor));
+      FestivalUi.listRow(a,column,"tilt","Phone tilt and vibration","Motion steering and feedback.",()->page(a,"Phone",runtime,editor));
+      FestivalUi.listRow(a,column,"controller","Physical controller","Button mapping and calibration.",()->page(a,"Controller",runtime,editor));
+      FestivalUi.listRow(a,column,"save","Saved layouts and presets","Switch between your layouts.",()->LayoutProfiles.show(a));
+    } else {
+      column = createPage(a, section, runtime, editor, inspect, resolutionDetails);
+    }
+    options.addView(column);
+    bindDetails(column, detailTitle, detailHelp, detailValue);
+    if (section.equals("Graphics")) resolutionDetails.run();
+
+    LinearLayout header = new LinearLayout(a);
+    root.setTag(FestivalUi.HEADER_ACTIONS, header);
+    if (!section.equals(SEARCH)) {
+      Button search = headerButton(a, header, "Search");
+      search.setOnClickListener(v -> page(a, SEARCH, runtime, editor));
+    }
+    Button reset = headerButton(a, header, "Reset / undo");
+    reset.setOnClickListener(v -> {
+      PopupMenu popup = new PopupMenu(a, reset);
+      popup.getMenu().add(section.equals(SEARCH) ? "Reset all settings" : "Reset this section")
+          .setOnMenuItemClickListener(i -> {
+            resetSection(a, section, runtime, () -> FestivalUi.refreshTree(root));
+            return true;
+          });
+      popup.getMenu().add("Undo last change").setOnMenuItemClickListener(i -> {
+        undo(a, runtime);
+        FestivalUi.refreshTree(root);
+        return true;
+      });
+      popup.show();
     });
-    select.accept(first);return root;
+    if (a instanceof FestivalUi.PanelHost && !section.equals(SEARCH)) {
+      String category = Arrays.asList("Touch", "Phone", "Controller").contains(section)
+          ? "Controls" : section;
+      for (int i = 0; i < CATEGORY_CARDS.length; i++) {
+        if (!CATEGORY_CARDS[i][2].equals(category)) continue;
+        int current = i;
+        ControllerPrompts.tabs(root, direction -> {
+          String next = CATEGORY_CARDS[Math.floorMod(current + direction, CATEGORY_CARDS.length)][2];
+          ((FestivalUi.PanelHost) a).replacePanel(pageTitle(next), buildPage(a, next, runtime, editor));
+        });
+        break;
+      }
+    }
+    return root;
+  }
+  private static Button headerButton(Activity a, LinearLayout header, String title) {
+    Button button = FestivalUi.button(a, title, false);
+    button.setTextSize(11);
+    button.setMinHeight(0);
+    button.setMinimumHeight(0);
+    LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-2, FestivalUi.dp(a, 32));
+    if (header.getChildCount() > 0) size.leftMargin = FestivalUi.dp(a, 8);
+    header.addView(button, size);
+    return button;
   }
   private static void bindDetails(View view,TextView title,TextView help,TextView value){
     if(view.isFocusable()&&view.getOnFocusChangeListener()==null)view.setOnFocusChangeListener((v,on)->{if(on){CharSequence caption=v instanceof TextView?((TextView)v).getText():v.getContentDescription();if(caption==null||caption.length()==0)caption=v.getContentDescription();title.setText(caption);Object desc=v.getTag(0x7f0a7f08);help.setText(desc instanceof String?(String)desc:toolHelp(title.getText().toString()));value.setText("");}});
@@ -396,7 +455,6 @@ final class SettingsHub {
       if(runtime!=null){TextView aaActive=FestivalUi.text(a,"",12,FestivalUi.MUTED);rows.addView(aaActive);FestivalUi.onRefresh(aaActive,()->aaActive.setText("Running MSAA: "+(active(runtime,"fh1_msaa_single_sample")==null||active(runtime,"fh1_msaa_2x")==null?"unavailable":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_single_sample")))?"Off":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_2x")))?"2×":"4×")));}
       FestivalUi.action(a, rows, "Graphics presets", () -> presets(a, runtime));
       FestivalUi.action(a, rows, "My graphics profiles", () -> GraphicsProfilePage.show(a,runtime));
-      FestivalUi.action(a,rows,"Graphics drivers",()->{if(a instanceof LauncherActivity)((LauncherActivity)a).openDrivers();else FestivalUi.explain(a,"Graphics drivers","Quit to the launcher to select a driver.");});
     }
     if (page.equals("Graphics")) {
       Button screen = FestivalUi.action(a, rows, "", () -> {});
@@ -469,7 +527,6 @@ final class SettingsHub {
               }
             });
       });
-      FestivalUi.action(a, rows, "Edit touch layout", editor);
       Button steering=FestivalUi.action(a,rows,"",()->{});
       FestivalUi.onRefresh(steering,()->{TouchLayout current=new TouchLayout();current.load(a);steering.setText("Steering: "+(current.steering.equals("arrows")?"Arrows":"Stick"));});
       steering.setOnClickListener(v->{TouchLayout current=new TouchLayout();current.load(a);
@@ -491,7 +548,6 @@ final class SettingsHub {
               error(a, e);
             }
           });
-      FestivalUi.action(a, rows, "Saved layouts and templates", () -> LayoutProfiles.show(a));
       FestivalUi.toggle(a,rows,"Manual shifting controls","Show clutch, shift up and shift down together.",()->{TouchLayout current=new TouchLayout();current.load(a);return !current.hidden[3]||!current.hidden[4]||!current.hidden[6];},on->{try{TouchLayout current=new TouchLayout();current.load(a);for(int index:new int[]{3,4,6})current.hidden[index]=!on;current.save(a);reload(a);}catch(IOException error){error(a,error);}});
 
     }
@@ -537,8 +593,6 @@ final class SettingsHub {
     if (page.equals("Advanced")) {
       FestivalUi.action(a, rows, "Adreno options", () -> AdrenoSettings.show(a, runtime));
       if(runtime!=null){TextView aaActive=FestivalUi.text(a,"",12,FestivalUi.MUTED);rows.addView(aaActive);FestivalUi.onRefresh(aaActive,()->aaActive.setText("Running MSAA: "+(active(runtime,"fh1_msaa_single_sample")==null||active(runtime,"fh1_msaa_2x")==null?"unavailable":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_single_sample")))?"Off":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_2x")))?"2×":"4×")));}
-      FestivalUi.action(a, rows, "Graphics presets", () -> presets(a, runtime));
-      FestivalUi.action(a, rows, "My graphics profiles", () -> GraphicsProfilePage.show(a,runtime));
       pref(a, rows, "Sustained performance mode", "sustained_mode", false);
       pref(a, rows, "Detailed GPU timings · next launch", "detailed_gpu", false);
       pref(a, rows, "Extended comparison capture · up to 64 MB · next launch", "extended_capture", false);
@@ -548,9 +602,6 @@ final class SettingsHub {
               + "cooling. It keeps your saved preset.",
           12, FestivalUi.MUTED));
       if(a instanceof PinyonShiftActivity)FestivalUi.action(a,rows,"Original game settings",()->((PinyonShiftActivity)a).openNativeSettings());
-      FestivalUi.action(a, rows, "Graphics cache", () -> GraphicsCache.show(a));
-      FestivalUi.action(
-          a, rows, "Record a performance comparison", () -> ProblemReports.capture(a));
     }
     if (page.equals("Gameplay")) {
       if (!(a instanceof PinyonShiftActivity)) {
@@ -563,7 +614,6 @@ final class SettingsHub {
               UiPreferences.save(a);
             });
       }
-      FestivalUi.action(a, rows, "Cheats · separate profile", () -> TrainerPage.show(a, runtime));
     }
   }
   static void pref(Activity a, LinearLayout rows, String title, String key, boolean fallback) {

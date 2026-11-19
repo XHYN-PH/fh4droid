@@ -33,6 +33,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
     bool stick = false;
     float stick_x = 0.0f, stick_y = 0.0f;  // the knob, for the stick
     float opacity = 1.f;
+    float background_opacity = .55f;
     bool driving_icons = true, button_hints = true;
     float icon_opacity = .95f;
     float amount = 0;
@@ -113,7 +114,7 @@ class TouchPad final : public rex::ui::WindowInputListener {
   Control Action(Control source) const;
   const char* DisplayLabel(const Layout& control) const;
   std::vector<bool> hidden_;
-  std::vector<float> timeouts_;
+  std::vector<float> timeouts_, control_opacity_;
   std::vector<std::chrono::steady_clock::time_point> activity_;
   float opacity_ = 0.55f, icon_opacity_ = .95f;
   bool auto_hide_ = true;

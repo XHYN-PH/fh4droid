@@ -308,8 +308,8 @@ public final class RacingLauncherView extends FrameLayout {
       } else {
         body.setGravity(Gravity.TOP);
         body.addView(externalBody, lp(-1, -2));
+        FestivalUi.attachPageScroll(externalBody, scroll);
       }
-      FestivalUi.attachPageScroll(externalBody, scroll);
     } else if (page.equals("home")) {
       if (design == Design.FESTIVAL) festival(body);
       else grid(body);
@@ -322,7 +322,7 @@ public final class RacingLauncherView extends FrameLayout {
     post(
         () -> {
           if (externalBody != expected || !page.equals(expectedPage)) return;
-          if (externalBody != null) FestivalUi.restorePage(externalBody, scroll);
+          if (externalBody != null) FestivalUi.restorePage(externalBody);
           else {
             requestActionFocus(
                 pageFocus.getOrDefault(page, page.equals("home") ? lastHome : firstCard()));
@@ -464,6 +464,8 @@ public final class RacingLauncherView extends FrameLayout {
     right.setOnClickListener(v -> open(b));
   }
 
+  private int menuCardHeight(){return cardHeight(compact ? 74 : 84);}
+
   private boolean stackedHome(){return getResources().getConfiguration().screenWidthDp<540 || largeText();}
   private void grid(LinearLayout body) {
     body.setGravity(Gravity.CENTER_VERTICAL);
@@ -474,15 +476,15 @@ public final class RacingLauncherView extends FrameLayout {
       FocusCard play=card("play","play",model.running?"Resume":model.ready?"Play":"Set up game","Start Forza Horizon",true,false);
       body.addView(play,lp(-1,cardHeight(compact?72:80)));play.setOnClickListener(v->activate("play"));
       gap(body,compact?6:10);
-      LinearLayout first=row(),second=row();body.addView(first,lp(-1,cardHeight(compact?45:58)));gap(body,compact?6:10);body.addView(second,lp(-1,cardHeight(compact?45:58)));
+      LinearLayout first=row(),second=row();body.addView(first,lp(-1,menuCardHeight()));gap(body,compact?6:10);body.addView(second,lp(-1,menuCardHeight()));
       addPair(first,"settings","sliders","Settings","Graphics & sound","controls","controller","Controls","Touch & controller");
       addPair(second,"files","folder","Game files","Installation & storage","more","grid","More","Mods, saves & tools");
     }else{
-      LinearLayout area=row();body.addView(area,lp(-1,cardHeight(compact?105:135)));
+      LinearLayout area=row();body.addView(area,new LinearLayout.LayoutParams(-1,2*dp(menuCardHeight())+dp(10)));
       FocusCard play=card("play","play",model.running?"Resume":model.ready?"Play":"Set up game","Start Forza Horizon",true,true);
       area.addView(play,new LinearLayout.LayoutParams(0,-1,1));play.setOnClickListener(v->activate("play"));
-      LinearLayout options=column();LinearLayout.LayoutParams op=new LinearLayout.LayoutParams(0,-1,1.6f);op.leftMargin=dp(10);area.addView(options,op);
-      LinearLayout first=row(),second=row();options.addView(first,new LinearLayout.LayoutParams(-1,0,1));gap(options,8);options.addView(second,new LinearLayout.LayoutParams(-1,0,1));
+      LinearLayout options=column();LinearLayout.LayoutParams op=new LinearLayout.LayoutParams(dp(10),-1,2);op.leftMargin=dp(10);area.addView(options,op);
+      LinearLayout first=row(),second=row();options.addView(first,new LinearLayout.LayoutParams(-1,0,1));gap(options,10);options.addView(second,new LinearLayout.LayoutParams(-1,0,1));
       addPair(first,"settings","sliders","Settings","Graphics & sound","controls","controller","Controls","Touch & controller");
       addPair(second,"files","folder","Game files","Installation & storage","more","grid","More","Mods, saves & tools");
     }
@@ -495,15 +497,7 @@ public final class RacingLauncherView extends FrameLayout {
       case "settings":
         heading = "Settings";
         description = "Tune graphics, sound and controls.";
-        entries =
-            new String[][] {
-              {"graphics", "sliders", "Graphics", "Resolution, quality & FPS"},
-              {"audio", "audio", "Audio", "Volume & music"},
-              {"control-settings", "controller", "Controls", "Touch, tilt & gamepad"},
-              {"interface", "grid", "Interface", "Display & readability"},
-              {"gameplay", "flag", "Gameplay", "Camera & preferences"},
-              {"advanced", "chip", "Advanced", "Drivers & diagnostics"}
-            };
+        entries = SettingsHub.CATEGORY_CARDS;
         break;
       case "controls":
         heading = "Choose how you drive.";
@@ -520,8 +514,7 @@ public final class RacingLauncherView extends FrameLayout {
         description = "Use your own supported game folder or disc image.";
         entries =
             new String[][] {
-              {"choose-game", "folder", "Choose game files", "Folder or disc image"},
-              {"verify", "check", "Check installation", "Verify installed files"},
+              {"choose-game", "folder", "Installation", "Choose or check game files"},
               {"storage", "save", "Storage", "Manage installed data"}
             };
         break;
@@ -550,10 +543,10 @@ public final class RacingLauncherView extends FrameLayout {
     }
     title(body, heading, description, compact ? 25 : 30);
     gap(body, compact ? 14 : 20);
-    int columns = columns();
+    int columns = page.equals("settings") && stackedHome() ? 2 : columns();
     for (int index = 0; index < entries.length; index += columns) {
       LinearLayout line = row();
-      body.addView(line, lp(-1, cardHeight(compact ? 74 : 84)));
+      body.addView(line, lp(-1, menuCardHeight()));
       for (int c = 0; c < columns; c++) {
         if (index + c >= entries.length) {
           line.addView(new View(getContext()), new LinearLayout.LayoutParams(0, 1, 1));
@@ -733,7 +726,8 @@ public final class RacingLauncherView extends FrameLayout {
 
   private void open(String action) {
     lastHome = action;
-    showPage(action);
+    if (action.equals("controls")) actions.open("control-settings");
+    else showPage(action);
   }
 
   private void activate(String action) {
@@ -808,7 +802,7 @@ public final class RacingLauncherView extends FrameLayout {
           focus.get(id).setNextFocusUpId(last.getId());
       }
     } else {
-      int columns = columns();
+      int columns = page.equals("settings") && stackedHome() ? 2 : columns();
       java.util.List<String> cards = new ArrayList<>(focus.keySet());
       cards.removeAll(Arrays.asList("back", "youtube", "telegram", "github"));
       for (int i = 0; i < cards.size(); i++) {

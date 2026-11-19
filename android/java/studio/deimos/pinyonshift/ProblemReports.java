@@ -13,7 +13,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 final class ProblemReports {
     private static final AtomicBoolean EXPORTING=new AtomicBoolean();
-    static void capture(Activity a){if(a instanceof LauncherActivity)((LauncherActivity)a).startDiagnosticRun();else FestivalUi.explain(a,"Performance comparison","Quit to the launcher, open Settings → Advanced and choose Record a performance comparison. Drive the same route with each configuration, then export a problem report.");}
     private static void entry(ZipOutputStream zip,String name,byte[] data)throws IOException{zip.putNextEntry(new ZipEntry(name));zip.write(data);zip.closeEntry();}
     private static org.json.JSONObject sessionBuild(File file){
         try(RandomAccessFile in=new RandomAccessFile(file,"r")){byte[] first=new byte[(int)Math.min(65536,in.length())];in.readFully(first);String line=new String(first,StandardCharsets.UTF_8).split("\\n",2)[0];return new org.json.JSONObject(line);}catch(Exception ignored){return new org.json.JSONObject();}
@@ -88,11 +87,10 @@ final class ProblemReports {
     private static void share(Activity a,android.widget.Button button){
         if(a.isFinishing()||a.isDestroyed())return;
         if(!EXPORTING.compareAndSet(false,true)){android.widget.Toast.makeText(a,"A report is already being prepared.",0).show();return;}
-        if(a instanceof PinyonShiftActivity)((PinyonShiftActivity)a).captureReportState();
         final CharSequence label=button==null?null:button.getText();
         if(button!=null){button.setEnabled(false);button.setText("Preparing report…");}
         final Context app=a.getApplicationContext();
-        new Thread(()->{
+        Runnable export=()->new Thread(()->{
             File result=null;String failure=null;
             try{result=ReportFiles.create(app.getCacheDir(),out->write(app,out));}
             catch(IOException|RuntimeException error){failure=error.getMessage()==null?"The report could not be created.":error.getMessage();}
@@ -108,6 +106,8 @@ final class ProblemReports {
                 try{a.startActivity(Intent.createChooser(send,"Share problem report"));}catch(ActivityNotFoundException e){android.widget.Toast.makeText(a,"No app available for sharing.",1).show();}
             });
         },"ReportExport").start();
+        if(a instanceof PinyonShiftActivity)((PinyonShiftActivity)a).captureReportState(export);
+        else export.run();
     }
     private ProblemReports(){}
 }

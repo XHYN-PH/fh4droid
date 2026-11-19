@@ -150,6 +150,11 @@ int main() {
   { std::ofstream out(layout); out << "steering_buttons 0\n"; }
   pad.LoadLayout(layout); CHECK(Has(pad, "LS") && !Has(pad, "LEFT"));
 
+  { std::ofstream out(layout); out << "opacity 0.55\ncontrol_opacity RT 0.28\n"; }
+  pad.LoadLayout(layout);
+  CHECK(std::abs(Find(pad, "RT").background_opacity-.28f)<.001f);
+  CHECK(std::abs(Find(pad, "RT").icon_opacity-.28f)<.001f);
+  CHECK(std::abs(Find(pad, "LT").background_opacity-.55f)<.001f);
   { std::ofstream out(layout); out << "steering_response_ms 200\nanalog_pedals 1\nhigh_contrast 1\nopacity 0.2\n"; }
   pad.LoadLayout(layout);
   CHECK(pad.Opacity() >= .85f);
@@ -259,7 +264,7 @@ int main() {
   pad.LoadLayout(layout);Access::Touch(pad,1,Action::kDown,fixed.x+fixed.radius*.5f,fixed.y);
   CHECK(pad.State().thumb_lx==0);Release(pad,1);
 
-  const auto overlay=pinyon_shift::ui::TouchOverlayForShapes(pad.Shapes(1280,720),pad.Opacity());
+  const auto overlay=pinyon_shift::ui::TouchOverlayForShapes(pad.Shapes(1280,720));
   bool base=false,knob=false;
   for(const auto& disc:overlay){CHECK(pinyon_shift::ui::FindTouchIcon(disc.label)!=nullptr);if(disc.label=="LS"){base|=!disc.thumb_knob;knob|=disc.thumb_knob;}}
   CHECK(base&&knob); // Both stick parts have a drawable identity in gameplay.

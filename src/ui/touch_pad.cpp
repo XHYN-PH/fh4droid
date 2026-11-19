@@ -117,7 +117,7 @@ void TouchPad::LoadLayout(const std::filesystem::path& path) {
   {
     std::lock_guard lock(mutex_);
     controls_ = Controls(); mapping_.clear(); hidden_.assign(controls_.size(), false);
-    timeouts_.assign(controls_.size(),-1);activity_.assign(controls_.size(),{});
+    timeouts_.assign(controls_.size(),-1);control_opacity_.assign(controls_.size(),0);activity_.assign(controls_.size(),{});
     opacity_ = 0.55f; icon_opacity_ = .95f; auto_hide_ = true; arrow_steering_ = true; fingers_.clear();
     analog_pedals_ = false; high_contrast_ = false; steering_response_ms_ = 0;
     steering_return_ms_ = -1; steering_lock_ = 1.f;
@@ -156,14 +156,19 @@ void TouchPad::LoadLayout(const std::filesystem::path& path) {
           auto source=find(from),target=find(to);if(valid(source)&&valid(target))mapping_[source]=target;
         }
       }
-      else if (label == "timeout") {
+      else if (label == "timeout" || label == "control_opacity") {
         std::string name;float value;
         if(row>>name>>value && std::isfinite(value)){
           if(extended && name=="LEFT")name="DPAD_LEFT";
           else if(extended && name=="RIGHT")name="DPAD_RIGHT";
           else if(name=="STEER-L")name="LEFT";
           else if(name=="STEER-R")name="RIGHT";
-          for(size_t i=0;i<controls_.size();i++)if(name==controls_[i].label)timeouts_[i]=std::clamp(value,-1.f,120.f);
+          for (size_t i=0; i<controls_.size(); ++i) {
+            if (name!=controls_[i].label) continue;
+            if (label=="timeout") timeouts_[i]=std::clamp(value,-1.f,120.f);
+            else control_opacity_[i]=std::clamp(value,0.f,1.f);
+            break;
+          }
         }
       }
       else {
@@ -605,7 +610,10 @@ std::vector<TouchPad::Shape> TouchPad::Shapes(float width, float height) const {
       case Control::kSteerRight:shape.amount=std::max(0.f,output.thumb_lx/32767.f);break;
       default:break;}}
 
-    shape.opacity=Alpha(i);shape.icon_opacity=icon_opacity_;shape.driving_icons=driving_icons_&&!UsesMenuControls();shape.button_hints=button_hints_;
+    const float override_opacity=i<control_opacity_.size()?control_opacity_[i]:0.f;
+    const float background=override_opacity>0.f?override_opacity:opacity_;
+    shape.background_opacity=high_contrast_?std::max(background,.85f):background;
+    shape.opacity=Alpha(i);shape.icon_opacity=override_opacity>0.f?override_opacity:icon_opacity_;shape.driving_icons=driving_icons_&&!UsesMenuControls();shape.button_hints=button_hints_;
     shape.stick = control.control == Control::kStick || control.control == Control::kRightStick;
     shape.stick_x = shape.x;
     shape.stick_y = shape.y;

@@ -17,13 +17,14 @@ final class TouchLayout {
     final int[] mapping=new int[LABELS.length];
     final boolean[] hidden=new boolean[LABELS.length];
     final float[] timeout=new float[LABELS.length];
+    final float[] controlOpacity=new float[LABELS.length];
     float opacity,idleSeconds,iconOpacity,steeringLock;
     boolean autoHide,analogPedals,highContrast,haptics,drivingLabels,buttonHints;
     String steering;
     int steeringResponseMs,steeringReturnMs,leftMode,rightMode;
     TouchLayout(){reset();}
     void reset(){
-        for(int i=0;i<values.length;i++){System.arraycopy(DEFAULTS[i],0,values[i],0,3);hidden[i]=false;timeout[i]=-1;mapping[i]=i;}
+        for(int i=0;i<values.length;i++){System.arraycopy(DEFAULTS[i],0,values[i],0,3);hidden[i]=false;timeout[i]=-1;mapping[i]=i;controlOpacity[i]=0;}
         opacity=.55f;iconOpacity=.95f;idleSeconds=20;autoHide=true;steering="arrows";steeringResponseMs=0;steeringReturnMs=-1;steeringLock=1;
         analogPedals=false;highContrast=false;haptics=false;drivingLabels=true;buttonHints=true;leftMode=rightMode=0;
     }
@@ -50,7 +51,13 @@ final class TouchLayout {
         !(name.equals("LEFT")||name.equals("RIGHT"))||steering.equals("arrows");}
     static String displayLabel(int i,boolean driving){return driving?TouchIcons.TITLES[i]:LABELS[i].replace("DPAD_","D-pad ");}
     private static float bounded(String text,float min,float max){float v=Float.parseFloat(text);if(!Float.isFinite(v))throw new NumberFormatException();return Math.max(min,Math.min(max,v));}
+    float backgroundOpacity(int i){
+        float value=controlOpacity[i]>0?controlOpacity[i]:opacity;
+        return highContrast?Math.max(.85f,value):value;
+    }
+    float labelOpacity(int i){return controlOpacity[i]>0?controlOpacity[i]:iconOpacity;}
     void parse(String text){
+        Arrays.fill(controlOpacity,0);
         boolean extended=false;
         for(String row:text.split("\n")){String name=row.trim().split("\\s+",2)[0];if(name.equals("steering_buttons")||name.equals("STEER-L")||name.equals("STEER-R")){extended=true;break;}}
         for(String row:text.split("\n")){
@@ -73,13 +80,16 @@ final class TouchLayout {
                     case "idle_seconds":idleSeconds=bounded(words[1],0,120);break;
                     case "left_mode":leftMode=(int)bounded(words[1],0,2);break;
                     case "right_mode":rightMode=(int)bounded(words[1],0,2);break;
-                }}else if(words.length==3&&words[0].equals("timeout")){
+                }}else if(words.length==3&&(words[0].equals("timeout")||words[0].equals("control_opacity"))){
                     String name=words[1];
                     if(extended&&name.equals("LEFT"))name="DPAD_LEFT";
                     else if(extended&&name.equals("RIGHT"))name="DPAD_RIGHT";
                     else if(name.equals("STEER-L"))name="LEFT";
                     else if(name.equals("STEER-R"))name="RIGHT";
-                    int i=Arrays.asList(LABELS).indexOf(name);if(i>=0)timeout[i]=bounded(words[2],-1,120);
+                    int i=Arrays.asList(LABELS).indexOf(name);if(i>=0){
+                        if(words[0].equals("timeout"))timeout[i]=bounded(words[2],-1,120);
+                        else controlOpacity[i]=bounded(words[2],0,1);
+                    }
                 }else if(words.length==3&&words[0].equals("map")){
                     int from=Arrays.asList(LABELS).indexOf(words[1]),to=Arrays.asList(LABELS).indexOf(words[2]);if(mappable(from)&&mappable(to))mapping[from]=to;
                 }else if(words.length==5){
@@ -98,7 +108,7 @@ final class TouchLayout {
         text.append("steering_return_ms ").append(steeringReturnMs).append("\nsteering_lock ").append(steeringLock).append('\n');
         text.append("icon_opacity ").append(iconOpacity).append('\n');
         text.append("driving_labels ").append(drivingLabels?1:0).append("\nbutton_hints ").append(buttonHints?1:0).append("\nidle_seconds ").append(idleSeconds).append("\nleft_mode ").append(leftMode).append("\nright_mode ").append(rightMode).append('\n');
-        for(int i=0;i<values.length;i++){text.append(String.format(Locale.ROOT,"%s %.6f %.6f %.6f %d%n",LABELS[i],values[i][0],values[i][1],values[i][2],hidden[i]?1:0));text.append("timeout ").append(LABELS[i]).append(' ').append(timeout[i]).append('\n');if(mapping[i]!=i)text.append("map ").append(LABELS[i]).append(' ').append(LABELS[mapping[i]]).append('\n');}
+        for(int i=0;i<values.length;i++){text.append(String.format(Locale.ROOT,"%s %.6f %.6f %.6f %d%n",LABELS[i],values[i][0],values[i][1],values[i][2],hidden[i]?1:0));text.append("timeout ").append(LABELS[i]).append(' ').append(timeout[i]).append('\n');if(controlOpacity[i]>0)text.append("control_opacity ").append(LABELS[i]).append(' ').append(controlOpacity[i]).append('\n');if(mapping[i]!=i)text.append("map ").append(LABELS[i]).append(' ').append(LABELS[mapping[i]]).append('\n');}
         return text.toString();
     }
     static File file(Context c){return new File(MobileConfig.base(c),"state/config/touch-layout.txt");}

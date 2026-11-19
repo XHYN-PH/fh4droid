@@ -179,7 +179,8 @@ def compare(manifest,threshold=5):
         delta=b["comparison"]["metrics"]["p95_frame_time_us"]["delta_percent"]
         reference_p99 = a["frames"]["frame_time_us"]["p99"]
         p99_delta = (b["frames"]["frame_time_us"]["p99"] / reference_p99 - 1) * 100 if reference_p99 else None
-        comparisons.append({"case":run["case"],"status":"regression" if delta>threshold else "within-threshold",
+        regressed = delta > threshold or p99_delta is not None and p99_delta > threshold
+        comparisons.append({"case":run["case"],"status":"regression" if regressed else "within-threshold",
                             "p95_delta_percent":delta,"p99_delta_percent":p99_delta})
     return {"schema":"fh4droid.performance-suite.v1","runs":results,"comparisons":comparisons,
             "scale_trials":scale_trials(results),"qualified_devices":[],"note":"Timing comparisons do not qualify visuals, audio, long-session stability or a GPU family. A/A repeats establish measurement noise before interpreting small changes."}

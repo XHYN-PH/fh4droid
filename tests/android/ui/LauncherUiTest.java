@@ -100,7 +100,7 @@ public class LauncherUiTest {
     Bitmap image = screenshot(root, "B-home");
     assertEquals(
         "Approved B home pixels changed",
-        "4286376af7d26f01699391bd112bbf7de3ab6e76ed754374257009cce9ccfbc7",
+        "d2e01e0391192b6bc2bee7c3fd9c9a18cff47241ae70f7b21258b75670ad7fe2",
         pixelDigest(image));
     String baseline = System.getProperty("launcher.preview.baseline");
     if (baseline != null) {
@@ -127,6 +127,21 @@ public class LauncherUiTest {
     arrange(root, 2400, 1080);
     root.requestActionFocus("graphics");
     screenshot(root, "B-settings-categories");
+  }
+
+  @Test
+  public void homeActionsMatchSettingsCardsAndUseSharedControls() {
+    RacingLauncherView root = create(false);
+    arrange(root, 2400, 1080);
+    int width = root.findViewWithTag("settings").getWidth();
+    int height = root.findViewWithTag("settings").getHeight();
+    root.findViewWithTag("controls").performClick();
+    assertEquals("control-settings", actions.get(actions.size() - 1));
+    root.showPage("settings");
+    arrange(root, 2400, 1080);
+    View graphics = root.findViewWithTag("graphics");
+    assertTrue(Math.abs(width - graphics.getWidth()) <= 1);
+    assertEquals(height, graphics.getHeight());
   }
 
   @Test
@@ -318,7 +333,7 @@ public class LauncherUiTest {
     String[][] groups = {
       {"settings", "graphics", "audio", "control-settings", "interface", "gameplay", "advanced"},
       {"controls", "touch-layout", "controller", "tilt"},
-      {"files", "choose-game", "verify", "storage"},
+      {"files", "choose-game", "storage"},
       {"profile", "edit-profile", "achievements", "saves"},
       {"more", "mods", "drivers", "saves", "achievements", "reports", "about"}
     };

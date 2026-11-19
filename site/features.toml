@@ -305,17 +305,17 @@ cells = ["yes", "yes", "yes", "partly: save backups; Android photo capture omitt
 [[platform]]
 feature = "Android launcher and touch editor"
 link = "android.md#launcher"
-cells = ["n/a", "n/a", "n/a", "partly: racing card launcher, management grid, controller focus with short optional transitions, organized settings, full-window editor; 20 touch labels in a shared atlas, arrows/stick, presets, remapping, undo/redo, separate arrow rates, per-control fading and photo-camera LB/RB and sticks; device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: racing card launcher, management grid, controller focus with short optional transitions, separate settings category pages with help beside the options, full-window editor with floating tools and a hidden-button picker; 20 touch labels in a shared atlas, arrows/stick, presets, remapping, undo/redo, separate arrow rates, per-control opacity and fading, and photo-camera LB/RB and sticks; device testing pending"]
 
 [[platform]]
 feature = "Direct ISO and folder loading"
 link = "android.md#game-files"
-cells = ["n/a", "n/a", "n/a", "partly: supported base game from an ISO or a local folder Android can read directly; copy fallback, verification progress and storage usage; device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: supported base game from an ISO or a local folder Android can read directly; copy fallback, ISO and local cache verification, progress and storage usage; device testing pending"]
 
 [[platform]]
 feature = "Phone save import/export and reports"
 link = "android.md#saves"
-cells = ["n/a", "n/a", "n/a", "partly: scoped normal/modded archives, backup export/restore/delete, original-XUID base-game Xenia import; current-session reports, recent frame timings, optional incident image and a background-aware stall watchdog; device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: scoped normal/modded archives and original-XUID base-game Xenia imports up to 4 GiB of save data, backup export/restore/delete with interrupted-swap recovery; current-session reports, recent frame timings, optional incident image and a background-aware stall watchdog; device testing pending"]
 
 [[platform]]
 feature = "Android mod and pipeline management"

@@ -23,14 +23,14 @@ struct TouchOverlayDisc {
 };
 // Build both halves of a stick with its real identity: the base owns the
 // modern icon/caption, the moving knob stays unlabelled in driving mode.
-inline std::vector<TouchOverlayDisc> TouchOverlayForShapes(const auto& shapes,float opacity){
+inline std::vector<TouchOverlayDisc> TouchOverlayForShapes(const auto& shapes){
   std::vector<TouchOverlayDisc> discs;
   for(const auto& shape:shapes){
     discs.push_back({shape.x,shape.y,shape.radius,shape.label,
-        shape.pressed&&!shape.stick,opacity*shape.opacity,shape.driving_icons,
+        shape.pressed&&!shape.stick,shape.background_opacity*shape.opacity,shape.driving_icons,
         shape.button_hints,shape.icon_opacity*shape.opacity,false,shape.amount});
     if(shape.stick)discs.push_back({shape.stick_x,shape.stick_y,shape.radius*.55f,
-        shape.label,shape.pressed,opacity*shape.opacity,shape.driving_icons,
+        shape.label,shape.pressed,shape.background_opacity*shape.opacity,shape.driving_icons,
         shape.button_hints,shape.icon_opacity*shape.opacity,true});
   }
   return discs;

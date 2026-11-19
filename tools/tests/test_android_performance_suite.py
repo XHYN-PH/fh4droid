@@ -31,6 +31,25 @@ class AndroidPerformanceSuiteTests(unittest.TestCase):
             self.assertEqual(result["comparisons"][0]["status"],"within-threshold")
             self.assertEqual(result["qualified_devices"],[])
 
+    def test_p99_stalls_flag_a_regression_with_an_unchanged_p95(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=pathlib.Path(temporary)
+            manifest,data=self.fixture(root)
+            with (root/"route.csv").open(encoding="utf-8") as source:
+                rows=list(csv.DictReader(source))
+            for row in rows[-2:]:
+                row["frame_time_us"]="1800000"
+            with (root/"stutter.csv").open("w",newline="",encoding="utf-8") as stream:
+                writer=csv.DictWriter(stream,fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+            data["runs"][1]["csv"]="stutter.csv"
+            manifest.write_text(json.dumps(data))
+            result=suite.compare(manifest)["comparisons"][0]
+            self.assertEqual(result["p95_delta_percent"],0)
+            self.assertGreater(result["p99_delta_percent"],5)
+            self.assertEqual(result["status"],"regression")
+
     def test_short_or_mismatched_runs_are_unqualified(self):
         with tempfile.TemporaryDirectory() as temporary:
             manifest,data=self.fixture(pathlib.Path(temporary),duration=10)
