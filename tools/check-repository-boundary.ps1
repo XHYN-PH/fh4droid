@@ -64,7 +64,7 @@ foreach ($relativePath in $candidateFiles) {
         }
     }
 
-    $fileInfo = Get-Item -LiteralPath $fullPath
+    $fileInfo = Get-Item -LiteralPath $fullPath -Force
     if ($fileInfo.Length -gt [int64]$policy.max_public_file_bytes -and
         $normalizedLower -notin $allowedLargeFiles) {
         $violations.Add([pscustomobject]@{
