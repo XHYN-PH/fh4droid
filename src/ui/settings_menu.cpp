@@ -471,6 +471,9 @@ std::unique_ptr<MenuScreen> SettingsPages::Display() {
     std::vector<Choice> scaling = {{"BILINEAR", {{"present_effect", "\"bilinear\""}}},
                                    {"CAS", {{"present_effect", "\"cas\""}}},
                                    {"FSR 1", {{"present_effect", "\"fsr\""}}}};
+#if REX_PLATFORM_ANDROID
+    scaling.insert(scaling.begin(), {"OFF (NEAREST)", {{"present_effect", "\"nearest\""}}});
+#endif
     const std::string saved_effect = Unquote(Saved("present_effect"));
     std::vector<rex::ui::UpscalerInfo> upscalers =
         services_.upscalers ? services_.upscalers() : std::vector<rex::ui::UpscalerInfo>{};

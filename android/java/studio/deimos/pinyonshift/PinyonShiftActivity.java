@@ -206,7 +206,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
                 gameIso=getContentResolver().openFileDescriptor(Uri.parse(isoUri),"r");
                 if(gameIso==null)throw new IOException("The disc image is unavailable.");
                 android.system.Os.lseek(gameIso.getFileDescriptor(),0,android.system.OsConstants.SEEK_SET);
-                setEnvironment("PINYON_SHIFT_GAME_ISO","/proc/self/fd/"+gameIso.getFd());
+                setEnvironment("PINYON_SHIFT_GAME_ISO_FD",Integer.toString(gameIso.getFd()));
             }catch(Exception error){
                 if(gameIso!=null)try{gameIso.close();}catch(IOException ignored){}
                 launchError="Disc image unavailable. Choose the ISO again in Game files and keep it in local storage while playing.";

@@ -2,7 +2,6 @@
 
 #include <mutex>
 #include <set>
-#include <cstdlib>
 #include <rex/filesystem/devices/disc_image_device.h>
 
 #include <rex/filesystem/entry.h>
@@ -18,11 +17,11 @@ OverlayDevice::OverlayDevice(std::string_view mount_path, const std::filesystem:
     : Device(mount_path) {
   // Game files are read-only, the base and every overlay alike.
 #if defined(__ANDROID__)
-  const char* iso = std::getenv("PINYON_SHIFT_GAME_ISO");
-  if (iso && *iso) base_ = std::make_unique<rex::filesystem::DiscImageDevice>(mount_path, iso);
-  else
+  base_ = rex::filesystem::DiscImageDevice::FromAndroidLaunch(mount_path);
 #endif
-  base_ = std::make_unique<rex::filesystem::HostPathDevice>(mount_path, base_root, true);
+  if (!base_) {
+    base_ = std::make_unique<rex::filesystem::HostPathDevice>(mount_path, base_root, true);
+  }
   for (const auto& root : overlay_roots) {
     overlays_.push_back(
         std::make_unique<rex::filesystem::HostPathDevice>(mount_path, root, true));

@@ -19,7 +19,14 @@ import org.robolectric.shadows.ShadowLooper;
 @GraphicsMode(GraphicsMode.Mode.NATIVE) @LooperMode(LooperMode.Mode.PAUSED)
 public class UiPolishTest {
   private Activity activity(){Activity a=Robolectric.buildActivity(Activity.class).setup().visible().get();a.getSharedPreferences("mobile",0).edit().clear().putBoolean("animations",false).commit();return a;}
-  private LinearLayout settings(Activity a,String section)throws Exception{Method m=SettingsHub.class.getDeclaredMethod("buildPage",Activity.class,String.class,MobileSettings.Runtime.class,Runnable.class);m.setAccessible(true);return (LinearLayout)m.invoke(null,a,section,null,(Runnable)()->{});}
+  private LinearLayout settings(Activity a,String section)throws Exception{
+    return settings(a,section,null);
+  }
+  private LinearLayout settings(Activity a,String section,MobileSettings.Runtime runtime)throws Exception{
+    Method build=SettingsHub.class.getDeclaredMethod("buildPage",Activity.class,String.class,MobileSettings.Runtime.class,Runnable.class);
+    build.setAccessible(true);
+    return (LinearLayout)build.invoke(null,a,section,runtime,(Runnable)()->{});
+  }
   private void arrange(View v,int w,int h){ShadowLooper.idleMainLooper();v.measure(View.MeasureSpec.makeMeasureSpec(w,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(h,View.MeasureSpec.EXACTLY));v.layout(0,0,w,h);}
   private void render(View v,int w,int h,String name)throws Exception{arrange(v,w,h);Bitmap b=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888);v.draw(new Canvas(b));new File("renders-integrated").mkdirs();try(OutputStream out=new FileOutputStream("renders-integrated/"+name+".png")){b.compress(Bitmap.CompressFormat.PNG,100,out);}b.recycle();}
   private RacingLauncherView shell(Activity a)throws Exception{File source=new File(System.getProperty("launcher.source.root"));Bitmap bg=BitmapFactory.decodeFile(new File(source,"android/art/menu-background.png").toString());BitmapFactory.Options opts=new BitmapFactory.Options();opts.inSampleSize=4;Bitmap logo=BitmapFactory.decodeFile(new File(source,"android/art/menu-logo.png").toString(),opts);RacingLauncherView v=new RacingLauncherView(a,RacingLauncherView.Design.GRID,new RacingLauncherView.Model(),bg,logo,x->{});a.setContentView(v);return v;}
@@ -39,6 +46,104 @@ public class UiPolishTest {
     }
   }
   @Test @Config(qualifiers="w640dp-h360dp-land-xxhdpi") public void compactDetailsRemainOnRight()throws Exception{Activity a=activity();RacingLauncherView root=shell(a);LinearLayout settings=settings(a,"Graphics");root.showContent("Graphics",settings,false);render(root,1920,1080,"test5-settings-compact");Rect d=new Rect(),s=new Rect();assertTrue(settings.findViewWithTag("details-panel").getGlobalVisibleRect(d));assertTrue(settings.findViewWithTag("settings-scroll").getGlobalVisibleRect(s));assertTrue(d.left>=s.right);}
+
+  @Test public void everySettingsChoiceSavesFromItsCategoryAndAppliesAtTheRightTime()throws Exception{
+    Activity a=activity();
+    Map<String,String> running=new LinkedHashMap<>();
+    MobileSettings.Runtime runtime=new MobileSettings.Runtime(){
+      public void changed(String key,String value){running.put(key,value);}
+      public String value(String key){return running.get(key);}
+    };
+    java.lang.reflect.Field catalog=SettingsHub.class.getDeclaredField("OPTIONS");
+    catalog.setAccessible(true);
+    @SuppressWarnings("unchecked")
+    List<MobileSettings.Option> options=(List<MobileSettings.Option>)catalog.get(null);
+    Map<String,String> initial=new LinkedHashMap<>();
+    for(MobileSettings.Option option:options){
+      String value=option.values[1];
+      initial.put(option.key,option.string?MobileConfig.quote(value):value);
+    }
+    initial.put("enabled_mods",MobileConfig.quote("immersive_camera"));
+    MobileConfig.putAll(a,initial);
+    AdrenoSettings.record(a,"auto","{\"ok\":true,\"coarse_shading_supported\":true}");
+    Set<String> reached=new HashSet<>();
+    int choices=0;
+    for(String section:new String[]{"Graphics","Audio","Controls","Touch","Phone",
+        "Controller","Interface","Gameplay","Advanced"}){
+      LinearLayout page=settings(a,section,runtime);
+      a.setContentView(page);
+      arrange(page,2400,1080);
+      for(MobileSettings.Option option:options){
+        View row=page.findViewWithTag(option.key);
+        if(row==null)continue;
+        assertTrue("Duplicate option "+option.key,reached.add(option.key));
+        assertTrue("Fixture could not enable "+option.key,row.isEnabled());
+        assertTrue("Could not focus "+option.key,row.requestFocus());
+        for(int i=0;i<option.values.length;i++){
+          running.clear();
+          int key=i==0?KeyEvent.KEYCODE_DPAD_LEFT:KeyEvent.KEYCODE_DPAD_RIGHT;
+          assertTrue(option.key,row.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,key)));
+          assertTrue(option.key+" choice "+option.values[i],
+              SettingValues.same(option.values[i],MobileConfig.get(a,option.key,"missing")));
+          if(option.restart)assertTrue(option.key+" applied early",running.isEmpty());
+          else{
+            assertEquals(option.key,Collections.singleton(option.key),running.keySet());
+            assertTrue(option.key,SettingValues.same(option.values[i],running.get(option.key)));
+          }
+          choices++;
+        }
+      }
+    }
+    assertEquals(options.size(),reached.size());
+    System.out.println("Checked "+choices+" Android setting choices across "+reached.size()+" options");
+  }
+
+  @Test public void nearestFilterSavesWithoutChangingResolutionOrAntiAliasing()throws Exception{
+    Activity a=activity();
+    Map<String,String> initial=new HashMap<>();
+    initial.put("fh1_render_scale_percent","90");
+    initial.put("present_effect",MobileConfig.quote("bilinear"));
+    initial.put("swap_post_effect",MobileConfig.quote("fxaa"));
+    MobileConfig.putAll(a,initial);
+    Map<String,String> running=new HashMap<>();
+    LinearLayout page=settings(a,"Graphics",running::put);
+    a.setContentView(page);
+    arrange(page,2400,1080);
+    View filter=page.findViewWithTag("present_effect");
+    assertNotNull(filter);filter.performClick();
+    android.app.Dialog dialog=org.robolectric.shadows.ShadowDialog.getLatestDialog();
+    TextView off=find(dialog.getWindow().getDecorView(),"Off (nearest)");
+    assertNotNull(off);off.performClick();
+    assertEquals(Collections.singletonMap("present_effect","nearest"),running);
+    assertEquals("nearest",MobileConfig.get(a,"present_effect",""));
+    assertEquals("90",MobileConfig.get(a,"fh1_render_scale_percent",""));
+    assertEquals("fxaa",MobileConfig.get(a,"swap_post_effect",""));
+    assertTrue(text(settings(a,"Graphics")).contains("Off (nearest)"));
+    LinearLayout search=settings(a,"All settings");
+    android.widget.EditText field=(android.widget.EditText)((ViewGroup)((android.widget.ScrollView)
+        search.findViewWithTag("settings-scroll")).getChildAt(0)).getChildAt(0);
+    field.setText("FSR softness");
+    assertNotNull(search.findViewWithTag("present_fsr_sharpness_reduction"));
+    field.setText("music player");
+    assertNotNull(find(search,"Use my music player"));
+  }
+
+  @Test public void graphicsPresetsRefreshTheMountedRowsImmediately()throws Exception{
+    Activity a=activity();
+    LinearLayout page=settings(a,"Graphics");
+    a.setContentView(page);
+    arrange(page,2400,1080);
+    TextView fsr=find(page,"FSR 1: Off");
+    assertNotNull(fsr);fsr.performClick();
+    android.app.Dialog dialog=org.robolectric.shadows.ShadowDialog.getLatestDialog();
+    TextView quality=find(dialog.getWindow().getDecorView(),"Quality · 67%");
+    assertNotNull(quality);quality.performClick();
+    assertEquals("67",MobileConfig.get(a,"fh1_render_scale_percent",""));
+    assertEquals("fsr",MobileConfig.get(a,"present_effect",""));
+    assertEquals("FSR 1: 67% render resolution",fsr.getText().toString());
+    assertTrue(text(page.findViewWithTag("fh1_render_scale_percent")).contains("67%"));
+    assertTrue(text(page.findViewWithTag("present_effect")).contains("FSR 1"));
+  }
 
   @Test public void settingsSearchAndShouldersKeepOneCategoryPage() {
     LauncherActivity a = Robolectric.buildActivity(LauncherActivity.class).setup().visible().get();
@@ -84,7 +189,29 @@ public class UiPolishTest {
     a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
   }
   @Test public void gameMenuSingleTapAndTextOnlyActions()throws Exception{Activity a=activity();List<String> actions=new ArrayList<>();GameMenuView menu=new GameMenuView(a,actions::add);a.setContentView(menu);render(menu,1250,850,"test5-game-menu");Button settings=menu.findViewWithTag("Settings");assertFalse(settings.hasFocus());long t=android.os.SystemClock.uptimeMillis();for(int action:new int[]{MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP}){MotionEvent e=MotionEvent.obtain(t,t+30,action,settings.getWidth()/2f,settings.getHeight()/2f,0);settings.dispatchTouchEvent(e);e.recycle();}ShadowLooper.idleMainLooper();assertEquals(Collections.singletonList("Settings"),actions);for(String title:new String[]{"Resume","Settings","Touch controls","Controller","Diagnostics","Achievements","Profile","More","Quit to launcher"}){Button b=menu.findViewWithTag(title);assertNotNull(b);for(android.graphics.drawable.Drawable icon:b.getCompoundDrawables())assertNull(icon);Rect r=new Rect();assertTrue(b.getGlobalVisibleRect(r));assertEquals(b.getHeight(),r.height());}}
-  @Test public void uiPreferencesSurviveProcessHandoff(){Activity a=activity();a.getSharedPreferences("mobile",0).edit().putString("app_language","fil").putBoolean("tilt_invert",true).commit();UiPreferences.save(a);a.getSharedPreferences("mobile",0).edit().clear().commit();UiPreferences.load(a);assertEquals("fil",a.getSharedPreferences("mobile",0).getString("app_language",""));assertTrue(a.getSharedPreferences("mobile",0).getBoolean("tilt_invert",false));}
+  @Test public void uiPreferencesSurviveProcessHandoff(){
+    Activity a=activity();
+    android.content.SharedPreferences prefs=a.getSharedPreferences("mobile",0);
+    String[] switches={"animations","show_fps","show_frame_time","show_memory_heat","match_refresh",
+        "phone_rumble","phone_tilt","tilt_invert","sustained_mode","advanced_settings","detailed_gpu",
+        "extended_capture","save_folder_sync","audio_compatibility"};
+    for(boolean enabled:new boolean[]{false,true}){
+      android.content.SharedPreferences.Editor edits=prefs.edit().putString("app_language","fil")
+          .putFloat("ui_scale",.9f).putInt("phone_rumble_strength",85)
+          .putInt("tilt_range",45).putInt("tilt_deadzone",7);
+      for(String key:switches)edits.putBoolean(key,enabled);
+      assertTrue(edits.commit());
+      UiPreferences.save(a);
+      assertTrue(prefs.edit().clear().commit());
+      UiPreferences.load(a);
+      for(String key:switches)assertEquals(key,enabled,prefs.getBoolean(key,!enabled));
+      assertEquals("fil",prefs.getString("app_language",""));
+      assertEquals(.9f,prefs.getFloat("ui_scale",0),.001f);
+      assertEquals(85,prefs.getInt("phone_rumble_strength",0));
+      assertEquals(45,prefs.getInt("tilt_range",0));
+      assertEquals(7,prefs.getInt("tilt_deadzone",0));
+    }
+  }
   public static class SaveSyncActivity extends PinyonShiftActivity {
     File mediaDirectory;
 

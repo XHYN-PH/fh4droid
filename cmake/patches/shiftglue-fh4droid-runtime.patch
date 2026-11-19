@@ -1,31 +1,109 @@
 diff --git a/include/rex/filesystem/devices/disc_image_device.h b/include/rex/filesystem/devices/disc_image_device.h
-index 21832129..225bdd3f 100644
+index 21832129..c2173204 100644
 --- a/include/rex/filesystem/devices/disc_image_device.h
 +++ b/include/rex/filesystem/devices/disc_image_device.h
-@@ -13,6 +13,7 @@
+@@ -12,10 +12,13 @@
+ #pragma once
  
  #include <memory>
++#include <span>
  #include <string>
 +#include <unordered_set>
  
  #include <rex/filesystem/device.h>
  #include <rex/memory/mapped_memory.h>
-@@ -77,13 +78,14 @@ class DiscImageDevice : public Device {
++#include <rex/platform.h>
+ 
+ namespace rex::filesystem {
+ 
+@@ -24,6 +27,12 @@ class DiscImageEntry;
+ class DiscImageDevice : public Device {
+  public:
+   DiscImageDevice(const std::string_view mount_path, const std::filesystem::path& host_path);
++#if !REX_PLATFORM_WIN32
++  DiscImageDevice(const std::string_view mount_path, int file_descriptor);
++#endif
++#if REX_PLATFORM_ANDROID
++  static std::unique_ptr<DiscImageDevice> FromAndroidLaunch(std::string_view mount_path);
++#endif
+   ~DiscImageDevice() override;
+ 
+   bool Initialize() override;
+@@ -47,17 +56,18 @@ class DiscImageDevice : public Device {
+   uint32_t component_name_max_length() const override { return 255; }
+ 
+   uint32_t total_allocation_units() const override {
+-    return uint32_t(mmap_->size() / sectors_per_allocation_unit() / bytes_per_sector());
++    return uint32_t(image_size_ / sectors_per_allocation_unit() / bytes_per_sector());
+   }
+   uint32_t available_allocation_units() const override { return 0; }
+   uint32_t sectors_per_allocation_unit() const override { return 1; }
+   uint32_t bytes_per_sector() const override { return 0x200; }
+ 
+  private:
++  friend class DiscImageFile;
++
+   enum class Error {
+     kSuccess = 0,
+     kErrorOutOfMemory = -1,
+-    kErrorReadError = -10,
+     kErrorFileMismatch = -30,
+     kErrorDamagedFile = -31,
+   };
+@@ -66,24 +76,28 @@ class DiscImageDevice : public Device {
+   std::filesystem::path host_path_;
+   std::unique_ptr<Entry> root_entry_;
+   std::unique_ptr<memory::MappedMemory> mmap_;
++#if !REX_PLATFORM_WIN32
++  bool use_descriptor_ = false;
++  int descriptor_ = -1;
++#endif
++  size_t image_size_ = 0;
+   DiscInfo disc_info_{};
+   uint64_t file_count_ = 0;
+   uint64_t total_file_size_ = 0;
+ 
+   typedef struct {
+-    uint8_t* ptr;
+-    size_t size;         // Size (bytes) of total image.
+     size_t game_offset;  // Offset (bytes) of game partition.
      size_t root_sector;  // Offset (sector) of root.
      size_t root_offset;  // Offset (bytes) of root.
      size_t root_size;    // Size (bytes) of root.
 +    std::unordered_set<size_t> visited;
    } ParseState;
  
++  bool ReadAt(size_t offset, std::span<uint8_t> output) const;
    Error Verify(ParseState* state);
-   bool VerifyMagic(ParseState* state, size_t offset);
-   Error ReadAllEntries(ParseState* state, const uint8_t* root_buffer);
-   bool ReadEntry(ParseState* state, const uint8_t* buffer, uint16_t entry_ordinal,
+-  bool VerifyMagic(ParseState* state, size_t offset);
+-  Error ReadAllEntries(ParseState* state, const uint8_t* root_buffer);
+-  bool ReadEntry(ParseState* state, const uint8_t* buffer, uint16_t entry_ordinal,
 -                 DiscImageEntry* parent);
++  Error ReadAllEntries(ParseState* state);
++  bool ReadEntry(ParseState* state, size_t directory_offset, uint16_t entry_ordinal,
 +                 DiscImageEntry* parent, size_t directory_size, uint32_t depth = 0);
  };
  
  }  // namespace rex::filesystem
+diff --git a/include/rex/filesystem/devices/disc_image_entry.h b/include/rex/filesystem/devices/disc_image_entry.h
+index 01dfc4a9..225ac9a1 100644
+--- a/include/rex/filesystem/devices/disc_image_entry.h
++++ b/include/rex/filesystem/devices/disc_image_entry.h
+@@ -31,13 +31,12 @@ class DiscImageEntry : public Entry {
+                                                 const std::string_view name,
+                                                 memory::MappedMemory* mmap);
+ 
+-  memory::MappedMemory* mmap() const { return mmap_; }
+   size_t data_offset() const { return data_offset_; }
+   size_t data_size() const { return data_size_; }
+ 
+   X_STATUS Open(uint32_t desired_access, File** out_file) override;
+ 
+-  bool can_map() const override { return true; }
++  bool can_map() const override { return mmap_ != nullptr; }
+   std::unique_ptr<memory::MappedMemory> OpenMapped(memory::MappedMemory::Mode mode, size_t offset,
+                                                    size_t length) override;
+ 
 diff --git a/include/rex/graphics/fh1_raster_scale.h b/include/rex/graphics/fh1_raster_scale.h
 new file mode 100644
 index 00000000..0d108db2
@@ -161,6 +239,18 @@ index e85efca0..6319612f 100644
  #ifdef REXGLUE_ENABLE_PROFILING
      if (tracy::IsProfilerStarted()) {
        FrameMark;
+diff --git a/include/rex/ui/presenter.h b/include/rex/ui/presenter.h
+index 64fe4681..5dcb3a86 100644
+--- a/include/rex/ui/presenter.h
++++ b/include/rex/ui/presenter.h
+@@ -232,6 +232,7 @@ class Presenter {
+       // NVIDIA DLSS Super Resolution through NGX (FSR 1 without it).
+       kDlss,
+ #endif
++      kNearest,
+     };
+ 
+ #if defined(REX_HAS_FIDELITYFX_SDK)
 diff --git a/include/rex/ui/vulkan/device.h b/include/rex/ui/vulkan/device.h
 index a7cce194..5e45df87 100644
 --- a/include/rex/ui/vulkan/device.h
@@ -173,6 +263,22 @@ index a7cce194..5e45df87 100644
      uint32_t vendorID = 0;
      uint32_t deviceID = 0;
      char deviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = {};
+diff --git a/include/rex/ui/vulkan/presenter.h b/include/rex/ui/vulkan/presenter.h
+index 43ee382b..40138228 100644
+--- a/include/rex/ui/vulkan/presenter.h
++++ b/include/rex/ui/vulkan/presenter.h
+@@ -430,8 +430,10 @@ class VulkanPresenter final : public Presenter {
+     enum GuestOutputDescriptorSet : uint32_t {
+       kGuestOutputDescriptorSetGuestOutput0Sampled,
+ 
+-      kGuestOutputDescriptorSetIntermediate0Sampled =
++      kGuestOutputDescriptorSetGuestOutput0Nearest =
+           kGuestOutputDescriptorSetGuestOutput0Sampled + kGuestOutputMailboxSize,
++      kGuestOutputDescriptorSetIntermediate0Sampled =
++          kGuestOutputDescriptorSetGuestOutput0Nearest + kGuestOutputMailboxSize,
+ 
+       kGuestOutputDescriptorSetCount =
+           kGuestOutputDescriptorSetIntermediate0Sampled + kMaxGuestOutputPaintEffects - 1,
 diff --git a/src/audio/xma_context.cpp b/src/audio/xma_context.cpp
 index f06cc9da..2aa2f725 100644
 --- a/src/audio/xma_context.cpp
@@ -266,76 +372,229 @@ index 4a6f100f..e0ef0757 100644
  
  int64_t GetSnapshotCounter(CounterId id) {
 diff --git a/src/filesystem/devices/disc_image_device.cpp b/src/filesystem/devices/disc_image_device.cpp
-index bce00ddf..50e9e8ca 100644
+index bce00ddf..619aa565 100644
 --- a/src/filesystem/devices/disc_image_device.cpp
 +++ b/src/filesystem/devices/disc_image_device.cpp
-@@ -89,14 +89,16 @@ DiscImageDevice::Error DiscImageDevice::Verify(ParseState* state) {
+@@ -12,11 +12,23 @@
+ #include <rex/filesystem/devices/disc_image_device.h>
+ #include <rex/filesystem/devices/disc_image_entry.h>
+ 
++#include <algorithm>
++#include <array>
++#include <cerrno>
++#include <charconv>
++#include <cstdlib>
++
+ #include <rex/literals.h>
+ #include <rex/logging.h>
+ #include <rex/math.h>
+ #include <rex/memory.h>
+ 
++#if !REX_PLATFORM_WIN32
++#include <fcntl.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#endif
++
+ namespace rex::filesystem {
+ 
+ using namespace rex::literals;
+@@ -27,25 +39,79 @@ DiscImageDevice::DiscImageDevice(const std::string_view mount_path,
+                                  const std::filesystem::path& host_path)
+     : Device(mount_path), name_("GDFX"), host_path_(host_path) {}
+ 
+-DiscImageDevice::~DiscImageDevice() = default;
++#if !REX_PLATFORM_WIN32
++DiscImageDevice::DiscImageDevice(const std::string_view mount_path, int file_descriptor)
++    : Device(mount_path), name_("GDFX"), use_descriptor_(true),
++      descriptor_(fcntl(file_descriptor, F_DUPFD_CLOEXEC, 0)) {}
++#endif
++
++#if REX_PLATFORM_ANDROID
++std::unique_ptr<DiscImageDevice> DiscImageDevice::FromAndroidLaunch(std::string_view mount_path) {
++  const char* selected = std::getenv("PINYON_SHIFT_GAME_ISO_FD");
++  if (!selected || !*selected) return {};
++  const std::string_view fd(selected);
++  int descriptor = -1;
++  const auto [end, error] = std::from_chars(fd.data(), fd.data() + fd.size(), descriptor);
++  if (error != std::errc{} || end != fd.data() + fd.size()) descriptor = -1;
++  return std::make_unique<DiscImageDevice>(mount_path, descriptor);
++}
++#endif
++
++DiscImageDevice::~DiscImageDevice() {
++#if !REX_PLATFORM_WIN32
++  if (descriptor_ >= 0) close(descriptor_);
++#endif
++}
++
++bool DiscImageDevice::ReadAt(size_t offset, std::span<uint8_t> output) const {
++  if (offset > image_size_ || output.size() > image_size_ - offset) return false;
++  if (output.empty()) return true;
++  if (mmap_) {
++    std::memcpy(output.data(), mmap_->data() + offset, output.size());
++    return true;
++  }
++#if !REX_PLATFORM_WIN32
++  while (!output.empty()) {
++    const ssize_t read = pread(descriptor_, output.data(), output.size(), static_cast<off_t>(offset));
++    if (read < 0 && errno == EINTR) continue;
++    if (read <= 0) return false;
++    offset += static_cast<size_t>(read);
++    output = output.subspan(static_cast<size_t>(read));
++  }
++  return true;
++#else
++  return false;
++#endif
++}
+ 
+ bool DiscImageDevice::Initialize() {
+-  mmap_ = memory::MappedMemory::Open(host_path_, memory::MappedMemory::Mode::kRead);
+-  if (!mmap_) {
+-    REXFS_ERROR("Disc image could not be mapped");
+-    return false;
++#if !REX_PLATFORM_WIN32
++  if (use_descriptor_) {
++    struct stat info {};
++    if (descriptor_ < 0 || fstat(descriptor_, &info) != 0 || info.st_size <= 0) {
++      REXFS_ERROR("Disc image descriptor is unavailable or has no readable size");
++      return false;
++    }
++    image_size_ = static_cast<size_t>(info.st_size);
++  } else
++#endif
++  {
++    mmap_ = memory::MappedMemory::Open(host_path_, memory::MappedMemory::Mode::kRead);
++    if (!mmap_) {
++      REXFS_ERROR("Disc image could not be mapped");
++      return false;
++    }
++    image_size_ = mmap_->size();
    }
  
-   // Read sector 32 to get FS state.
--  if (state->size < state->game_offset + (32 * kXESectorSize)) {
-+  if (state->size < state->game_offset + (32 * kXESectorSize) + 32) {
-     return Error::kErrorReadError;
-   }
-   uint8_t* fs_ptr = state->ptr + state->game_offset + (32 * kXESectorSize);
-   state->root_sector = memory::load<uint32_t>(fs_ptr + 20);
-   state->root_size = memory::load<uint32_t>(fs_ptr + 24);
-   state->root_offset = state->game_offset + (state->root_sector * kXESectorSize);
--  if (state->root_size < 13 || state->root_size > 32_MiB) {
-+  if (state->root_size < 14 || state->root_size > 32_MiB ||
-+      state->root_offset > state->size ||
-+      state->root_size > state->size - state->root_offset) {
-     return Error::kErrorDamagedFile;
-   }
- 
-@@ -109,7 +111,7 @@ DiscImageDevice::Error DiscImageDevice::Verify(ParseState* state) {
- }
- 
- bool DiscImageDevice::VerifyMagic(ParseState* state, size_t offset) {
--  if (offset >= state->size) {
-+  if (offset > state->size || state->size - offset < 20) {
+   ParseState state = {};
+-  state.ptr = mmap_->data();
+-  state.size = mmap_->size();
+   auto result = Verify(&state);
+   if (result != Error::kSuccess) {
+     REXFS_ERROR("Failed to verify disc image header: {}", static_cast<int>(result));
      return false;
    }
  
-@@ -123,16 +125,23 @@ DiscImageDevice::Error DiscImageDevice::ReadAllEntries(ParseState* state,
+-  result = ReadAllEntries(&state, state.ptr + state.root_offset);
++  result = ReadAllEntries(&state);
+   if (result != Error::kSuccess) {
+     REXFS_ERROR("Failed to read all GDFX entries: {}", static_cast<int>(result));
+     return false;
+@@ -72,67 +138,60 @@ Entry* DiscImageDevice::ResolvePath(const std::string_view path) {
+ 
+ DiscImageDevice::Error DiscImageDevice::Verify(ParseState* state) {
+   // Find sector 32 of the game partition - try at a few points.
+-  static const size_t likely_offsets[] = {
++  static constexpr size_t likely_offsets[] = {
+       0x00000000, 0x0000FB20, 0x00020600, 0x02080000, 0x0FD90000,
+   };
++  std::array<uint8_t, 32> header{};
+   bool magic_found = false;
+-  for (size_t n = 0; n < rex::countof(likely_offsets); n++) {
+-    state->game_offset = likely_offsets[n];
+-    if (VerifyMagic(state, state->game_offset + (32 * kXESectorSize))) {
++  for (size_t offset : likely_offsets) {
++    if (ReadAt(offset + 32 * kXESectorSize, header) &&
++        std::memcmp(header.data(), "MICROSOFT*XBOX*MEDIA", 20) == 0) {
++      state->game_offset = offset;
+       magic_found = true;
+       break;
+     }
+   }
+-  if (!magic_found) {
+-    // File doesn't have the magic values - likely not a real GDFX source.
+-    return Error::kErrorFileMismatch;
+-  }
+-
+-  // Read sector 32 to get FS state.
+-  if (state->size < state->game_offset + (32 * kXESectorSize)) {
+-    return Error::kErrorReadError;
+-  }
+-  uint8_t* fs_ptr = state->ptr + state->game_offset + (32 * kXESectorSize);
+-  state->root_sector = memory::load<uint32_t>(fs_ptr + 20);
+-  state->root_size = memory::load<uint32_t>(fs_ptr + 24);
+-  state->root_offset = state->game_offset + (state->root_sector * kXESectorSize);
+-  if (state->root_size < 13 || state->root_size > 32_MiB) {
++  if (!magic_found) return Error::kErrorFileMismatch;
++
++  state->root_sector = memory::load<uint32_t>(header.data() + 20);
++  state->root_size = memory::load<uint32_t>(header.data() + 24);
++  state->root_offset = state->game_offset + state->root_sector * kXESectorSize;
++  if (state->root_size < 14 || state->root_size > 32_MiB ||
++      state->root_offset > image_size_ ||
++      state->root_size > image_size_ - state->root_offset) {
+     return Error::kErrorDamagedFile;
+   }
+ 
+   disc_info_.game_offset = state->game_offset;
+   disc_info_.root_sector = state->root_sector;
+   disc_info_.root_size = state->root_size;
+-  disc_info_.host_size = state->size;
++  disc_info_.host_size = image_size_;
+ 
+   return Error::kSuccess;
+ }
+ 
+-bool DiscImageDevice::VerifyMagic(ParseState* state, size_t offset) {
+-  if (offset >= state->size) {
+-    return false;
+-  }
+-
+-  // Simple check to see if the given offset contains the magic value.
+-  return std::memcmp(state->ptr + offset, "MICROSOFT*XBOX*MEDIA", 20) == 0;
+-}
+-
+-DiscImageDevice::Error DiscImageDevice::ReadAllEntries(ParseState* state,
+-                                                       const uint8_t* root_buffer) {
++DiscImageDevice::Error DiscImageDevice::ReadAllEntries(ParseState* state) {
+   auto root_entry = new DiscImageEntry(this, nullptr, "", mmap_.get());
    root_entry->attributes_ = kFileAttributeDirectory;
    root_entry_ = std::unique_ptr<Entry>(root_entry);
  
 -  if (!ReadEntry(state, root_buffer, 0, root_entry)) {
 -    return Error::kErrorOutOfMemory;
-+  if (!ReadEntry(state, root_buffer, 0, root_entry, state->root_size)) {
++  if (!ReadEntry(state, state->root_offset, 0, root_entry, state->root_size)) {
 +    return Error::kErrorDamagedFile;
    }
- 
+-
    return Error::kSuccess;
  }
  
- bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16_t entry_ordinal,
+-bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16_t entry_ordinal,
 -                                DiscImageEntry* parent) {
 -  const uint8_t* p = buffer + (entry_ordinal * 4);
++bool DiscImageDevice::ReadEntry(ParseState* state, size_t base, uint16_t entry_ordinal,
 +                                DiscImageEntry* parent, size_t directory_size, uint32_t depth) {
-+  const size_t base = size_t(reinterpret_cast<uintptr_t>(buffer) -
-+                             reinterpret_cast<uintptr_t>(state->ptr));
 +  const size_t ordinal = size_t(entry_ordinal) * 4;
 +  if (depth > 128 || directory_size < 14 || directory_size > 32_MiB ||
-+      base > state->size || directory_size > state->size - base ||
++      base > image_size_ || directory_size > image_size_ - base ||
 +      ordinal > directory_size - 14 || state->visited.size() >= 100000 ||
 +      !state->visited.insert(base + ordinal).second) return false;
-+  const uint8_t* p = buffer + ordinal;
++  std::array<uint8_t, 14 + 255> record{};
++  const size_t available = std::min(record.size(), directory_size - ordinal);
++  if (!ReadAt(base + ordinal, std::span(record).first(available))) return false;
++  const uint8_t* p = record.data();
  
    uint16_t node_l = memory::load<uint16_t>(p + 0);
    uint16_t node_r = memory::load<uint16_t>(p + 2);
-@@ -140,13 +149,18 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
+@@ -140,13 +199,18 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
    size_t length = memory::load<uint32_t>(p + 8);
    uint8_t attributes = memory::load<uint8_t>(p + 12);
    uint8_t name_length = memory::load<uint8_t>(p + 13);
 +  if (!name_length || name_length > directory_size - ordinal - 14) return false;
 +  const size_t data_offset = state->game_offset + sector * kXESectorSize;
-+  if (data_offset > state->size || length > state->size - data_offset) return false;
++  if (data_offset > image_size_ || length > image_size_ - data_offset) return false;
    auto name_buffer = reinterpret_cast<const char*>(p + 14);
  
 -  if (node_l && !ReadEntry(state, buffer, node_l, parent)) {
-+  if (node_l && !ReadEntry(state, buffer, node_l, parent, directory_size, depth + 1)) {
++  if (node_l && !ReadEntry(state, base, node_l, parent, directory_size, depth + 1)) {
      return false;
    }
  
@@ -345,24 +604,91 @@ index bce00ddf..50e9e8ca 100644
  
    auto entry = DiscImageEntry::Create(this, parent, name, mmap_.get());
    entry->attributes_ = attributes | kFileAttributeReadOnly;
-@@ -170,7 +184,7 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
-       }
-       // Read child list.
-       uint8_t* folder_ptr = state->ptr + state->game_offset + (sector * kXESectorSize);
+@@ -163,20 +227,13 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
+     entry->data_offset_ = 0;
+     entry->data_size_ = 0;
+     if (length) {
+-      // Not a leaf - read in children.
+-      if (state->size < state->game_offset + (sector * kXESectorSize)) {
+-        // Out of bounds read.
+-        return false;
+-      }
+-      // Read child list.
+-      uint8_t* folder_ptr = state->ptr + state->game_offset + (sector * kXESectorSize);
 -      if (!ReadEntry(state, folder_ptr, 0, entry.get())) {
-+      if (!ReadEntry(state, folder_ptr, 0, entry.get(), length, depth + 1)) {
++      if (!ReadEntry(state, data_offset, 0, entry.get(), length, depth + 1)) {
          return false;
        }
      }
-@@ -186,7 +200,7 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
+   } else {
+     // File.
+-    entry->data_offset_ = state->game_offset + (sector * kXESectorSize);
++    entry->data_offset_ = data_offset;
+     entry->data_size_ = length;
+     ++file_count_;
+     total_file_size_ += length;
+@@ -186,7 +243,7 @@ bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16
    parent->children_.emplace_back(std::move(entry));
  
    // Read next file in the list.
 -  if (node_r && !ReadEntry(state, buffer, node_r, parent)) {
-+  if (node_r && !ReadEntry(state, buffer, node_r, parent, directory_size, depth + 1)) {
++  if (node_r && !ReadEntry(state, base, node_r, parent, directory_size, depth + 1)) {
      return false;
    }
  
+diff --git a/src/filesystem/devices/disc_image_entry.cpp b/src/filesystem/devices/disc_image_entry.cpp
+index 1986c71b..c8e3c1f3 100644
+--- a/src/filesystem/devices/disc_image_entry.cpp
++++ b/src/filesystem/devices/disc_image_entry.cpp
+@@ -39,14 +39,12 @@ X_STATUS DiscImageEntry::Open(uint32_t desired_access, File** out_file) {
+ 
+ std::unique_ptr<memory::MappedMemory> DiscImageEntry::OpenMapped(memory::MappedMemory::Mode mode,
+                                                                  size_t offset, size_t length) {
+-  if (mode != memory::MappedMemory::Mode::kRead) {
+-    // Only allow reads.
++  if (mode != memory::MappedMemory::Mode::kRead || !mmap_ || offset > data_size_) {
+     return nullptr;
+   }
+ 
+-  size_t real_offset = data_offset_ + offset;
+-  size_t real_length = length ? std::min(length, data_size_) : data_size_;
+-  return mmap_->Slice(real_offset, real_length);
++  const size_t remaining = data_size_ - offset;
++  return mmap_->Slice(data_offset_ + offset, length ? std::min(length, remaining) : remaining);
+ }
+ 
+ }  // namespace rex::filesystem
+diff --git a/src/filesystem/devices/disc_image_file.cpp b/src/filesystem/devices/disc_image_file.cpp
+index 313c9af4..e44a0f99 100644
+--- a/src/filesystem/devices/disc_image_file.cpp
++++ b/src/filesystem/devices/disc_image_file.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <rex/filesystem/devices/disc_image_device.h>
+ #include <rex/filesystem/devices/disc_image_entry.h>
+ #include <rex/filesystem/devices/disc_image_file.h>
+ 
+@@ -27,12 +28,14 @@ void DiscImageFile::Destroy() {
+ 
+ X_STATUS DiscImageFile::ReadSync(std::span<uint8_t> buffer, size_t byte_offset,
+                                  size_t* out_bytes_read) {
+-  if (byte_offset >= entry_->size()) {
++  *out_bytes_read = 0;
++  if (byte_offset >= entry_->data_size()) {
+     return X_STATUS_END_OF_FILE;
+   }
+-  size_t real_offset = entry_->data_offset() + byte_offset;
+-  size_t real_length = std::min(buffer.size(), entry_->data_size() - byte_offset);
+-  std::memcpy(buffer.data(), entry_->mmap()->data() + real_offset, real_length);
++  const size_t real_offset = entry_->data_offset() + byte_offset;
++  const size_t real_length = std::min(buffer.size(), entry_->data_size() - byte_offset);
++  const auto* disc = static_cast<const DiscImageDevice*>(entry_->device());
++  if (!disc->ReadAt(real_offset, buffer.first(real_length))) return X_STATUS_UNSUCCESSFUL;
+   *out_bytes_read = real_length;
+   return X_STATUS_SUCCESS;
+ }
 diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
 index 3ac490b8..fd721e41 100644
 --- a/src/graphics/command_processor.cpp
@@ -1241,7 +1567,7 @@ index 9328c1aa..0982a5d0 100644
        target_path.find("B13EBABEBABEBABE:") != std::string::npos &&
        (target_path.find("ForzaProfile") != std::string::npos ||
 diff --git a/src/system/runtime.cpp b/src/system/runtime.cpp
-index eb0734a4..362a66c2 100644
+index eb0734a4..132a5fe3 100644
 --- a/src/system/runtime.cpp
 +++ b/src/system/runtime.cpp
 @@ -14,6 +14,8 @@
@@ -1253,7 +1579,7 @@ index eb0734a4..362a66c2 100644
  #include <rex/filesystem/devices/null_device.h>
  #include <rex/filesystem/vfs.h>
  #include <rex/logging.h>
-@@ -321,8 +323,18 @@ bool Runtime::SetupVfs() {
+@@ -321,10 +323,17 @@ bool Runtime::SetupVfs() {
  
    // Mount game_data_root as \Device\Harddisk0\Partition1
    auto mount_path = "\\Device\\Harddisk0\\Partition1";
@@ -1261,19 +1587,41 @@ index eb0734a4..362a66c2 100644
 -      mount_path, abs_game_root, !REXCVAR_GET(allow_game_relative_writes));
 +  std::unique_ptr<rex::filesystem::Device> device;
 +#if defined(__ANDROID__)
-+  const char* iso = std::getenv("PINYON_SHIFT_GAME_ISO");
-+  if (iso && *iso) {
-+    device = std::make_unique<rex::filesystem::DiscImageDevice>(mount_path, iso);
-+    REXSYS_INFO("Mounting the selected read-only disc image");
-+  } else
++  device = rex::filesystem::DiscImageDevice::FromAndroidLaunch(mount_path);
++  if (device) REXSYS_INFO("Mounting the selected read-only disc image with positioned reads");
 +#endif
-+  {
++  if (!device) {
 +    device = std::make_unique<rex::filesystem::HostPathDevice>(
 +        mount_path, abs_game_root, !REXCVAR_GET(allow_game_relative_writes));
 +  }
    if (!device->Initialize()) {
-     REXSYS_ERROR("Runtime::SetupVfs: Failed to initialize host path device");
+-    REXSYS_ERROR("Runtime::SetupVfs: Failed to initialize host path device");
++    REXSYS_ERROR("Runtime::SetupVfs: Failed to initialize the game device");
      return false;
+   }
+   if (!file_system_->RegisterDevice(std::move(device))) {
+diff --git a/src/system/user_module.cpp b/src/system/user_module.cpp
+index f7b37998..f0d2fd5a 100644
+--- a/src/system/user_module.cpp
++++ b/src/system/user_module.cpp
+@@ -91,15 +91,13 @@ X_STATUS UserModule::LoadFromFile(const std::string_view path) {
+     // Ugh.
+     size_t bytes_read = 0;
+     result = file->ReadSync(std::span<uint8_t>(buffer), 0, &bytes_read);
++    file->Destroy();
+     if (XFAILED(result)) {
+       return result;
+     }
+ 
+-    // Load the module.
++    // Load the module from the bytes read.
+     result = LoadFromMemory(buffer.data(), bytes_read);
+-
+-    // Close the file.
+-    file->Destroy();
+   }
+ 
+   // Only XEX returns X_STATUS_PENDING
 diff --git a/src/system/xmemory.cpp b/src/system/xmemory.cpp
 index 907dcd46..4a81bcbb 100644
 --- a/src/system/xmemory.cpp
@@ -1288,6 +1636,48 @@ index 907dcd46..4a81bcbb 100644
          REXSYS_WARN(
              "Recovered stale physical page protection for guest {:08X} (host {:016X}, "
              "guest_protect {:08X})",
+diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
+index 0cb2aee3..6f5e9e46 100644
+--- a/src/ui/presenter.cpp
++++ b/src/ui/presenter.cpp
+@@ -61,7 +61,12 @@ REXCVAR_DEFINE_STRING(present_effect, "bilinear", "UI/Presenter",
+                       "downscaling), fsr (FSR 1 upscale with RCAS sharpening), fsr2 and fsr3 "
+                       "(temporal FSR through the FidelityFX runtime), dlss (DLSS through NGX); "
+                       "FSR 1 when the temporal upscaler is unavailable")
+-    .allowed({"bilinear", "cas", "fsr", "fsr2", "fsr3", "dlss"});
++    .allowed({
++        "bilinear", "cas", "fsr", "fsr2", "fsr3", "dlss",
++#if REX_PLATFORM_ANDROID
++        "nearest",
++#endif
++    });
+ 
+ REXCVAR_DEFINE_DOUBLE(present_cas_additional_sharpness,
+                       rex::ui::Presenter::GuestOutputPaintConfig::kCasAdditionalSharpnessDefault,
+@@ -86,7 +91,12 @@ REXCVAR_DEFINE_STRING(
+     .allowed({"auto", "nativeaa", "quality", "balanced", "performance", "ultra_performance"});
+ #else
+ REXCVAR_DEFINE_STRING(present_effect, "bilinear", "UI/Presenter", "Guest output effect: bilinear")
+-    .allowed({"bilinear"});
++    .allowed({
++        "bilinear",
++#if REX_PLATFORM_ANDROID
++        "nearest",
++#endif
++    });
+ #endif
+ 
+ REXCVAR_DEFINE_BOOL(present_dither, false, "UI/Presenter",
+@@ -102,6 +112,9 @@ GuestOutputPaintConfig::Effect ParsePresentEffect(const std::string& effect_name
+   std::string lowered = effect_name;
+   std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                  [](unsigned char c) { return char(std::tolower(c)); });
++#if REX_PLATFORM_ANDROID
++  if (lowered == "nearest") return GuestOutputPaintConfig::Effect::kNearest;
++#endif
+ #if defined(REX_HAS_FIDELITYFX_SDK)
+   if (lowered == "cas") {
+     return GuestOutputPaintConfig::Effect::kCas;
 diff --git a/src/ui/vulkan/vulkan_device.cpp b/src/ui/vulkan/vulkan_device.cpp
 index 9983e131..58512811 100644
 --- a/src/ui/vulkan/vulkan_device.cpp
@@ -1343,3 +1733,127 @@ index 9983e131..58512811 100644
    device->properties_.vendorID = properties.vendorID;
    device->properties_.deviceID = properties.deviceID;
    rex::string::copy_truncating(device->properties_.deviceName, properties.deviceName,
+diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
+index 590c6024..efa38e2b 100644
+--- a/src/ui/vulkan/vulkan_presenter.cpp
++++ b/src/ui/vulkan/vulkan_presenter.cpp
+@@ -3615,7 +3615,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+         guest_output_image_descriptor_write.pImageInfo = &guest_output_image_descriptor_image_info;
+         guest_output_image_descriptor_write.pBufferInfo = nullptr;
+         guest_output_image_descriptor_write.pTexelBufferView = nullptr;
+-        dfn.vkUpdateDescriptorSets(device, 1, &guest_output_image_descriptor_write, 0, nullptr);
++        VkWriteDescriptorSet writes[] = {
++            guest_output_image_descriptor_write, guest_output_image_descriptor_write};
++        writes[1].dstSet = paint_context_.guest_output_descriptor_sets
++            [PaintContext::kGuestOutputDescriptorSetGuestOutput0Nearest +
++             guest_output_image_paint_ref_index];
++        dfn.vkUpdateDescriptorSets(device, uint32_t(rex::countof(writes)), writes, 0, nullptr);
+       }
+ 
+       // Make sure intermediate textures of the needed size are available, and
+@@ -4104,9 +4109,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+             effect_src_descriptor_set = PaintContext::GuestOutputDescriptorSet(
+                 PaintContext::kGuestOutputDescriptorSetIntermediate0Sampled + (i - 1));
+           } else {
++            const auto descriptor_base =
++                guest_output_paint_config.GetEffect() == GuestOutputPaintConfig::Effect::kNearest
++                    ? PaintContext::kGuestOutputDescriptorSetGuestOutput0Nearest
++                    : PaintContext::kGuestOutputDescriptorSetGuestOutput0Sampled;
+             effect_src_descriptor_set = PaintContext::GuestOutputDescriptorSet(
+-                PaintContext::kGuestOutputDescriptorSetGuestOutput0Sampled +
+-                guest_output_image_paint_ref_index);
++                descriptor_base + guest_output_image_paint_ref_index);
+           }
+           dfn.vkCmdBindDescriptorSets(
+               draw_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+@@ -4547,13 +4555,11 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+   guest_output_image_sampler_bindings[0].descriptorCount = 1;
+   guest_output_image_sampler_bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+   guest_output_image_sampler_bindings[0].pImmutableSamplers = nullptr;
+-  const VkSampler sampler_linear_clamp =
+-      ui_samplers_->samplers()[UISamplers::kSamplerIndexLinearClampToEdge];
+   guest_output_image_sampler_bindings[1].binding = 1;
+   guest_output_image_sampler_bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+   guest_output_image_sampler_bindings[1].descriptorCount = 1;
+   guest_output_image_sampler_bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+-  guest_output_image_sampler_bindings[1].pImmutableSamplers = &sampler_linear_clamp;
++  guest_output_image_sampler_bindings[1].pImmutableSamplers = nullptr;
+   VkDescriptorSetLayoutCreateInfo guest_output_paint_image_descriptor_set_layout_create_info;
+   guest_output_paint_image_descriptor_set_layout_create_info.sType =
+       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+@@ -4787,9 +4793,6 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+   guest_output_paint_descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+   guest_output_paint_descriptor_pool_sizes[0].descriptorCount =
+       PaintContext::kGuestOutputDescriptorSetCount;
+-  // Required even when using immutable samplers, otherwise failing to allocate
+-  // descriptor sets (tested on AMD Software: Adrenalin Edition 22.3.2 on
+-  // Windows 10 on AMD Radeon RX Vega 10 with Vulkan validation enabled).
+   guest_output_paint_descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLER;
+   guest_output_paint_descriptor_pool_sizes[1].descriptorCount =
+       PaintContext::kGuestOutputDescriptorSetCount;
+@@ -4835,6 +4838,29 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+     return false;
+   }
+ 
++  // Keep both sampler variants bound per mailbox image so a live setting
++  // change never rewrites a descriptor that an older frame still uses.
++  using Descriptor = PaintContext::GuestOutputDescriptorSet;
++  const uint32_t descriptor_count = PaintContext::kGuestOutputDescriptorSetCount;
++  const VkDescriptorImageInfo linear_sampler{
++      ui_samplers_->samplers()[UISamplers::kSamplerIndexLinearClampToEdge]};
++  const VkDescriptorImageInfo nearest_sampler{
++      ui_samplers_->samplers()[UISamplers::kSamplerIndexNearestClampToEdge]};
++  std::array<VkWriteDescriptorSet, PaintContext::kGuestOutputDescriptorSetCount> sampler_writes{};
++  for (uint32_t i = 0; i < descriptor_count; ++i) {
++    auto& write = sampler_writes[i];
++    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
++    write.dstSet = paint_context_.guest_output_descriptor_sets[i];
++    write.dstBinding = 1;
++    write.descriptorCount = 1;
++    write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
++    write.pImageInfo = i >= Descriptor::kGuestOutputDescriptorSetGuestOutput0Nearest &&
++                              i < Descriptor::kGuestOutputDescriptorSetIntermediate0Sampled
++                          ? &nearest_sampler
++                          : &linear_sampler;
++  }
++  dfn.vkUpdateDescriptorSets(device, descriptor_count, sampler_writes.data(), 0, nullptr);
++
+   upscalers_ = CreateVulkanUpscalers(vulkan_device_);
+   if (std::unique_ptr<VulkanFrameGenerator> generator =
+           CreateVulkanFfxFrameGenerator(vulkan_device_)) {
+@@ -4977,7 +5003,6 @@ bool VulkanPresenter::CreateHdrSwapchainImages(VkFormat swapchain_format) {
+   }
+ 
+   const uint32_t image_count = uint32_t(context.swapchain_images.size());
+-  // The sampler too, though immutable, as for guest_output_descriptor_pool.
+   VkDescriptorPoolSize pool_sizes[2] = {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, image_count},
+                                         {VK_DESCRIPTOR_TYPE_SAMPLER, image_count}};
+   VkDescriptorPoolCreateInfo pool_create_info = {};
+@@ -5064,13 +5089,20 @@ bool VulkanPresenter::CreateHdrSwapchainImages(VkFormat swapchain_format) {
+     }
+     VkDescriptorImageInfo image_info = {VK_NULL_HANDLE, hdr_image.srgb_view,
+                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+-    VkWriteDescriptorSet write = {};
+-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+-    write.dstSet = hdr_image.descriptor_set;
+-    write.descriptorCount = 1;
+-    write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+-    write.pImageInfo = &image_info;
+-    dfn.vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
++    const VkDescriptorImageInfo sampler_info{
++        ui_samplers_->samplers()[UISamplers::kSamplerIndexLinearClampToEdge]};
++    VkWriteDescriptorSet writes[2]{};
++    for (uint32_t binding = 0; binding < 2; ++binding) {
++      writes[binding].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
++      writes[binding].dstSet = hdr_image.descriptor_set;
++      writes[binding].dstBinding = binding;
++      writes[binding].descriptorCount = 1;
++    }
++    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
++    writes[0].pImageInfo = &image_info;
++    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
++    writes[1].pImageInfo = &sampler_info;
++    dfn.vkUpdateDescriptorSets(device, uint32_t(rex::countof(writes)), writes, 0, nullptr);
+   }
+   return true;
+ }

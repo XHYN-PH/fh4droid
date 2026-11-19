@@ -61,11 +61,8 @@ final class MobileSettings {
           "30", "40", "60", "120"),
       o("Performance", "vulkan_pipeline_creation_threads", "Shader workers", "-1", true,
           "Automatic uses one worker on low-memory or four-core devices, up to two otherwise, to leave CPU time for "
-              + "the game. More workers can finish preparation sooner but compete "
-              + "with gameplay.",
+              + "the game. More workers can finish preparing the known pipelines sooner.",
           "-1", "1", "2", "4"),
-      o("Performance", "vulkan_aot_prewarm_threads", "Background preparation workers", "-1", true,
-          "Automatic uses one worker on low-memory or four-core devices, two otherwise. Prepared free-roam pipelines run below normal priority, leaving title and audio work ahead of speculative preparation.", "-1", "1", "2", "4"),
       o("Performance", "host_present_fps_limit", "Additional display limit", "0", false,
           "Automatic follows game frames. An additional cap can reduce display "
               + "work; keep it at or above the game frame limit.",
@@ -83,13 +80,14 @@ final class MobileSettings {
               + "presentation surface.",
           "false", "true"),
       s("Display", "present_effect", "Upscaling filter", "bilinear", false,
-          "Bilinear is the cheapest starting point. CAS and FSR 1 add "
-              + "sharpening and GPU work.",
-          "bilinear", "cas", "fsr"),
+          "Off uses nearest-neighbour display scaling with no smoothing. At reduced render "
+              + "resolutions, edges can look blocky. Bilinear smooths pixels. CAS and FSR 1 "
+              + "add sharpening and GPU work. Post-process anti-aliasing is a separate setting.",
+          "nearest", "bilinear", "cas", "fsr"),
       o("Display", "present_cas_additional_sharpness", "CAS sharpness", "0", false,
           "Additional sharpening when CAS is selected.", "0", "0.25", "0.5", "0.75", "1"),
-      o("Display", "present_fsr_sharpness_reduction", "FSR softness", "0", false,
-          "Higher values reduce sharpening halos when FSR is selected.", "0", "0.5", "1", "1.5",
+      o("Display", "present_fsr_sharpness_reduction", "FSR softness", "0.2", false,
+          "Higher values reduce sharpening halos when FSR is selected.", "0", "0.2", "0.5", "1", "1.5",
           "2"),
       o("Display", "present_dither", "Smooth colour gradients", "false", false,
           "Dithering can reduce visible colour bands in the final image.", "false", "true"),
@@ -221,6 +219,8 @@ final class MobileSettings {
       }
     }
     if (option.key.equals("present_effect")) {
+      if (str.equals("nearest"))
+        return "Off (nearest)";
       if (str.equals("fsr"))
         return "FSR 1";
       if (str.equals("cas"))
@@ -236,7 +236,7 @@ final class MobileSettings {
       return str;
     return str + "%";
   }
-  static boolean automaticResource(String key){return key.equals("vulkan_pipeline_creation_threads")||key.equals("vulkan_aot_prewarm_threads")||key.equals("vulkan_texture_memory_prealloc_mb");}
+  static boolean automaticResource(String key){return key.equals("vulkan_pipeline_creation_threads")||key.equals("vulkan_texture_memory_prealloc_mb");}
 
   static String summary(Activity activity) throws NumberFormatException {
     int i;
