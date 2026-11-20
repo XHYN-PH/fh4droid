@@ -19,4 +19,8 @@
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowNoTitle">true</item>
     </style>
+    <style name="FH4DroidPauseDrawerMotion">
+        <item name="android:windowEnterAnimation">@anim/pause_drawer_enter</item>
+        <item name="android:windowExitAnimation">@anim/pause_drawer_exit</item>
+    </style>
 </resources>

@@ -136,7 +136,7 @@ public final class RacingLauncherView extends FrameLayout {
             + model.notice;
     if (!next.equals(signature)) {
       remember();
-      render();
+      render(!isLaidOut());
     }
   }
 
@@ -398,7 +398,7 @@ public final class RacingLauncherView extends FrameLayout {
             + contentInsets.right, MeasureSpec.EXACTLY),
             MeasureSpec.makeMeasureSpec(viewportHeight + contentInsets.top
                 + contentInsets.bottom, MeasureSpec.EXACTLY));
-        grid(body, scroll.getMeasuredHeight());
+        grid(body, scroll.getMeasuredHeight(), animate || !isLaidOut());
       }
     } else secondary(body);
     wireFocus();
@@ -414,7 +414,7 @@ public final class RacingLauncherView extends FrameLayout {
     };
     if (animate) {
       post(restore);
-      MenuMotion.page(slot, reversing);
+      if (!home() || design != Design.GRID) MenuMotion.page(slot, reversing);
     } else restoreAfterResize = restore;
     reversing = false;
   }
@@ -568,7 +568,7 @@ public final class RacingLauncherView extends FrameLayout {
     return page.equals("settings") && (viewportWidth < screenDp(540) || largeText()) ? 2 : columns();
   }
 
-  private void grid(LinearLayout body, int availableHeight) {
+  private void grid(LinearLayout body, int availableHeight, boolean animate) {
     title(body, model.running ? "Game running" : model.ready ? "Ready to drive" : "Game files needed",
         model.graphics, compact ? 23 : 29);
     if (!model.notice.isEmpty()) {
@@ -613,6 +613,7 @@ public final class RacingLauncherView extends FrameLayout {
     gap(options, spacing);
     options.addView(second, new LinearLayout.LayoutParams(-1, rowHeight));
     for (FocusCard card : cards) card.fitHeight(cardWidth, rowHeight);
+    if (animate) MenuMotion.dashboard(area, first, second);
   }
 
   private void secondary(LinearLayout body) {

@@ -843,7 +843,7 @@ final class FestivalUi {
     if(key==null)return null;if(view.isFocusable()&&key.equals(focusKey(view)))return view;
     if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++){View found=findFocusKey(group.getChildAt(i),key);if(found!=null)return found;}}return null;
   }
-  private static void motion(View v, boolean horizontal) {
+  static void enter(View v) {
     v.animate().cancel();
     v.setAlpha(1);
     v.setTranslationX(0);
@@ -852,10 +852,7 @@ final class FestivalUi {
       return;
     float distance = 12 * v.getResources().getDisplayMetrics().density;
     v.setAlpha(0);
-    if (horizontal)
-      v.setTranslationX(distance);
-    else
-      v.setTranslationY(distance);
+    v.setTranslationY(distance);
     v.animate()
         .alpha(1)
         .translationX(0)
@@ -863,12 +860,6 @@ final class FestivalUi {
         .setDuration(180)
         .setInterpolator(new DecelerateInterpolator())
         .start();
-  }
-  static void enter(View v) {
-    motion(v, false);
-  }
-  static void slideIn(View v) {
-    motion(v, true);
   }
   static void immersive(Activity a) {
     a.getWindow().setStatusBarColor(BG);

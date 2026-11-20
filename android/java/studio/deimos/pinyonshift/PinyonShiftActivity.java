@@ -544,13 +544,28 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     void openNativeAchievements(){resumeDriving();if(nativeReady)nativeAction("achievements");}
     void openNativeSettings(){resumeDriving();if(nativeReady)nativeOpenSettings();}
     private void showGameMenu(){
-        if(closing||comparisonState!=null)return;if(!nativeReady){toast("The game is still starting.");return;}if(isFinishing()||gameMenu!=null&&gameMenu.isShowing())return;
+        if(closing||comparisonState!=null||isFinishing()||isDestroyed()||gameMenu!=null)return;
+        if(!nativeReady){toast("The game is still starting.");return;}
         if(sessionLoggingEnabled())ActionBreadcrumbs.record(this,"Game menu","opened");
-        nativeHostMenu(true);stopPhoneRumble();drawerPages.clear();drawer=new android.widget.FrameLayout(this);
-        gameMenu=new android.app.AlertDialog.Builder(this).setView(drawer).create();gameMenu.setCanceledOnTouchOutside(true);
-        gameMenu.setOnKeyListener((d,key,event)->{if(ControllerPrompts.handle(this,gameMenu.getWindow(),key,event,this::backPanel))return true;if(key!=android.view.KeyEvent.KEYCODE_BACK)return false;if(event.getAction()==android.view.KeyEvent.ACTION_UP)backPanel();return true;});
-        gameMenu.setOnDismissListener(d->{drawerPages.clear();if(bridgeLoaded)nativeHostMenu(closing||!gameResumed);refreshCpuHintTarget();FestivalUi.immersive(this);});
-        gameMenu.setOnShowListener(d->{android.view.Window w=gameMenu.getWindow();if(w!=null){FestivalUi.styleOverlay(this,w,.35f);w.setGravity(android.view.Gravity.RIGHT|android.view.Gravity.CENTER_VERTICAL);resizeGameMenu();}refreshCpuHintTarget();FestivalUi.slideIn(drawer);});
+        drawerPages.clear();
+        drawer=new android.widget.FrameLayout(this);
+        android.app.AlertDialog dialog=new android.app.AlertDialog.Builder(this).setView(drawer).create();
+        gameMenu=dialog;
+        dialog.setCanceledOnTouchOutside(true);
+        android.view.Window window=dialog.getWindow();
+        if(window!=null){
+            FestivalUi.styleOverlay(this,window,.35f);
+            window.setGravity(android.view.Gravity.RIGHT|android.view.Gravity.CENTER_VERTICAL);
+            MenuMotion.drawerWindow(window);
+        }
+        dialog.setOnKeyListener((d,key,event)->{
+            if(ControllerPrompts.handle(this,dialog.getWindow(),key,event,this::backPanel))return true;
+            if(key!=android.view.KeyEvent.KEYCODE_BACK)return false;
+            if(event.getAction()==android.view.KeyEvent.ACTION_UP)backPanel();
+            return true;
+        });
+        dialog.setOnDismissListener(d->gameMenuDismissed(dialog));
+        dialog.setOnShowListener(d->refreshCpuHintTarget());
         MobileSettings.Runtime runtime=settingsRuntime();
         Runnable editor=()->{resumeDriving();startActivity(new Intent(this,TouchEditorActivity.class).putExtra("return_to_game",true));};
         GameMenuView body=new GameMenuView(this,label->{switch(label){
@@ -577,13 +592,44 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
           }
           case "Quit to launcher":new android.app.AlertDialog.Builder(this).setTitle("Quit the game?").setMessage("Wait for the game's save indicator to finish before quitting.").setNegativeButton("Keep playing",null).setPositiveButton("Quit",(d,w)->requestQuit()).show();break;
         }});
-        showPanel("Game menu",body);gameMenu.show();
+        showPanel("Game menu",body);
+        nativeHostMenu(true);
+        stopPhoneRumble();
+        try{dialog.show();}
+        catch(android.view.WindowManager.BadTokenException error){gameMenuDismissed(dialog);}
     }
-    @Override public void showPanel(String title,android.view.View body){if(drawer!=null)FestivalUi.rememberTree(drawer);drawerPages.push(new DrawerPage(title,body));renderDrawer();}
+    private void gameMenuDismissed(android.app.AlertDialog dialog){
+        if(gameMenu!=dialog)return;
+        gameMenu=null;
+        drawerPages.clear();
+        drawer=null;
+        if(bridgeLoaded)nativeHostMenu(closing||!gameResumed);
+        refreshCpuHintTarget();
+        if(!isFinishing()&&!isDestroyed())FestivalUi.immersive(this);
+    }
+    @Override public void showPanel(String title,android.view.View body){
+        if(drawer==null)return;
+        drawerPages.push(new DrawerPage(title,body));
+        renderDrawer(false);
+    }
     @Override public void replacePanel(String title,android.view.View body){if(!drawerPages.isEmpty())drawerPages.pop();showPanel(title,body);}
-    private void renderDrawer(){if(drawer==null||drawerPages.isEmpty())return;FestivalUi.rememberTree(drawer);drawer.removeAllViews();DrawerPage page=drawerPages.peek();android.view.View panel=page.body instanceof GameMenuView?page.body:FestivalUi.panel(this,page.title,page.body,this::backPanel);if(panel.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)panel.getParent()).removeView(panel);drawer.addView(panel,new android.widget.FrameLayout.LayoutParams(-1,page.body instanceof GameMenuView?-2:-1));resizeGameMenu();if(page.body instanceof GameMenuView)page.body.post(()->FestivalUi.restorePage(page.body));FestivalUi.refreshTree(panel);FestivalUi.slideIn(panel);}
+    private void renderDrawer(boolean back){
+        if(drawer==null||drawerPages.isEmpty())return;
+        FestivalUi.rememberTree(drawer);
+        if(drawer.getChildCount()>0)MenuMotion.stop(drawer.getChildAt(0));
+        drawer.removeAllViews();
+        DrawerPage page=drawerPages.peek();
+        boolean menu=page.body instanceof GameMenuView;
+        android.view.View panel=menu?page.body:FestivalUi.panel(this,page.title,page.body,this::backPanel);
+        if(panel.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)panel.getParent()).removeView(panel);
+        drawer.addView(panel,new android.widget.FrameLayout.LayoutParams(-1,menu?-2:-1));
+        resizeGameMenu();
+        if(menu)page.body.post(()->{if(page.body.isAttachedToWindow())FestivalUi.restorePage(page.body);});
+        FestivalUi.refreshTree(panel);
+        if(gameMenu!=null&&gameMenu.isShowing())MenuMotion.page(panel,back);
+    }
     private void resizeGameMenu(){if(gameMenu==null||gameMenu.getWindow()==null||drawerPages.isEmpty())return;boolean home=drawerPages.peek().body instanceof GameMenuView;boolean settings=Boolean.TRUE.equals(drawerPages.peek().body.getTag(FestivalUi.FULL_PAGE));int screen=getResources().getDisplayMetrics().widthPixels;gameMenu.getWindow().setLayout(settings?(int)(screen*.96f):Math.min(FestivalUi.dp(this,500),screen-FestivalUi.dp(this,24)),home?-2:-1);}
-    @Override public void backPanel(){if(drawerPages.size()>1){drawerPages.pop();renderDrawer();}else resumeDriving();}
+    @Override public void backPanel(){if(drawerPages.size()>1){drawerPages.pop();renderDrawer(true);}else resumeDriving();}
     @Override public void onBackPressed(){if(gameMenu!=null&&gameMenu.isShowing())backPanel();else showGameMenu();}
     public void gameRumble(int left,int right){uiHandler.post(()->{
         if(phoneVibrator==null||!phoneVibrator.hasVibrator()||!gameResumed||gameMenu!=null&&gameMenu.isShowing()||!getSharedPreferences("mobile",0).getBoolean("phone_rumble",true)){stopPhoneRumble();return;}

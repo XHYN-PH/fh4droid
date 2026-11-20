@@ -353,6 +353,24 @@ public class UiPolishTest {
     a.getSharedPreferences("mobile",0).edit().putBoolean("record_session_logs",true).commit();
     assertEquals("STANDARD",defaultMode.invoke(a).toString());
   }
+
+  @Test public void aboutShowsRequirementsCreditsAndUpstreamLink() {
+    LauncherActivity launcher = Robolectric.buildActivity(LauncherActivity.class).setup().visible().get();
+    RacingLauncherView root = (RacingLauncherView) ((ViewGroup) launcher.findViewById(android.R.id.content)).getChildAt(0);
+    root.showPage("more");
+    arrange(root, 2400, 1080);
+    assertTrue(root.findViewWithTag("about").performClick());
+    arrange(root, 2400, 1080);
+    assertTrue(text(root).contains("Android 13 or newer"));
+    assertTrue(text(root).contains("arcanite24"));
+    assertTrue(text(root).contains("Control artwork credits"));
+    assertNull(root.findViewWithTag("launcher-footer"));
+    View upstream = findByDescription(root, "Pinyon Shift. Upstream project");
+    assertNotNull(upstream);
+    assertTrue(upstream.performClick());
+    assertEquals("https://github.com/arcanite24/pinyon-shift",
+        org.robolectric.Shadows.shadowOf(launcher).getNextStartedActivity().getDataString());
+  }
   @Test public void quietPlaySuppressesRecordingAndLeavesEarlierLogsAlone() throws Exception {
     SaveSyncActivity game=Robolectric.buildActivity(SaveSyncActivity.class).get();
     File log=new File(MobileConfig.base(game),"state/logs/android-launch-settings.json");

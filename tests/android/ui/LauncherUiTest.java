@@ -246,11 +246,21 @@ public class LauncherUiTest {
   @Test
   public void motionSettlesAndReducedMotionIsImmediate() {
     RacingLauncherView root = create(true);
+    root.showPage("home");
+    View dashboard = (View) root.findViewWithTag("play").getParent();
+    View firstRow = (View) root.findViewWithTag("settings").getParent();
+    View secondRow = (View) root.findViewWithTag("files").getParent();
+    assertTrue(dashboard.getTranslationY() > 0);
+    assertEquals(0, firstRow.getAlpha(), 0);
+    assertTrue(firstRow.animate().getStartDelay() < secondRow.animate().getStartDelay());
     root.requestActionFocus("settings");
     View card = root.findViewWithTag("settings");
     assertTrue(card.getScaleX() < 1);
     settle();
     assertEquals(1, card.getScaleX(), .001);
+    assertEquals(0, dashboard.getTranslationY(), .001);
+    assertEquals(1, firstRow.getAlpha(), .001);
+    assertEquals(1, secondRow.getAlpha(), .001);
     for (int i = 0; i < 4; i++) {
       root.showPage("more");
       root.showPage("home");
@@ -259,9 +269,16 @@ public class LauncherUiTest {
     settle();
     assertTrue(root.findViewWithTag("play").isShown());
     activity.getSharedPreferences("mobile", 0).edit().putBoolean("animations", false).commit();
+    root.showPage("home");
+    assertEquals(0, ((View) root.findViewWithTag("play").getParent()).getTranslationY(), 0);
+    assertEquals(1, ((View) root.findViewWithTag("files").getParent()).getAlpha(), 0);
     root.requestActionFocus("controls");
     assertEquals(1, root.findViewWithTag("controls").getScaleX(), 0);
     assertFalse(MenuMotion.enabled(activity));
+    Window window = new android.app.Dialog(activity).getWindow();
+    window.setWindowAnimations(android.R.style.Animation_Dialog);
+    MenuMotion.drawerWindow(window);
+    assertEquals(0, window.getAttributes().windowAnimations);
   }
 
   @Test

@@ -145,7 +145,34 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         catch(android.content.pm.PackageManager.NameNotFoundException error){return "Version unavailable";}
     }
     private void external(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(ActivityNotFoundException error){toast("No browser is available.");}}
-    private void about(){LinearLayout body=FestivalUi.column(this);body.addView(FestivalUi.text(this,installedVersion(),16,FestivalUi.ORANGE));body.addView(FestivalUi.text(this,"FH4Droid is an unofficial Android fan port. Supply your own supported Forza Horizon game files. Local achievements do not synchronize with Xbox Live.",14,FestivalUi.TEXT));FestivalUi.action(this,body,"Control artwork credits",this::controlArtworkCredits);FestivalUi.present(this,"About FH4Droid",body);}
+    private void about(){
+        LinearLayout body=FestivalUi.column(this);
+        LinearLayout app=FestivalUi.card(this,body,"FH4Droid",installedVersion());
+        app.addView(FestivalUi.text(this,
+            "An unofficial Android port of Forza Horizon (2012), based on Pinyon Shift and maintained by XHYN-PH.",
+            14,FestivalUi.TEXT));
+        LinearLayout requirements=FestivalUi.card(this,body,"Requirements",
+            "Android 13 or newer · ARMv8.2-A · compatible Vulkan driver");
+        requirements.addView(FestivalUi.text(this,
+            "Use your own supported USA base-game files from Xbox 360. Profiles, saves and achievements are stored locally.",
+            13,FestivalUi.TEXT));
+        LinearLayout credits=FestivalUi.card(this,body,"Credits",
+            "Playground Games, Turn 10 Studios and Microsoft Studios for Forza Horizon.");
+        credits.addView(FestivalUi.text(this,
+            "arcanite24 and contributors for Pinyon Shift and its Android port. ShiftGlue, ReXGlue, SDL3 and libadrenotools contributors for the runtime, input and graphics support. StevenMXZ and Mesa contributors for the bundled Turnip driver.",
+            13,FestivalUi.TEXT));
+        FestivalUi.tileRow(this,body,
+            FestivalUi.tile(this,"folder","Pinyon Shift","Upstream project",()->external("https://github.com/arcanite24/pinyon-shift")),
+            FestivalUi.tile(this,"chip","ShiftGlue","Runtime source",()->external("https://github.com/arcanite24/shiftglue-sdk")),
+            FestivalUi.tile(this,"file","Third-party notices","Licences and acknowledgements",
+                ()->external("https://github.com/XHYN-PH/fh4droid/blob/main/THIRD_PARTY_NOTICES.md")));
+        FestivalUi.tileRow(this,body,
+            FestivalUi.tile(this,"folder","FH4Droid on GitHub","Source and releases",()->launcherAction("github")),
+            FestivalUi.tile(this,"play","YouTube","Videos and updates",()->launcherAction("youtube")),
+            FestivalUi.tile(this,"info","Telegram","Project announcements",()->launcherAction("telegram")));
+        FestivalUi.listRow(this,body,"controller","Control artwork credits","Lucide and Feather licences",this::controlArtworkCredits);
+        FestivalUi.present(this,"About FH4Droid",body);
+    }
     private void controlArtworkCredits(){
         LinearLayout body=FestivalUi.column(this);
         FestivalUi.action(this,body,"Lucide icon library",()->external("https://lucide.dev/"));

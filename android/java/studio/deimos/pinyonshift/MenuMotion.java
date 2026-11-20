@@ -3,6 +3,7 @@ package studio.deimos.pinyonshift;
 import android.animation.*;
 import android.content.Context;
 import android.view.View;
+import android.view.Window;
 import android.view.animation.DecelerateInterpolator;
 
 /** Short, interruptible menu motion. Nothing runs once a transition has settled. */
@@ -26,6 +27,36 @@ final class MenuMotion {
         .setDuration(220)
         .setInterpolator(new DecelerateInterpolator(1.5f))
         .start();
+  }
+
+  static void dashboard(View cards, View topRow, View bottomRow) {
+    if (!enabled(cards.getContext())) return;
+    enter(cards, 0, 12, 0);
+    enter(topRow, 9, 0, 30);
+    enter(bottomRow, 9, 0, 60);
+  }
+
+  private static void enter(View view, int x, int y, long delay) {
+    float density = view.getResources().getDisplayMetrics().density;
+    view.setAlpha(0);
+    view.setTranslationX(x * density);
+    view.setTranslationY(y * density);
+    view.animate()
+        .alpha(1)
+        .translationX(0)
+        .translationY(0)
+        .setStartDelay(delay)
+        .setDuration(190)
+        .setInterpolator(new DecelerateInterpolator(1.5f))
+        .start();
+  }
+
+  static void drawerWindow(Window window) {
+    Context context = window.getContext();
+    // Let the dialog resolve its theme before applying the app's motion setting.
+    window.getDecorView();
+    window.setWindowAnimations(enabled(context) ? context.getResources().getIdentifier(
+        "FH4DroidPauseDrawerMotion", "style", context.getPackageName()) : 0);
   }
 
   static void focus(View view, boolean focused) {
