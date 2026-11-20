@@ -71,6 +71,8 @@ records the selectors, measurements and image checks.
 
 Bloom and luminance are built by reducing the scene to 320x192, 64x32 and 32x32 levels; the final pass applies motion blur and the colour grade from a 16x16x16 lookup texture. Every post group changes the frame, so none of it is dead work.
 
+The motion blur pass reconstructs velocity from scene depth and stencil. FH4Droid gives the asphalt tagged by the car's stencil volume the same camera motion as the surrounding road. This corrects the stencil cutoff that can leave a sharply bounded patch of unblurred asphalt behind the car.
+
 {{findings:rendering/Post effects}}
 
 ## Render scenarios

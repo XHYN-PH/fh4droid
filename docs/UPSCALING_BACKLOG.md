@@ -36,8 +36,10 @@ planned here as an opt-in feature, off by default.
   the RTX 4080. The HUD and the host UI (F3, F6) are kept out of the
   generated frames and drawn on each one, and all three run with HDR.
   LSFG stays off until THS answers (UP-0.1).
-- **The game has no motion vectors, no jitter and no TAA.** Its motion blur
-  takes six taps along a camera velocity. Depth exists: the 1280x720
+- **The game computes velocity for motion blur at half resolution.** The
+  velocity pass reprojects scene depth through a matrix selected by stencil.
+  The final composite takes six taps along that velocity. Temporal upscalers
+  reconstruct their own full-resolution inputs. The 1280x720
   `24_8_FLOAT` texture is resolved every frame, and DR-2.2 keeps it current.
   The HUD boundary is known (the front buffer's `2_10_10_10_AS_10_10_10_10`
   view), and `scene_post.cpp` already snapshots the pre-HUD scene. The

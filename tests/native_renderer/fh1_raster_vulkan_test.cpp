@@ -2,10 +2,12 @@
 // Compile with the pinned Vulkan headers and link a Vulkan loader. A software
 // ICD is sufficient; this checks correctness, never phone performance.
 #include <vulkan/vulkan.h>
+#include <rex/graphics/fh1_motion_blur.h>
 #include <rex/graphics/fh1_raster_scale.h>
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -26,6 +28,27 @@
                                std::to_string(vk_status_)); \
   } while (0)
 namespace {
+void CheckMotionBlurStencilCutoff() {
+  using rex::graphics::fh1_motion_blur::CorrectStencilCutoff;
+  constexpr uint32_t guest_cutoff = 0x3F008100;
+  const float original = std::bit_cast<float>(guest_cutoff);
+  const float corrected = std::bit_cast<float>(CorrectStencilCutoff(guest_cutoff));
+  for (uint32_t stencil = 0; stencil <= 0xFF; ++stencil) {
+    const float sampled_stencil = float(stencil) / 255.0f;
+    const bool uses_camera = sampled_stencil >= corrected;
+    const bool used_camera = sampled_stencil >= original;
+    if (uses_camera != (stencil >= 0x80) ||
+        (uses_camera != used_camera) != (stencil == 0x80)) {
+      throw std::runtime_error("motion blur camera classification for stencil " +
+                               std::to_string(stencil));
+    }
+  }
+  if (CorrectStencilCutoff(0x3F400000) != 0x3F400000) {
+    throw std::runtime_error("motion blur modified an unrecognised cutoff");
+  }
+  std::cout << "PASS: motion blur classifies all 256 stencil values" << std::endl;
+}
+
 uint32_t Tiled(uint32_t x, uint32_t y, uint32_t pitch) {
   pitch = (pitch + 31) & ~31u;
   uint32_t macro = ((x >> 5) + (y >> 5) * (pitch >> 5)) << 9;
@@ -366,6 +389,7 @@ struct Source {
 }  // namespace
 int main() {
   try {
+    CheckMotionBlurStencilCutoff();
     Gpu gpu;
     size_t checks = 0;
     for (bool depth : {false, true}) {

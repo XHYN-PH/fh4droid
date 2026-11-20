@@ -113,6 +113,36 @@ iterations: off/on/off suppressed 0/420/0 commands, exactly two per enabled
 iteration. Decoded draw counts remained equal and control bytes matched.
 This verifies selection; timings from that build-concurrent check are excluded.
 
+### Motion blur at the car's stencil volume
+
+A sharp patch in the asphalt with motion blur enabled appears in FH4Droid
+0.9.6 and on desktop. A PIX capture shows a stencil-only volume under the
+car that inverts bit 7 on background pixels with stencil zero. The FH1
+pipeline catalog includes the same depth-only vertex shader,
+`6468E7FEC2CBA0CE`, with the matching stencil operation.
+[Pinyon Shift #842](https://github.com/arcanite24/pinyon-shift/issues/842) ·
+[Xenia PIX capture](https://github.com/xenia-project/game-compatibility/issues/509#issuecomment-1722316467)
+
+The 640x360 pass at draw 5359 (`E68FE55ECD482EC5`) reads depth and stencil
+at slot 2. The supported base executable's metadata identifies 25
+reprojection matrices. With the original cutoff of 0.50196838, a stencil
+byte of 0x80 normalized to 128/255 passes the object path and selects slot
+43. At a cutoff of 0.5 it selects the camera matrix in slot zero. Values
+from 0x00 through 0x7F and from 0x81 through 0xFF classify as before.
+
+The Vulkan constant buffer upload substitutes the cutoff for this exact
+velocity shader and original value. The volume still writes stencil for its
+other consumers, and the final composite still takes the motion-blur taps.
+The shader interface and precompiled shader cache are shared by the original
+and corrected draws.
+
+On llvmpipe, the translated velocity shader rendered a test texture with
+all 256 stencil values and distinct camera and car reprojection matrices.
+With the corrected cutoff, the 0x80 sample matched the ordinary road's
+velocity and coverage byte for byte. All 255 other samples, including the
+player car stencil at 0x15, matched their original output. Full driving
+captures on Android remain unverified.
+
 ### Depth before the shadow mask
 
 The same ordered race trace corrects an earlier pass label. The 1040-pitch

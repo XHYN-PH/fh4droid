@@ -560,6 +560,15 @@ source = """docs/MODERN_RENDERING_RESEARCH.md Ordered post-chain inputs and outp
 
 [[finding]]
 group = """Post effects"""
+base = """pixel shader E68FE55ECD482EC5 (container 0x821AFBA8)"""
+name = """camera motion for the car's stencil volume"""
+what = """The half-resolution velocity pass reconstructs motion from scene depth using a matrix selected by stencil. The car's stencil-only volume can mark road pixels 0x80. The shader's cutoff in c253.w, 0.50196838, is just above the point-sampled UNORM8 value of 0x80. That value selects matrix slot 43 outside the 25 supplied matrices. FH4Droid uploads 0.5 for this shader and cutoff so 0x80 selects the camera matrix. All other byte values keep their original classification. The stencil and depth writes still run."""
+how = """Register usage and constants from the supported base executable, the velocity pass identity in the 0.9.6 Android report, and the stencil states and motion mask in xenia-project/game-compatibility#509. Software Vulkan readback of the translated shader confirms the corrected 0x80 output matches the road's motion with distinct car and camera matrices."""
+confidence = """confirmed"""
+source = """docs/MODERN_RENDERING_RESEARCH.md Motion blur at the car's stencil volume"""
+
+[[finding]]
+group = """Post effects"""
 base = """guest 0x1BDB1000, 0x1C149000"""
 name = """temporal post surface"""
 what = """One post-chain destination is temporal: a padded 1280x736 surface updated 256 rows per frame, fully republished every other frame and read back the next frame, alternating between history destinations `0x1BDB1000` and `0x1C149000`, with several guest formats per address. Treating it as a plain single-frame output fails."""
