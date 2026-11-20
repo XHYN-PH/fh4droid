@@ -174,6 +174,8 @@ An intentional native window close records a clean exit before the runtime's har
 
 ## Build and implementation notes
 
+The public maintainer guide covers the released source, toolchain, fork signing and save transfers. [FH4Droid fork and maintainer guide](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fork-handoff.md)
+
 The pinned ShiftGlue SDK is 537b2b64, matching upstream 0.9.1. Reviewed runtime changes and regenerated Vulkan helpers are stored in cmake/patches and applied idempotently before configuring the source SDK. This avoids a submodule commit unavailable from the upstream remote. Regenerate helpers with compile-fh1-native.sh (SPIRV_ONLY=1 and GLSLANG set), then run tools/update-android-sdk-patch.py after reviewing the SDK worktree.
 
 The current minimum is Android 13/API 33 with an ARMv8.2-A CPU, matching Pinyon Shift. The launcher checks for LSE atomics and RDM before loading native libraries. Vulkan 1.1/1.2 compatibility, Mali/Immortalis and Samsung Xclipse remain experimental. Packaging records the CPU baseline from the native build. Run `tools/test-android-mobile.py` and the renderer and parser host tests before packaging. The APK and native libraries must support 16 KiB page alignment.

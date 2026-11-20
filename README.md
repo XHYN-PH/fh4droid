@@ -4,7 +4,7 @@
 
 <h1 align="center">FH4Droid</h1>
 
-<p align="center">Forza Horizon (2012) for Android.<br>Based on Pinyon Shift and maintained by XHYN-PH.</p>
+<p align="center">Forza Horizon (2012) for Android.<br>Based on Pinyon Shift. Android fork by XHYN-PH.</p>
 
 <p align="center">
   <a href="https://github.com/XHYN-PH/fh4droid/releases">Download APK</a> ·
@@ -15,6 +15,8 @@
 **FH4Droid focuses on Android only.** It brings the original Xbox 360 **Forza Horizon (2012)** to compatible phones and handhelds.
 
 **Current release is FH4Droid 0.9.5.** It uses Pinyon Shift 0.9.1. [Android release notes](docs/releases/fh4droid-0.9.5.md)
+
+**XHYN-PH is stepping away from maintenance.** The source and release downloads are public. To build the app, sign a fork or continue maintenance, see the [fork and maintainer guide](docs/releases/fork-handoff.md).
 
 **You must provide your own legally obtained game files.** Use the supported USA Xbox 360 base-game ISO or complete extracted folder. Game files and game-download links are not provided here.
 
