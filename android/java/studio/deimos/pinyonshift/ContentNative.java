@@ -18,6 +18,7 @@ final class ContentNative {
     }
     private static native byte[] nativeManifest(String path) throws IOException;
     private static native void nativeExtractDlc(String source,String destination,String id) throws IOException;
+    private static native long nativeExtractForzaProfile(String source,String destination) throws IOException;
     static JSONObject manifest(File file) throws IOException {
         load();
         try { return new JSONObject(new String(nativeManifest(file.getAbsolutePath()),java.nio.charset.StandardCharsets.UTF_8)); }
@@ -25,6 +26,11 @@ final class ContentNative {
     }
     static void extractDlc(File source,File destination,String id) throws IOException {
         load();nativeExtractDlc(source.getAbsolutePath(),destination.getAbsolutePath(),id);
+    }
+
+    static long extractForzaProfile(File source, File destination) throws IOException {
+        load();
+        return nativeExtractForzaProfile(source.getAbsolutePath(), destination.getAbsolutePath());
     }
     private ContentNative() {}
 }

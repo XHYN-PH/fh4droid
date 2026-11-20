@@ -136,7 +136,9 @@ An unchanged, successful driver probe can be reused across Play launches. An And
 
 ## Saves
 
-Saves exports Normal, Modded or Both base-game save trees. Manage backups lets the player export, restore, or delete an individual backup while the game is closed. Reset selected save type keeps a rollback backup and retains installed DLC. Imports validate the archive in staging, reject path escapes and duplicate entries, and back up the selected profiles before replacement. A recovery journal restores the original saves and DLC when an import or restore is interrupted. Restoring an individual backup can also return a profile to its earlier empty state.
+Saves exports Normal, Modded or Both base-game save trees. **Clear saves** confirms the selected save type, moves that progress to a backup, and keeps installed DLC in place. Use **Restore previous saves** to undo the clear. **Manage backups** lets you export, restore or delete an individual backup while the game is closed. A recovery journal protects the original saves and DLC if an import, clear or restore is interrupted.
+
+**Import ForzaProfile** accepts Xbox 360 Forza Horizon save packages, including files with no filename extension. Choose Normal or Modded as the destination. The app checks the profile, companion database and version flags in staging, then keeps the old saves as a rollback copy and selects the package's player ID when available. A modded import selects that player only for modded sessions. Use **Restore saves** for an FH4Droid ZIP and **Import a Xenia profile** for a Xenia ZIP. Title-update saves require a matching game build.
 
 Use **Manage backups → Create named checkpoint** to copy the selected save type before changing cars, mods or settings. Backups show the saved profile type and date. Their detail panel shows the size and offers export, restore and delete.
 

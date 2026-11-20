@@ -1054,6 +1054,23 @@ void PinyonShiftApp::OnPostInitLogging() {
 
 void PinyonShiftApp::OnPreSetup(rex::RuntimeConfig& config) {
   rex::system::SetHostGpuLossHandler(&OnHostGpuLoss);
+#if defined(__ANDROID__)
+  // Console imports can select an owner for modded play without changing the
+  // player's normal save or overriding an explicit developer launch argument.
+  if (g_user_data_root.filename() == "user-modded" &&
+      rex::cvar::GetFlagSource("user_xuid") <= rex::cvar::Source::kConfig) {
+    std::ifstream marker(g_user_data_root / "profile-id.txt", std::ios::binary);
+    std::string owner(16, '\0');
+    std::error_code error;
+    if (marker.read(owner.data(), owner.size()) && marker.peek() == EOF &&
+        owner.find_first_not_of("0123456789ABCDEF") == std::string::npos &&
+        std::filesystem::is_regular_file(g_user_data_root / owner / "4D5309C9" / "00000001" /
+                                             "ForzaProfile" / "ForzaProfile",
+                                         error)) {
+      rex::cvar::SetFlagByName("user_xuid", owner);
+    }
+  }
+#endif
   // The window title and the F3 overlay name this release and its commits.
   rex::ui::SetBuildLabel(pinyon_shift::diagnostics::BuildLabel());
   config.gpu_plugin =

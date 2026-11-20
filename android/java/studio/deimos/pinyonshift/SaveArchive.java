@@ -84,10 +84,16 @@ final class SaveArchive {
     }
     private static String importedOwner(File state, File stage, List<String> roots, String archived) throws IOException {
         Set<String> owners = profileOwners(stage, roots, true);
-        if (archived != null) {
-            if (!owners.contains(archived)) throw new IOException("The backup's player profile is missing.");
-            return archived;
+        if (archived != null && !owners.contains(archived))
+            throw new IOException("The backup's player profile is missing.");
+        if (roots.size() == 1 && roots.contains(MODDED)) {
+            String moddedOwner = backupOwner(new File(stage, MODDED));
+            if (moddedOwner != null) {
+                if (!owners.contains(moddedOwner)) throw new IOException("The modded save's player profile is missing.");
+                return null;
+            }
         }
+        if (archived != null) return archived;
         String owner = chooseOwner(owners, configuredOwner(state));
         if (owner == null && !owners.isEmpty())
             throw new IOException("This older backup has several player profiles. Export it again from the source phone with the intended profile selected.");
@@ -225,6 +231,47 @@ final class SaveArchive {
             switchRoots(state,stage,selected,importedOwner(state,stage,selected,archived));
         }finally{if(!ContentTransaction.pending(state))delete(stage);}
     }
+    static synchronized void importForzaProfile(File state, String scope, InputStream input)
+            throws IOException {
+        Files.createDirectories(state.toPath());
+        File stage = Files.createTempDirectory(state.toPath(), "save-import-").toFile();
+        try {
+            File packageFile = new File(stage, "ForzaProfile.stfs");
+            long size = ContentFiles.copyToFile(input, packageFile, SAVE_LIMIT);
+            File profile = new File(stage, "profile");
+            ContentFiles.requireSpace(profile, size);
+            long owner = ContentNative.extractForzaProfile(packageFile, profile);
+            installForzaProfile(state, stage, scope, owner);
+        } finally {
+            if (!ContentTransaction.pending(state)) delete(stage);
+        }
+    }
+
+    static void installForzaProfile(File state, File stage, String scope, long sourceOwner)
+            throws IOException {
+        if (!rootName(scope)) throw new IOException("Choose Normal or Modded saves.");
+        File profile = new File(stage, "profile");
+        for (String required : new String[]{"ForzaProfile", "PlayerDatabase"}) {
+            File file = new File(profile, required);
+            if (!Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS) || file.length() == 0) {
+                throw new IOException("The save package is missing " + required + ". Existing saves were kept.");
+            }
+        }
+        verifyBaseVersion(new File(profile, "VersionFlags"));
+        String owner = String.format(Locale.ROOT, "%016X", sourceOwner);
+        if (!XeniaSaveImport.usableXuid(owner)) owner = configuredOwner(state);
+        File slot = new File(stage, scope + "/" + owner + "/" + PROFILE_DIRECTORY);
+        FileOperation.check();
+        Files.createDirectories(slot.getParentFile().toPath());
+        Files.move(profile.toPath(), slot.toPath(), StandardCopyOption.ATOMIC_MOVE);
+        if (MODDED.equals(scope)) {
+            Files.write(new File(stage, MODDED + "/" + PROFILE_MARKER).toPath(),
+                        owner.getBytes(StandardCharsets.US_ASCII));
+            owner = null;
+        }
+        switchRoots(state, stage, Collections.singletonList(scope), owner);
+    }
+
     private static File newBackup(File state)throws IOException{
         File parent=new File(state,"backups");
         if(Files.isSymbolicLink(parent.toPath()))throw new IOException("Backup links are not supported.");
@@ -434,8 +481,11 @@ final class SaveArchive {
             long[] budget={0,0};
             for(String root:roots){
                 File source=scoped||backup.nativeSlot?new File(payload,root):payload;
-                if(Files.exists(source.toPath(),LinkOption.NOFOLLOW_LINKS))
-                    stageBackup(source,source,new File(stage,root),budget,0);
+                if(Files.exists(source.toPath(),LinkOption.NOFOLLOW_LINKS)) {
+                    File target = new File(stage, root);
+                    if (scoped && directory(source)) Files.createDirectories(target.toPath());
+                    stageBackup(source,source,target,budget,0);
+                }
             }
             if(!scoped&&budget[1]==0)throw new IOException("The backup has no save data.");
             FileOperation.check();
@@ -463,6 +513,8 @@ final class SaveArchive {
         File stage = Files.createTempDirectory(state.toPath(), "save-reset-").toFile();
         try {
             FileOperation.check();
+            // Keep an empty modded tree so the next launch does not seed it from normal saves.
+            for (String root : roots) Files.createDirectory(new File(stage, root).toPath());
             switchRoots(state, stage, roots, null);
         } finally {
             if(!ContentTransaction.pending(state))delete(stage);

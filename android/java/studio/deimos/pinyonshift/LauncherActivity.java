@@ -24,6 +24,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         PanelPage(String title,View body,java.util.function.Supplier<View> builder){this.title=title;this.body=body;this.builder=builder;}
     }
     private static final int ISO=310,SAVE_OUT=311,SAVE_IN=312,DRIVER_ZIP=313,PROBE=314,PROFILE_PIC=315,XENIA_IN=316,BACKUP_OUT=317;
+    private static final int FORZA_NORMAL_IN=318,FORZA_MODDED_IN=319;
     private boolean busy;
     private InstallationStatus installationStatus;
     private String pendingBackupPath;
@@ -479,13 +480,15 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
             FestivalUi.tile(this,"upload","Export saves","Export a ZIP for backup.",()->{if(canManage())pick(SAVE_OUT,"application/zip",true);}),
             FestivalUi.tile(this,"download","Restore saves","Restore from a backup ZIP.",()->{if(canManage())new AlertDialog.Builder(this).setTitle("Import saves?").setMessage("Current saves are kept as a local backup before replacement.")
                 .setNegativeButton("Cancel",null).setPositiveButton("Choose ZIP",(d,w)->pick(SAVE_IN,"application/zip",false)).show();}));
+        FestivalUi.tileRow(this,p,
+            FestivalUi.tile(this,"file","Import ForzaProfile","Choose an Xbox 360 save package.",this::chooseForzaProfile),
+            FestivalUi.tile(this,"trash","Clear saves","Back up and clear the selected save type.",this::confirmClearSaves));
         FestivalUi.listRow(this,p,"user","Import a Xenia profile","Add a base-game Xenia save from a ZIP.",()->{if(canManage())new AlertDialog.Builder(this).setTitle("Import a base-game Xenia save").setMessage("Choose a ZIP containing content/<XUID>/4D5309C9 with the original folders. Imports beside your current normal save and selects that original XUID for next launch. Existing profiles are kept, settings are backed up, and title-update-v4 saves are refused. Modded mode keeps using its separate save tree.").setNegativeButton("Cancel",null).setPositiveButton("Choose ZIP",(d,w)->pick(XENIA_IN,"application/zip",false)).show();});
         FestivalUi.listRow(this,p,"save","Restore previous saves","Go back to the copy kept before the last change.",()->{if(canManage())new AlertDialog.Builder(this).setTitle("Restore previous saves?").setMessage("Your current saves are also kept before the restore.")
             .setNegativeButton("Cancel",null).setPositiveButton("Restore",(d,w)->saveWork("Restoring saves…",()->SaveArchive.restore(new File(MobileConfig.base(this),"state")),()->toast("Previous saves restored."))).show();});
         FestivalUi.listRow(this, p, "save", "Manage backups", "Export, restore, or delete an individual backup.",
             () -> openPage("Save backups", this::backupPage));
-        FestivalUi.listRow(this, p, "trash", "Reset selected save type", "Move the selected live saves to a local backup.", this::confirmResetSaves);
-        TextView help=FestivalUi.text(this,"The save type applies to exports. Imports and restores keep normal and modded profiles separate and retain a rollback copy. Quit the game before changing saves.",13,FestivalUi.MUTED);help.setPadding(FestivalUi.dp(this,4),FestivalUi.dp(this,10),FestivalUi.dp(this,4),0);p.addView(help);
+        TextView help=FestivalUi.text(this,"Save type applies to Export and Clear. Imports keep a recovery backup. Quit the game before changing saves.",13,FestivalUi.MUTED);help.setPadding(FestivalUi.dp(this,4),FestivalUi.dp(this,10),FestivalUi.dp(this,4),0);p.addView(help);
         TextView next=FestivalUi.text(this,"Next launch: "+LocalProfile.configuredProfile(MobileConfig.read(this))+"\n"+LocalProfile.backupStatus(MobileConfig.read(this)),13,FestivalUi.ORANGE);next.setPadding(FestivalUi.dp(this,4),FestivalUi.dp(this,6),FestivalUi.dp(this,4),0);p.addView(next);
         return p;
     }
@@ -568,17 +571,26 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         });
         dialog.show();
     }
-    private void confirmResetSaves() {
+    private void chooseForzaProfile() {
+        if (!canManage()) return;
+        new AlertDialog.Builder(this).setTitle("Import ForzaProfile")
+            .setMessage("Choose where to import a base-game Xbox 360 save. FH4Droid backs up that save type before replacement. Modded imports use the package's player only in modded sessions.")
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Normal saves", (dialog, which) -> pick(FORZA_NORMAL_IN, "*/*", false))
+            .setPositiveButton("Modded saves", (dialog, which) -> pick(FORZA_MODDED_IN, "*/*", false))
+            .show();
+    }
+    private void confirmClearSaves() {
         if (!canManage()) return;
         String scope = pendingSaveScope;
         String label = SaveArchive.BOTH.equals(scope) ? "normal and modded saves"
             : SaveArchive.NORMAL.equals(scope) ? "normal saves" : "modded saves";
-        new AlertDialog.Builder(this).setTitle("Reset " + label + "?")
+        new AlertDialog.Builder(this).setTitle("Clear " + label + "?")
             .setMessage("The selected saves will be moved to a backup. Installed DLC stays in place.")
-            .setNegativeButton("Cancel", null).setPositiveButton("Back up and reset", (dialog, which) -> {
-                if (canManage()) work("Backing up saves…", () -> ContentFiles.locked(this, () -> {
-                    SaveArchive.resetProfiles(saveState(), scope); return null;
-                }), () -> toast("Saves moved to a backup."));
+            .setNegativeButton("Cancel", null).setPositiveButton("Back up and clear", (dialog, which) -> {
+                if (canManage()) saveWork("Backing up and clearing saves…",
+                    () -> SaveArchive.resetProfiles(saveState(), scope),
+                    () -> toast("Saves cleared. Restore previous saves to undo."));
             }).show();
     }
     void openDrivers(){drivers();}
@@ -674,6 +686,15 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         }
         else if(request==SAVE_IN)saveWork("Importing saves…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open backup.");SaveArchive.importInto(new File(MobileConfig.base(this),"state"),in);}},()->toast("Saves imported."));
         else if(request==XENIA_IN)saveWork("Checking Xenia profile…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open Xenia ZIP.");try(XeniaSaveImport.Prepared prepared=XeniaSaveImport.prepare(new File(MobileConfig.base(this),"state"),in)){XeniaSaveImport.install(new File(MobileConfig.base(this),"state"),prepared);}}},()->toast("Xenia profile imported; original XUID selected for the next launch."));
+        else if (request == FORZA_NORMAL_IN || request == FORZA_MODDED_IN) {
+            String scope = request == FORZA_MODDED_IN ? SaveArchive.MODDED : SaveArchive.NORMAL;
+            saveWork("Checking ForzaProfile…", () -> {
+                try (InputStream in = getContentResolver().openInputStream(uri)) {
+                    if (in == null) throw new IOException("Cannot open the ForzaProfile save package.");
+                    SaveArchive.importForzaProfile(saveState(), scope, in);
+                }
+            }, () -> toast("ForzaProfile imported into " + (scope.equals(SaveArchive.MODDED) ? "Modded saves." : "Normal saves.")));
+        }
         else if(request==PROFILE_PIC)work("Preparing gamer picture…",()->ProfilePage.importPicture(this,uri),()->toast("Gamer picture saved for the next launch."));
         else if(request==DRIVER_ZIP)work("Importing driver…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open driver ZIP.");pendingDriver=DriverStore.importZip(this,in);}},()->probe(pendingDriver,false));
     }

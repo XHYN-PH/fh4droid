@@ -21,6 +21,27 @@ void Error(JNIEnv* env, const std::exception& error) {
   jclass type = env->FindClass("java/io/IOException");
   if (type) { env->ThrowNew(type, error.what()); env->DeleteLocalRef(type); }
 }
+
+class ContentWorker {
+ public:
+  explicit ContentWorker(JNIEnv* env) : env_(env) {
+    jclass type = env_->FindClass("java/lang/Thread");
+    if (!type) throw std::runtime_error("Content worker is unavailable");
+    auto current = env_->GetStaticMethodID(type, "currentThread", "()Ljava/lang/Thread;");
+    interrupted_ = env_->GetMethodID(type, "isInterrupted", "()Z");
+    if (current && interrupted_) thread_ = env_->CallStaticObjectMethod(type, current);
+    env_->DeleteLocalRef(type);
+    if (!thread_) throw std::runtime_error("Content worker is unavailable");
+  }
+  ~ContentWorker() { env_->DeleteLocalRef(thread_); }
+
+  bool cancelled() const { return env_->CallBooleanMethod(thread_, interrupted_) == JNI_TRUE; }
+
+ private:
+  JNIEnv* env_;
+  jobject thread_ = nullptr;
+  jmethodID interrupted_ = nullptr;
+};
 }
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_studio_deimos_pinyonshift_ContentNative_nativeManifest(JNIEnv* env, jclass,
@@ -42,20 +63,19 @@ Java_studio_deimos_pinyonshift_ContentNative_nativeManifest(JNIEnv* env, jclass,
 extern "C" JNIEXPORT void JNICALL
 Java_studio_deimos_pinyonshift_ContentNative_nativeExtractDlc(JNIEnv* env, jclass,
     jstring package, jstring destination, jstring id) {
-  jobject thread = nullptr;
   try {
-    jclass type = env->FindClass("java/lang/Thread");
-    if (!type) throw std::runtime_error("Content worker is unavailable");
-    auto current = env->GetStaticMethodID(type, "currentThread", "()Ljava/lang/Thread;");
-    auto interrupted = env->GetMethodID(type, "isInterrupted", "()Z");
-    if (!current || !interrupted) { env->DeleteLocalRef(type); throw std::runtime_error("Content worker is unavailable"); }
-    thread = env->CallStaticObjectMethod(type, current);
-    env->DeleteLocalRef(type);
-    if (!thread) throw std::runtime_error("Content worker is unavailable");
+    ContentWorker worker(env);
     pinyon_shift::content::ExtractVerifiedDlc(Read(env, package), Read(env, destination),
-        Read(env, id), [env, thread, interrupted] {
-          return env->CallBooleanMethod(thread, interrupted) == JNI_TRUE;
-        });
+        Read(env, id), [&worker] { return worker.cancelled(); });
   } catch (const std::exception& error) { Error(env, error); }
-  if (thread) env->DeleteLocalRef(thread);
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_studio_deimos_pinyonshift_ContentNative_nativeExtractForzaProfile(JNIEnv* env, jclass,
+    jstring package, jstring destination) {
+  try {
+    ContentWorker worker(env);
+    return static_cast<jlong>(pinyon_shift::content::ExtractForzaProfile(
+        Read(env, package), Read(env, destination), [&worker] { return worker.cancelled(); }));
+  } catch (const std::exception& error) { Error(env, error); return 0; }
 }

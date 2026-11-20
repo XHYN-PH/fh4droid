@@ -885,6 +885,124 @@ index 313c9af4..e44a0f99 100644
    *out_bytes_read = real_length;
    return X_STATUS_SUCCESS;
  }
+diff --git a/src/filesystem/devices/stfs_container_device.cpp b/src/filesystem/devices/stfs_container_device.cpp
+index 25fa784b..14f26640 100644
+--- a/src/filesystem/devices/stfs_container_device.cpp
++++ b/src/filesystem/devices/stfs_container_device.cpp
+@@ -544,14 +544,33 @@ StfsContainerDevice::Error StfsContainerDevice::ReadSTFS() {
+   root_entry_ = std::unique_ptr<Entry>(root_entry);
+ 
+   std::vector<StfsContainerEntry*> all_entries;
++  std::vector<uint8_t> entry_depths;
+ 
+   // Load all listings.
+   StfsDirectoryBlock directory;
+ 
+   auto& descriptor = header_.metadata.volume_descriptor.stfs;
++  const uint64_t header_size = header_.header.header_size;
++  if (!descriptor.is_valid() || descriptor.file_table_block_count == 0 ||
++      header_size < sizeof(header_.header) || header_size >= files_total_size_) {
++    return Error::kErrorDamagedFile;
++  }
++  // A block belongs to one directory table or file. Bound the chain walk to
++  // data that fits in the package and reject repeated allocations.
++  const size_t block_limit = std::min<size_t>(files_total_size_ / kBlockSize,
++                                              kBlocksPerHashLevel[2]);
++  std::vector<bool> used_blocks(block_limit);
++  const auto claim_block = [&](uint32_t index, size_t length) {
++    if (index >= block_limit || used_blocks[index]) return false;
++    const size_t offset = BlockToOffsetSTFS(index);
++    if (offset > files_total_size_ || length > files_total_size_ - offset) return false;
++    used_blocks[index] = true;
++    return true;
++  };
+   uint32_t table_block_index = descriptor.file_table_block_number();
+   size_t n = 0;
+   for (n = 0; n < descriptor.file_table_block_count; n++) {
++    if (!claim_block(table_block_index, sizeof(directory))) return Error::kErrorDamagedFile;
+     auto offset = BlockToOffsetSTFS(table_block_index);
+     rex::filesystem::Seek(file, offset, SEEK_SET);
+ 
+@@ -569,12 +588,22 @@ StfsContainerDevice::Error StfsContainerDevice::ReadSTFS() {
+       }
+ 
+       StfsContainerEntry* parent_entry = nullptr;
++      uint8_t depth = 1;
+       if (dir_entry.directory_index == 0xFFFF) {
+         parent_entry = root_entry;
+       } else {
+-        parent_entry = all_entries[dir_entry.directory_index];
++        const size_t parent_index = dir_entry.directory_index;
++        if (parent_index >= all_entries.size() || entry_depths[parent_index] >= 64 ||
++            !(all_entries[parent_index]->attributes() & kFileAttributeDirectory)) {
++          return Error::kErrorDamagedFile;
++        }
++        parent_entry = all_entries[parent_index];
++        depth = entry_depths[parent_index] + 1;
+       }
+ 
++      if (!dir_entry.flags.name_length || dir_entry.flags.name_length > sizeof(dir_entry.name)) {
++        return Error::kErrorDamagedFile;
++      }
+       std::string name(reinterpret_cast<const char*>(dir_entry.name),
+                        dir_entry.flags.name_length & 0x3F);
+       auto entry = StfsContainerEntry::Create(this, parent_entry, name, &files_);
+@@ -595,6 +624,7 @@ StfsContainerDevice::Error StfsContainerDevice::ReadSTFS() {
+       entry->access_timestamp_ = entry->write_timestamp_;
+ 
+       all_entries.push_back(entry.get());
++      entry_depths.push_back(depth);
+ 
+       // Fill in all block records.
+       // It's easier to do this now and just look them up later, at the cost
+@@ -605,10 +635,12 @@ StfsContainerDevice::Error StfsContainerDevice::ReadSTFS() {
+         size_t remaining_size = dir_entry.length;
+         while (remaining_size && block_index != kEndOfChain) {
+           size_t block_size = std::min(static_cast<size_t>(kBlockSize), remaining_size);
++          if (!claim_block(block_index, block_size)) return Error::kErrorDamagedFile;
+           size_t offset = BlockToOffsetSTFS(block_index);
+           entry->block_list_.push_back({0, offset, block_size});
+           remaining_size -= block_size;
+           auto block_hash = GetBlockHash(block_index);
++          if (!block_hash) return Error::kErrorReadError;
+           block_index = block_hash->level0_next_block();
+         }
+ 
+@@ -619,7 +651,7 @@ StfsContainerDevice::Error StfsContainerDevice::ReadSTFS() {
+               "bytes missing)",
+               name, dir_entry.length.get() - remaining_size, dir_entry.length.get(),
+               remaining_size);
+-          assert_always();
++          return Error::kErrorDamagedFile;
+         }
+ 
+         // Check that the number of blocks retrieved from hash entries matches
+@@ -629,7 +661,7 @@ StfsContainerDevice::Error StfsContainerDevice::ReadSTFS() {
+               "STFS failed to read correct block-chain for entry {}, read {} "
+               "blocks, expected {}",
+               entry->name_, entry->block_list_.size(), dir_entry.allocated_data_blocks());
+-          assert_always();
++          return Error::kErrorDamagedFile;
+         }
+       }
+ 
+@@ -637,6 +669,7 @@ StfsContainerDevice::Error StfsContainerDevice::ReadSTFS() {
+     }
+ 
+     auto block_hash = GetBlockHash(table_block_index);
++    if (!block_hash) return Error::kErrorReadError;
+     table_block_index = block_hash->level0_next_block();
+     if (table_block_index == kEndOfChain) {
+       break;
+@@ -646,7 +679,7 @@ StfsContainerDevice::Error StfsContainerDevice::ReadSTFS() {
+   if (n + 1 != descriptor.file_table_block_count) {
+     REXFS_WARN("STFS read {} file table blocks, but STFS headers expected {}!", n + 1,
+                descriptor.file_table_block_count);
+-    assert_always();
++    return Error::kErrorDamagedFile;
+   }
+ 
+   return Error::kSuccess;
 diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
 index 3ac490b8..fd721e41 100644
 --- a/src/graphics/command_processor.cpp

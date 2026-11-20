@@ -477,6 +477,41 @@ public class UiPolishTest {
     dialog.dismiss();
   }
 
+  @Test public void savesPageExposesConsoleImportAndConfirmedClear() {
+    LauncherActivity launcher = Robolectric.buildActivity(LauncherActivity.class).setup().visible().get();
+    ReflectionHelpers.setField(launcher, "pendingSaveScope", SaveArchive.MODDED);
+    ReflectionHelpers.callInstanceMethod(launcher, "saves");
+    View root = launcher.findViewById(android.R.id.content);
+    arrange(root, 2400, 1080);
+    TextView clear = find(root, "Clear saves");
+    TextView consoleImport = find(root, "Import ForzaProfile");
+    assertNotNull(clear);
+    assertNotNull(consoleImport);
+
+    View clearAction = clear;
+    while (!clearAction.isClickable() && clearAction.getParent() instanceof View)
+      clearAction = (View)clearAction.getParent();
+    assertTrue(clearAction.performClick());
+    android.app.AlertDialog confirm = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+    assertTrue(text(confirm.getWindow().getDecorView()).contains("Clear modded saves?"));
+    assertEquals("Back up and clear", confirm.getButton(android.content.DialogInterface.BUTTON_POSITIVE).getText().toString());
+    confirm.dismiss();
+
+    View importAction = consoleImport;
+    while (!importAction.isClickable() && importAction.getParent() instanceof View)
+      importAction = (View)importAction.getParent();
+    assertTrue(importAction.performClick());
+    android.app.AlertDialog scope = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog();
+    scope.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick();
+    ShadowLooper.idleMainLooper();
+    org.robolectric.shadows.ShadowActivity.IntentForResult started =
+        Shadows.shadowOf(launcher).getNextStartedActivityForResult();
+    assertNotNull(started);
+    android.content.Intent picker = started.intent;
+    assertEquals(android.content.Intent.ACTION_OPEN_DOCUMENT, picker.getAction());
+    assertEquals("*/*", picker.getType());
+  }
+
   @Test public void driverPageIdentifiesSelectedAndActuallyTestedDrivers() throws Exception {
     LauncherActivity launcher = Robolectric.buildActivity(LauncherActivity.class).setup().visible().get();
     AdrenoSettings.record(launcher, "", "{\"ok\":true,\"effective_driver\":\"\","

@@ -71,6 +71,66 @@ public final class ProfileArchiveTest {
             && MobileConfig.readFile(targetSettings).get("user_xuid").equals(receiver),
             "a title-update save is blocked before it can replace live progress");
     }
+    private static void forzaProfileImport(Path temp) throws Exception {
+        File target = temp.resolve("console-import-state").toFile();
+        String localOwner = "E030000087654321", packageOwner = "E030000012345678";
+        Path normal = ownedSave(target, localOwner, "keep-normal");
+        put(target, SaveArchive.MODDED, "old-modded");
+        File settings = new File(target, "config/pinyon_shift.toml");
+        MobileConfig.putFile(settings, Collections.singletonMap("user_xuid", MobileConfig.quote(localOwner)));
+        Path dlc = target.toPath().resolve("user-modded/4D5309C9/00000002/installed/payload");
+        Files.createDirectories(dlc.getParent());
+        Files.write(dlc, new byte[]{11});
+
+        File stage = Files.createTempDirectory(target.toPath(), "save-import-").toFile();
+        Path incoming = stage.toPath().resolve("profile");
+        Files.createDirectory(incoming);
+        Files.write(incoming.resolve("ForzaProfile"), new byte[]{21});
+        Files.write(incoming.resolve("PlayerDatabase"), new byte[]{31});
+        Path flags = incoming.resolve("VersionFlags");
+        Files.write(flags, new byte[]{'c','m','s','s',0,0,0,4,0,0,0,1});
+        long xuid = Long.parseUnsignedLong(packageOwner, 16);
+        boolean rejected = false;
+        try { SaveArchive.installForzaProfile(target, stage, SaveArchive.MODDED, xuid); }
+        catch (IOException expected) { rejected = expected.getMessage().contains("title update"); }
+        check(rejected && get(target, SaveArchive.MODDED).equals("old-modded")
+                && SaveArchive.latest(target) == null
+                && MobileConfig.readFile(settings).get("user_xuid").equals(localOwner),
+            "console title-update save is rejected before modifying progress or settings");
+
+        Files.write(flags, new byte[]{'c','m','s','s',0,0,0,0,0,0,0,0});
+        SaveArchive.installForzaProfile(target, stage, SaveArchive.MODDED, xuid);
+        Path imported = target.toPath().resolve("user-modded/" + packageOwner + "/4D5309C9/00000001/ForzaProfile");
+        check(Files.readAllBytes(imported.resolve("ForzaProfile"))[0] == 21
+                && Files.readAllBytes(imported.resolve("PlayerDatabase"))[0] == 31,
+            "console import installs the complete profile in the selected slot");
+        check(Files.exists(normal) && Files.readAllBytes(dlc)[0] == 11
+                && MobileConfig.readFile(settings).get("user_xuid").equals(localOwner)
+                && ContentFiles.text(new File(target, "user-modded/profile-id.txt"), 64).equals(packageOwner),
+            "modded console import preserves the normal player and keeps a scoped owner");
+        File receiver = temp.resolve("console-import-receiver").toFile();
+        Path receiverNormal = ownedSave(receiver, localOwner, "receiving-normal");
+        File receiverSettings = new File(receiver, "config/pinyon_shift.toml");
+        MobileConfig.putFile(receiverSettings, Collections.singletonMap("user_xuid", MobileConfig.quote(localOwner)));
+        SaveArchive.importInto(receiver, new ByteArrayInputStream(export(target, SaveArchive.MODDED)));
+        check(Files.exists(receiverNormal)
+                && MobileConfig.readFile(receiverSettings).get("user_xuid").equals(localOwner)
+                && ContentFiles.text(new File(receiver, "user-modded/profile-id.txt"), 64).equals(packageOwner),
+            "exporting a scoped modded profile keeps that ownership when restored");
+        SaveArchive.restore(target);
+        check(Files.notExists(imported) && Files.exists(normal)
+                && get(target, SaveArchive.MODDED).equals("old-modded")
+                && MobileConfig.readFile(settings).get("user_xuid").equals(localOwner),
+            "console import can be undone with the previous owner and saves intact");
+
+        SaveArchive.resetProfiles(target, SaveArchive.MODDED);
+        check(new File(target, SaveArchive.MODDED).isDirectory()
+                && Files.notExists(new File(target, "user-modded/profile/save").toPath())
+                && Files.exists(normal) && Files.readAllBytes(dlc)[0] == 11,
+            "clear retains a modded root and preserves normal saves and DLC");
+        SaveArchive.restore(target);
+        check(get(target, SaveArchive.MODDED).equals("old-modded"), "clear can be undone");
+    }
     public static void main(String[] args)throws Exception{
         Path temp=Files.createTempDirectory("fh4droid-scoped-saves-");File state=temp.resolve("state").toFile();
         try{
@@ -174,6 +234,7 @@ public final class ProfileArchiveTest {
             check(!new File(absentState,SaveArchive.NORMAL).exists() && absent.folder.isDirectory(),
                 "selected snapshot can restore a missing profile and retains its backup");
             crossPhoneRestore(temp);
+            forzaProfileImport(temp);
             System.out.println("PASS: "+checks+" profile identity and scoped save archive checks");
         }finally{SaveArchive.delete(temp.toFile());}
     }
