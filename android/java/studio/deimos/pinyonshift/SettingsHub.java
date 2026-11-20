@@ -38,8 +38,8 @@ final class SettingsHub {
   static {
     OPTIONS.add(
         new MobileSettings.Option("Display", "pinyon_shift_fov_scale", "Camera field of view", "1",
-            false, false, "Wider values show more of the scene and can add graphics work.", ".8",
-            ".9", "1", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9", "2"));
+            false, false, "Wider values show more of the scene and can add graphics work.", "0.8",
+            "0.9", "1", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9", "2"));
     OPTIONS.add(new MobileSettings.Option("Gameplay", "pinyon_shift_save_backups",
         "Automatic save backups", "true", true, false,
         "Keep the native port's rolling save backups. This does not restore "
@@ -725,7 +725,7 @@ final class SettingsHub {
                 Map<String,String> values=new LinkedHashMap<>();
                 values.put("present_effect",MobileConfig.quote("fsr"));
                 values.put(key,scales[i]);
-                values.put("present_fsr_sharpness_reduction",".5");
+                values.put("present_fsr_sharpness_reduction","0.5");
                 apply(a,runtime,values,true,false);
               },()->null);
       FestivalUi.action(a, rows, "Graphics presets", () -> presets(a, runtime));

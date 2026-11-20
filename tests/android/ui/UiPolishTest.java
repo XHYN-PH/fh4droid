@@ -264,6 +264,7 @@ public class UiPolishTest {
     assertNotNull(quality);quality.performClick();
     assertEquals("67",MobileConfig.get(a,"fh1_render_scale_percent",""));
     assertEquals("fsr",MobileConfig.get(a,"present_effect",""));
+    assertEquals("0.5",MobileConfig.get(a,"present_fsr_sharpness_reduction",""));
     assertTrue(text(fsr).contains("Quality · 67%"));
     assertTrue(text(page.findViewWithTag("fh1_render_scale_percent")).contains("67%"));
     assertTrue(text(page.findViewWithTag("present_effect")).contains("FSR 1"));

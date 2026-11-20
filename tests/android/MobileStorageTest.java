@@ -131,6 +131,15 @@ public final class MobileStorageTest {
         Map<String,String> values=new LinkedHashMap<>();values.put("vsync","false");values.put("pinyon_shift_fh1_shadows","false");
         MobileConfig.putFile(file,values);String text=new String(Files.readAllBytes(file.toPath()),StandardCharsets.UTF_8);
         check(text.contains("custom = 77")&&text.contains("vsync = false")&&text.contains("pinyon_shift_fh1_shadows = false"),"settings transaction preserves unrelated values");
+        Map<String,String> legacy = new LinkedHashMap<>();
+        legacy.put("present_fsr_sharpness_reduction", ".5");
+        legacy.put("pinyon_shift_fov_scale", "+.9 # imported profile");
+        legacy.put("custom_text", "\".5\"");
+        MobileConfig.putFile(file, legacy);
+        String normalized = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+        check(normalized.contains("present_fsr_sharpness_reduction = 0.5\n"),"legacy FSR softness writes valid TOML");
+        check(normalized.contains("pinyon_shift_fov_scale = +0.9 # imported profile\n"),"signed leading fraction retains its comment");
+        check(normalized.contains("custom_text = \".5\"\n"),"quoted text is preserved");
         byte[] before=Files.readAllBytes(file.toPath());values.put("bad key","true");
         rejects(()->MobileConfig.putFile(file,values),"invalid batch is rejected");
         check(Arrays.equals(before,Files.readAllBytes(file.toPath())),"invalid setting leaves entire file untouched");

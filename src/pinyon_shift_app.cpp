@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -259,6 +260,43 @@ std::string DefaultConfigText() {
   return output.str();
 }
 
+// Older Android controls wrote bare fractions such as .5. Repair only the
+// row the TOML parser rejected so matching text inside strings is preserved.
+std::optional<std::string> RepairAndroidDecimals(const std::string& text) {
+  static const std::regex bare_fraction(
+      R"([ \t]*(?:present_fsr_sharpness_reduction|pinyon_shift_fov_scale|pinyon_shift_camera_(?:gforce|lean|shake|head))[ \t]*=[ \t]*[+-]?(\.[0-9]+)[ \t]*(?:#[^\r\n]*)?\r?)");
+  if (!std::regex_search(text, bare_fraction)) {
+    return std::nullopt;
+  }
+  std::string repaired = text;
+  for (;;) {
+    try {
+      (void)toml::parse(repaired);
+      break;
+    } catch (const toml::parse_error& error) {
+      size_t row_start = 0;
+      for (uint32_t line = 1; line < error.source().begin.line; ++line) {
+        row_start = repaired.find('\n', row_start);
+        if (row_start == std::string::npos) {
+          return std::nullopt;
+        }
+        ++row_start;
+      }
+      const auto row_end = std::min(repaired.find('\n', row_start), repaired.size());
+      const std::string row = repaired.substr(row_start, row_end - row_start);
+      std::smatch match;
+      if (!std::regex_match(row, match, bare_fraction)) {
+        return std::nullopt;
+      }
+      repaired.insert(row_start + match.position(1), 1, '0');
+    }
+  }
+  if (repaired == text) {
+    return std::nullopt;
+  }
+  return repaired;
+}
+
 bool EnsureSupportedConfig(const std::filesystem::path& path, bool& created,
                            bool& migrated) {
   created = false;
@@ -359,6 +397,37 @@ bool EnsureSupportedConfig(const std::filesystem::path& path, bool& created,
       }
       config_text = repaired;
       migrated = true;
+    }
+  }
+  if (auto repaired = RepairAndroidDecimals(config_text)) {
+    auto lock_path = path;
+    lock_path += ".lock";
+    const bool saved = pinyon_shift::platform::WithFileLock(lock_path, [&] {
+      auto latest = pinyon_shift::config::ReadFile(path);
+      if (!latest) {
+        return false;
+      }
+      if (*latest != config_text) {
+        config_text = std::move(*latest);
+        repaired = RepairAndroidDecimals(config_text);
+        if (!repaired) {
+          return true;
+        }
+      }
+      auto backup = path;
+      backup += ".android-decimals.bak";
+      std::error_code error;
+      std::filesystem::copy_file(path, backup, std::filesystem::copy_options::overwrite_existing,
+                                 error);
+      if (error || !pinyon_shift::config::WriteAtomically(path, *repaired)) {
+        return false;
+      }
+      config_text = std::move(*repaired);
+      migrated = true;
+      return true;
+    });
+    if (!saved) {
+      return false;
     }
   }
   const std::regex schema_pattern(

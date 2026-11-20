@@ -10,6 +10,8 @@ import java.util.regex.*;
 
 /** Edits individual host settings without replacing unrelated PC/game settings. */
 final class MobileConfig {
+    private static final Pattern BARE_FRACTION =
+        Pattern.compile("([\\t ]*[+-]?)(\\.[0-9]+(?:[eE][+-]?[0-9]+)?[\\t ]*(?:#.*)?)");
     static File base(Context c){File f=c.getExternalFilesDir(null);return f!=null?f:c.getFilesDir();}
     static File file(Context c){return new File(base(c),SetupActivity.CONFIG_FILE);}
     static synchronized Map<String,String> read(Context c){return readFile(file(c));}
@@ -77,7 +79,10 @@ final class MobileConfig {
         String text=f.isFile()?new String(Files.readAllBytes(f.toPath()),StandardCharsets.UTF_8):defaults();
         if(text.startsWith("\ufeff"))text=text.substring(1);
         for(Map.Entry<String,String> e:updates.entrySet()){
-            String key=e.getKey(),literal=e.getValue();Pattern row=Pattern.compile("(?m)^[\\t ]*"+Pattern.quote(key)+"[\\t ]*=.*$");Matcher m=row.matcher(text);
+            String key=e.getKey(),literal=e.getValue();
+            Matcher fraction=BARE_FRACTION.matcher(literal);
+            if(fraction.matches())literal=fraction.group(1)+"0"+fraction.group(2);
+            Pattern row=Pattern.compile("(?m)^[\\t ]*"+Pattern.quote(key)+"[\\t ]*=.*$");Matcher m=row.matcher(text);
             text=m.find()?m.replaceAll(Matcher.quoteReplacement(key+" = "+literal)):text+"\n"+key+" = "+literal+"\n";
         }
         writeText(f,text);

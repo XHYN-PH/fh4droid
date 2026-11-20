@@ -86,6 +86,8 @@ Use the arrows on the resolution row, D-pad left and right, or the left stick to
 
 Under **Settings → Graphics → Upscaling filter**, **Automatic (sharp)** uses CAS sharpening at reduced render resolutions and Bilinear at 100%. Upgrading moves the previous Bilinear setting to Automatic once. Choose **Bilinear** to keep smoothing or **Off (nearest)** for nearest-neighbour scaling. FSR 1 is also available. **Post-process anti-aliasing** stays independent. The filter can change live. Render resolution applies on the next launch.
 
+The FSR preset in 0.9.5 could save softness as `.5`, which caused the game to ignore the settings file and run with defaults. Version 0.9.6 writes `0.5` and repairs invalid values from the preset and camera controls at startup. On 0.9.5, choose **FSR softness → 0.2** after setting the preset, then quit and relaunch the game.
+
 Native attachment dimensions, viewport/scissor, depth/colour transfers and source reads scale together. Guest resolve destinations retain their original layout. Fractional resolutions use separate raster-v3 shader/pipeline caches; the precompiled SPIR-V pack is used only at 100%. Shader preparation is scheduled with bounded concurrency, and detailed GPU timestamp profiling is opt-in.
 
 A software Vulkan readback suite checked 953,854 colour/depth values across every supported scale, including generic and specialized paths. Vulkan 1.2 extension and 1.3 core probe paths passed on that software driver. These checks establish neither phone-driver compatibility nor sustained FPS. No performance gain is claimed. Compare the same route, captures, duration and thermal conditions before recommending a preset.
