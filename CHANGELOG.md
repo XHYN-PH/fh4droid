@@ -1,5 +1,11 @@
 # Changelog
 
+## FH4Droid 0.9.7 - 2026-11-20
+
+- Fix the sharp rectangle in the asphalt around the car with **Motion blur** enabled. The marked patch of road now receives the same motion blur as the surrounding asphalt.
+
+[Full FH4Droid 0.9.7 release notes](docs/releases/fh4droid-0.9.7.md)
+
 ## FH4Droid 0.9.6 - 2026-11-20
 
 - Fix FSR presets and camera controls that could make the game start with default settings. Repair affected settings on launch and save a recovery copy.

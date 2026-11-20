@@ -88,6 +88,8 @@ Under **Settings → Graphics → Upscaling filter**, **Automatic (sharp)** uses
 
 The FSR preset in 0.9.5 could save softness as `.5`, which caused the game to ignore the settings file and run with defaults. Version 0.9.6 writes `0.5` and repairs invalid values from the preset and camera controls at startup. On 0.9.5, choose **FSR softness → 0.2** after setting the preset, then quit and relaunch the game.
 
+Version 0.9.7 fixes the sharp-edged patch of asphalt around the car with **Motion blur** enabled. The shader uses the same camera motion for that patch and the surrounding road. [Rendering details](game-rendering.md#post-effects)
+
 Native attachment dimensions, viewport/scissor, depth/colour transfers and source reads scale together. Guest resolve destinations retain their original layout. Fractional resolutions use separate raster-v3 shader/pipeline caches; the precompiled SPIR-V pack is used only at 100%. Shader preparation is scheduled with bounded concurrency, and detailed GPU timestamp profiling is opt-in.
 
 A software Vulkan readback suite checked 953,854 colour/depth values across every supported scale, including generic and specialized paths. Vulkan 1.2 extension and 1.3 core probe paths passed on that software driver. These checks establish neither phone-driver compatibility nor sustained FPS. No performance gain is claimed. Compare the same route, captures, duration and thermal conditions before recommending a preset.
