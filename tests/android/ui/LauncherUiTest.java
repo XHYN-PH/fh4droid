@@ -77,6 +77,17 @@ public class LauncherUiTest {
     ShadowLooper.idleMainLooper(1, java.util.concurrent.TimeUnit.SECONDS);
   }
 
+  private void resize(RacingLauncherView root, int width, int height) {
+    ViewGroup.LayoutParams frame = root.getLayoutParams();
+    frame.width = width;
+    frame.height = height;
+    root.setLayoutParams(frame);
+    arrange(root, width, height);
+    settle();
+    assertEquals(width, root.getWidth());
+    assertEquals(height, root.getHeight());
+  }
+
   private void key(View root, int code) {
     root.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, code));
     root.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, code));
@@ -84,7 +95,11 @@ public class LauncherUiTest {
 
   private Bitmap screenshot(RacingLauncherView root, String name) throws Exception {
     arrange(root, 2400, 1080);
-    Bitmap image = Bitmap.createBitmap(2400, 1080, Bitmap.Config.ARGB_8888);
+    return capture(root, name);
+  }
+
+  private Bitmap capture(RacingLauncherView root, String name) throws Exception {
+    Bitmap image = Bitmap.createBitmap(root.getWidth(), root.getHeight(), Bitmap.Config.ARGB_8888);
     root.draw(new Canvas(image));
     new File("renders-integrated").mkdirs();
     try (OutputStream out = new FileOutputStream("renders-integrated/" + name + ".png")) {
@@ -114,9 +129,10 @@ public class LauncherUiTest {
     arrange(root, 2400, 1080);
     root.requestActionFocus("mods");
     Bitmap manage = screenshot(root, "B-manage");
+    assertNull(root.findViewWithTag("launcher-footer"));
     assertEquals(
         "Approved management pixels changed",
-        "0873a07ec285d44bd4158f00ec6ec1e23e240c4ef10c398214e0009f8e58e928",
+        "79dcd01c93782e8033e41396273e4fabca9f0d21fa56bd1e9b6c9b3655bf727c",
         pixelDigest(manage));
     String manageBaseline = System.getProperty("launcher.preview.manage");
     if (manageBaseline != null)
@@ -260,11 +276,142 @@ public class LauncherUiTest {
     Rect visible = new Rect();
     assertTrue(more.getGlobalVisibleRect(visible));
     assertTrue("Focused card is clipped", visible.width() >= more.getWidth() - 4);
-    Bitmap image = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888);
-    root.draw(new Canvas(image));
-    try (OutputStream out = new FileOutputStream("renders-integrated/B-compact.png")) {
-      image.compress(Bitmap.CompressFormat.PNG, 100, out);
+    assertEquals("Focused card height is clipped", more.getHeight(), visible.height());
+    capture(root, "B-compact");
+  }
+
+  @Test
+  @Config(qualifiers = "w640dp-h336dp-land-xhdpi")
+  public void shortLandscapeKeepsReleaseDashboardAndClearsSystemBars() throws Exception {
+    org.robolectric.android.controller.ActivityController<LauncherActivity> controller =
+        Robolectric.buildActivity(LauncherActivity.class);
+    LauncherActivity launcher = controller.get();
+    installLauncherFixture(launcher, "0.9.3", 913);
+    File game = GameFiles.root(launcher);
+    java.nio.file.Files.createDirectories(game.toPath());
+    java.nio.file.Files.createFile(new File(game, "default.xex").toPath());
+    MobileConfig.put(launcher, "fh1_render_scale_percent", "90");
+    MobileConfig.put(launcher, "pinyon_shift_fh1_render_fps_limit", "60");
+    launcher.getSharedPreferences("mobile", 0).edit().putBoolean("animations", false).commit();
+    controller.setup().visible();
+    ViewGroup content = launcher.findViewById(android.R.id.content);
+    RacingLauncherView root = (RacingLauncherView) content.getChildAt(0);
+    Insets top = Insets.of(0, 12, 0, 0);
+    Insets bottom = Insets.of(0, 0, 0, 22);
+    Insets cutout = Insets.of(58, 0, 4, 0);
+    root.dispatchApplyWindowInsets(new WindowInsets.Builder()
+        .setInsets(WindowInsets.Type.displayCutout(), cutout)
+        .setInsetsIgnoringVisibility(WindowInsets.Type.displayCutout(), cutout)
+        .setVisible(WindowInsets.Type.displayCutout(), true)
+        .setInsetsIgnoringVisibility(WindowInsets.Type.statusBars(), top)
+        .setInsetsIgnoringVisibility(WindowInsets.Type.navigationBars(), bottom)
+        .build());
+    float previousLabelSize = Float.POSITIVE_INFINITY;
+    for (int height : new int[] {576, 492}) {
+      resize(root, 1280, height);
+      assertReleaseDashboard(root);
+      assertFooterClear(root);
+      int[] origin = new int[2];
+      root.getLocationInWindow(origin);
+      for (String id : new String[] {"play", "settings", "controls", "files", "more", "profile",
+          "youtube", "telegram", "github", "installed-version", "launcher-heading", "launcher-summary"}) {
+        View action = root.findViewWithTag(id);
+        Rect visible = new Rect();
+        assertTrue(id + " is hidden at " + height, action.getLocalVisibleRect(visible));
+        assertEquals(id + " is clipped at " + height,
+            new Rect(0, 0, action.getWidth(), action.getHeight()), visible);
+        int[] location = new int[2];
+        action.getLocationInWindow(location);
+        int x = location[0] - origin[0], y = location[1] - origin[1];
+        assertTrue(id + " overlaps a cutout or system bar at " + height,
+            x >= cutout.left && x + action.getWidth() <= 1280 - cutout.right
+            && y >= top.top && y + action.getHeight() <= height - bottom.bottom);
+      }
+      assertNotNull(findText(root, "Ready to drive"));
+      assertNotNull(findText(root, "Game files ready"));
+      TextView profile = (TextView) findText(root.findViewWithTag("profile"), "Local profile");
+      assertEquals("The profile button should show its full label", 0, profile.getLayout().getEllipsisCount(0));
+      assertTrue(((TextView) root.findViewWithTag("launcher-summary")).getText().toString().contains("60 FPS"));
+      View settings = root.findViewWithTag("settings");
+      float labelSize = ((TextView) findText(settings, "Settings")).getTextSize();
+      assertTrue("Card labels should shrink as the window gets shorter", labelSize < previousLabelSize);
+      assertTrue("Card labels should fit the compact type scale", labelSize <= 26);
+      previousLabelSize = labelSize;
+      View play = root.findViewWithTag("play");
+      Rect playBounds = new Rect(), captionBounds = new Rect();
+      assertTrue(play.getGlobalVisibleRect(playBounds));
+      assertTrue(findText(play, "Start Forza Horizon").getGlobalVisibleRect(captionBounds));
+      assertTrue("The Play caption should fit inside its card", playBounds.contains(captionBounds));
+      assertTrue(root.requestActionFocus("play"));
+      capture(root, "B-release-dashboard-1280x" + height);
     }
+    assertTrue(root.requestActionFocus("controls"));
+    key(root, KeyEvent.KEYCODE_DPAD_DOWN);
+    assertEquals("more", root.focusedAction());
+    launcher.getSharedPreferences("mobile", 0).edit().putFloat("ui_scale", 1.02f).commit();
+    resize(root, 1052, 576);
+    assertReleaseDashboard(root);
+    assertFooterClear(root);
+    assertEquals("more", root.focusedAction());
+    key(root, KeyEvent.KEYCODE_DPAD_LEFT);
+    assertEquals("files", root.focusedAction());
+
+    resize(root, 1052, 320);
+    assertFooterClear(root);
+    ViewGroup menu = root.findViewWithTag("launcher-menu-viewport");
+    ScrollView scroll = (ScrollView) menu.getChildAt(0);
+    assertTrue("The short dashboard should need scrolling", scroll.getChildAt(0).getHeight() > scroll.getHeight());
+    scroll.scrollTo(0, scroll.getChildAt(0).getHeight());
+    assertTrue(scroll.getScrollY() > 0);
+    Rect footer = new Rect();
+    assertTrue(root.findViewWithTag("launcher-footer").getGlobalVisibleRect(footer));
+    for (String id : new String[] {"play", "settings", "controls", "files", "more"}) {
+      Rect card = new Rect();
+      if (root.findViewWithTag(id).getGlobalVisibleRect(card))
+        assertTrue("Scrolling should keep " + id + " above the footer", card.bottom < footer.top);
+    }
+    root.showPage("more");
+    resize(root, 1052, 576);
+    assertNull(root.findViewWithTag("launcher-footer"));
+    assertNull(root.findViewWithTag("github"));
+    root.showContent("Details", new LinearLayout(launcher), false);
+    resize(root, 1052, 576);
+    assertNull(root.findViewWithTag("launcher-footer"));
+    root.clearContent(true);
+    root.showPage("home");
+    resize(root, 1052, 576);
+    assertFooterClear(root);
+  }
+
+  private void assertReleaseDashboard(RacingLauncherView root) {
+    Rect play = boundsInWindow(root.findViewWithTag("play"));
+    Rect settings = boundsInWindow(root.findViewWithTag("settings"));
+    Rect controls = boundsInWindow(root.findViewWithTag("controls"));
+    Rect files = boundsInWindow(root.findViewWithTag("files"));
+    Rect more = boundsInWindow(root.findViewWithTag("more"));
+    assertTrue("Play should be on the left of both rows", play.right < settings.left);
+    assertTrue("The right-hand cards should have a column gap", settings.right < controls.left);
+    assertTrue("The right-hand cards should have a row gap", settings.bottom < files.top);
+    assertEquals(settings.top, play.top);
+    assertEquals(files.bottom, play.bottom);
+    assertEquals(settings.left, files.left);
+    assertEquals(controls.left, more.left);
+    assertEquals(settings.top, controls.top);
+    assertEquals(files.top, more.top);
+    assertTrue(Math.abs(play.width() - settings.width()) <= 1);
+  }
+
+  private void assertFooterClear(RacingLauncherView root) {
+    View menu = root.findViewWithTag("launcher-menu-viewport");
+    Rect footer = boundsInWindow(root.findViewWithTag("launcher-footer"));
+    assertTrue("The footer should have its own row below the menu", boundsInWindow(menu).bottom < footer.top);
+    assertEquals(new Rect(0, 0, menu.getWidth(), menu.getHeight()), menu.getClipBounds());
+  }
+
+  private Rect boundsInWindow(View view) {
+    int[] location = new int[2];
+    view.getLocationInWindow(location);
+    return new Rect(location[0], location[1], location[0] + view.getWidth(), location[1] + view.getHeight());
   }
 
   @Test
@@ -272,28 +419,7 @@ public class LauncherUiTest {
     org.robolectric.android.controller.ActivityController<LauncherActivity> controller =
         Robolectric.buildActivity(LauncherActivity.class);
     LauncherActivity app = controller.get();
-    app.setTheme(android.R.style.Theme_Material_NoActionBar);
-    File assets = new File("menu-fixture.zip");
-    try (java.util.zip.ZipOutputStream zip =
-        new java.util.zip.ZipOutputStream(new FileOutputStream(assets))) {
-      for (String name : new String[] {"menu-background.png", "menu-logo.png"}) {
-        zip.putNextEntry(new java.util.zip.ZipEntry("assets/" + name));
-        java.nio.file.Files.copy(source("android/art/" + name).toPath(), zip);
-        zip.closeEntry();
-      }
-    }
-    int cookie =
-        org.robolectric.util.ReflectionHelpers.callInstanceMethod(
-            app.getAssets(),
-            "addAssetPath",
-            org.robolectric.util.ReflectionHelpers.ClassParameter.from(
-                String.class, assets.getCanonicalPath()));
-    assertTrue(cookie > 0);
-    android.content.pm.PackageInfo info =
-        app.getPackageManager().getPackageInfo(app.getPackageName(), 0);
-    info.versionName = "0.8.2-polish-test3";
-    info.setLongVersionCode(803);
-    org.robolectric.Shadows.shadowOf(app.getPackageManager()).installPackage(info);
+    installLauncherFixture(app, "0.8.2-polish-test3", 803);
     controller.setup().visible();
     app.getSharedPreferences("mobile", 0).edit().putBoolean("animations", false).commit();
     RacingLauncherView root =
@@ -325,6 +451,33 @@ public class LauncherUiTest {
     assertEquals("home", root.page());
     assertEquals("settings", root.focusedAction());
     app.finish();
+  }
+
+  private void installLauncherFixture(LauncherActivity app, String version, long build)
+      throws Exception {
+    app.setTheme(android.R.style.Theme_Material_NoActionBar);
+    File assets = File.createTempFile("menu-fixture-", ".zip");
+    assets.deleteOnExit();
+    try (java.util.zip.ZipOutputStream zip =
+        new java.util.zip.ZipOutputStream(new FileOutputStream(assets))) {
+      for (String name : new String[] {"menu-background.png", "menu-logo.png"}) {
+        zip.putNextEntry(new java.util.zip.ZipEntry("assets/" + name));
+        java.nio.file.Files.copy(source("android/art/" + name).toPath(), zip);
+        zip.closeEntry();
+      }
+    }
+    int cookie =
+        org.robolectric.util.ReflectionHelpers.callInstanceMethod(
+            app.getAssets(),
+            "addAssetPath",
+            org.robolectric.util.ReflectionHelpers.ClassParameter.from(
+                String.class, assets.getCanonicalPath()));
+    assertTrue(cookie > 0);
+    android.content.pm.PackageInfo info =
+        app.getPackageManager().getPackageInfo(app.getPackageName(), 0);
+    info.versionName = version;
+    info.setLongVersionCode(build);
+    org.robolectric.Shadows.shadowOf(app.getPackageManager()).installPackage(info);
   }
 
   @Test

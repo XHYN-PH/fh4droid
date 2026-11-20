@@ -155,6 +155,7 @@ elseif(ANDROID)
     add_library(pinyon_shift SHARED ${PINYON_SHIFT_HOST_LOCAL_SOURCES})
     set_target_properties(pinyon_shift PROPERTIES OUTPUT_NAME main)
     target_sources(pinyon_shift PRIVATE src/android_bridge.cpp src/android_achievement_art.cpp)
+    target_link_libraries(pinyon_shift PRIVATE android)
     add_dependencies(pinyon_shift fh4droid_android)
     # Every generated function is a default-visibility weak symbol, so in a
     # shared library each call between them went through the PLT (4-6 % of

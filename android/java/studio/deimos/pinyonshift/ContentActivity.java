@@ -60,7 +60,20 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
     private void rebuild(){
         FestivalUi.rememberTree(host);Page oldRoot=pages.peekFirst(),oldDetail=pages.size()>1?pages.peekLast():null;
         pages.clear();LinearLayout body=FestivalUi.column(this);LinearLayout tabs=new LinearLayout(this);body.addView(tabs);
-        String[] names={"Mods","DLC","Shaders"};for(int i=0;i<names.length;i++){final int selected=i;Button button=FestivalUi.button(this,names[i],false);button.setSelected(tab==i);tabs.addView(button,new LinearLayout.LayoutParams(0,-2,1));button.setOnClickListener(v->selectTab(selected));}
+        String[] names={"Mods","DLC","Shaders"}, icons={"layers","download","chip"};
+        for(int i=0;i<names.length;i++){
+            final int selected=i;
+            Button button=FestivalUi.button(this,names[i],false);
+            FestivalUi.setActionIcon(this,button,icons[i]);
+            button.setSelected(tab==i);
+            button.setTag(FestivalUi.FOCUS_KEY,"content-tab-"+i);
+            LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(0,-2,1);
+            if(i>0)size.leftMargin=FestivalUi.dp(this,8);
+            tabs.addView(button,size);
+            button.setOnClickListener(v->selectTab(selected));
+        }
+        tabs.addView(FestivalUi.text(this,"LB / RB",11,FestivalUi.MUTED));
+        body.setTag(FestivalUi.DEFAULT_FOCUS,tabs.getChildAt(tab));
         ControllerPrompts.tabs(body, direction -> selectTab(tab + direction));
         try{if(tab==0)mods(body);else if(tab==1)dlc(body);else shaders(body);}
         catch(Exception error){body.addView(FestivalUi.text(this,"Content could not be loaded: "+error.getMessage(),14,FestivalUi.MUTED));}
@@ -72,24 +85,48 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
     private static JSONObject find(List<JSONObject> items,String key,String id){for(JSONObject item:items)if(id.equals(item.optString(key)))return item;return null;}
     private boolean available(){if(busy||loading)return false;if(GameFiles.running(this)){error("Quit the game before changing content.");return false;}return true;}
     private void mods(LinearLayout body)throws Exception{
-        FestivalUi.listRow(this,body,"wrench","Cheats · separate profile","Trainer options keep standard progress separate.",()->TrainerPage.show(this,null));
-        body.addView(FestivalUi.text(this,"Changes apply at the next launch. Earlier mods win conflicts. Database mods use a separate modded profile.",13,FestivalUi.MUTED));
+        section(body,"Installed mods");
         if(optionsProblem!=null&&!optionsProblem.isEmpty())body.addView(FestivalUi.text(this,"Saved mod options could not be read. Disable optional mods for recovery: "+optionsProblem,14,FestivalUi.ORANGE));
-        FestivalUi.tileRow(this,body,FestivalUi.tile(this,"file","Import ZIP","One mod package",()->pick(MOD_ZIP,false,false)),FestivalUi.tile(this,"folder","Import folder","Choose a mod folder",()->pick(MOD_FOLDER,true,false)));
-        builtin(body,"festival_pacing","Festival pacing");
-        builtin(body,"hidden_cars","Hidden cars");
-        if(!enabledMods.isEmpty())FestivalUi.action(this,body,"Disable all optional mods",this::disableMods);
+        ArrayList<View> installed=new ArrayList<>();
         for(JSONObject item:modItems){
             String id=item.getString("name"),title=item.optString("title",id);boolean on=item.optBoolean("enabled");String problem=item.optString("problem","");
-            FestivalUi.listRow(this,body,"layers",title,(on?"Enabled · priority "+(item.optInt("order")+1):"Disabled")+(problem.isEmpty()?"":" · "+problem),()->modDetails(id));
+            View row=FestivalUi.tile(this,"layers",title,problem.isEmpty()
+                ? on ? "Enabled for next launch · priority "+(item.optInt("order")+1) : "Disabled"
+                : "Needs attention · "+problem,()->modDetails(id));
+            row.setTag(FestivalUi.FOCUS_KEY,"mod:"+id);
+            installed.add(row);
         }
+        if(installed.isEmpty())body.addView(FestivalUi.text(this,"No mods installed yet.",13,FestivalUi.MUTED));
+        contentTiles(body,installed);
+        if(!enabledMods.isEmpty())FestivalUi.action(this,body,"Disable all optional mods",this::disableMods);
+        section(body,"Add mods");
+        FestivalUi.tileRow(this,body,FestivalUi.tile(this,"file","Import ZIP","One mod package",()->pick(MOD_ZIP,false,false)),FestivalUi.tile(this,"folder","Import folder","Choose a mod folder",()->pick(MOD_FOLDER,true,false)));
+        ArrayList<View> builtIns=new ArrayList<>();
+        builtin(builtIns,"festival_pacing","Festival pacing","flag");
+        builtin(builtIns,"hidden_cars","Hidden cars","layers");
+        contentTiles(body,builtIns);
+        FestivalUi.listRow(this,body,"wrench","Cheats · separate profile","Open trainer options.",()->TrainerPage.show(this,null));
         body.addView(FestivalUi.text(this,"Game-file overlays, database scripts and Android ARM64 plugins are supported. Mods that rebuild archive members need preparation with the PC mod tools before import.",12,FestivalUi.MUTED));
     }
-    private void builtin(LinearLayout body,String id,String title){
-        boolean installed=new File(ModStore.root(this),id).isDirectory();
-        FestivalUi.action(this,body,installed?title+" · details":"Install "+title,()->{
-            if(installed)modDetails(id);else perform("Installing "+title+"…",()->{ModStore.installBuiltin(this,id);return "Installed. Open its details to enable it.";});
-        });
+    private void section(LinearLayout body,String name){
+        TextView heading=FestivalUi.text(this,name,14,FestivalUi.TEXT);
+        heading.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        heading.setPadding(0,FestivalUi.dp(this,12),0,FestivalUi.dp(this,2));
+        heading.setAccessibilityHeading(true);
+        body.addView(heading);
+    }
+    private void contentTiles(LinearLayout body,List<View> entries){
+        for(int i=0;i<entries.size();i+=2){
+            if(i+1<entries.size())FestivalUi.tileRow(this,body,entries.get(i),entries.get(i+1));
+            else FestivalUi.tileRow(this,body,entries.get(i));
+        }
+    }
+    private void builtin(List<View> tiles,String id,String title,String icon){
+        if(find(modItems,"name",id)!=null)return;
+        tiles.add(FestivalUi.tile(this,icon,title,"Install built-in mod",()->perform("Installing "+title+"…",()->{
+            ModStore.installBuiltin(this,id);
+            return "Installed. Open its details to enable it.";
+        })));
     }
     private void disableMods(){
         new AlertDialog.Builder(this).setTitle("Disable optional mods?").setMessage("Return to the normal profile next launch. Installed mods, their options and both save profiles are kept.").setNegativeButton("Cancel",null).setPositiveButton("Disable",(d,w)->perform("Disabling mods…",()->{ModStore.disableAll(this);return "Optional mods disabled for the next launch.";})).show();
@@ -114,15 +151,25 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
         }
     }
     private void dlc(LinearLayout body)throws Exception{
+        section(body,"Installed content");
+        ArrayList<View> installed=new ArrayList<>(), missing=new ArrayList<>();
+        for(JSONObject item:dlcItems){
+            String id=item.getString("package_id"),title=item.getString("display_name");
+            boolean present=item.optBoolean("installed"),enabled=item.optBoolean("enabled");
+            View tile=FestivalUi.tile(this,"folder",title,item.optBoolean("conflict")?"Conflicting copies"
+                :enabled?"Enabled for next launch":present?"Installed · disabled":"Available to import",()->dlcDetails(item));
+            tile.setTag(FestivalUi.FOCUS_KEY,"dlc:"+id);
+            (present?installed:missing).add(tile);
+        }
+        if(installed.isEmpty())body.addView(FestivalUi.text(this,"No DLC installed yet.",13,FestivalUi.MUTED));
+        contentTiles(body,installed);
+        section(body,"Import or find DLC");
         body.addView(FestivalUi.text(this,"Import your original Marketplace packages, ZIPs containing packages, or a folder. Nested ZIPs are supported up to three levels. Imports start disabled.",13,FestivalUi.MUTED));
         FestivalUi.tileRow(this,body,FestivalUi.tile(this,"file","Import packages / ZIPs","Choose one or more files",()->pick(DLC_FILES,false,true)),FestivalUi.tile(this,"folder","Import folder","Find packages in a folder",()->pick(DLC_FOLDER,true,false)));
         FestivalUi.action(this,body,"UDLC download page",()->external("https://www.moddb.com/mods/forza-horizon-udlc-pack/downloads/udlcv12"));
         FestivalUi.action(this,body,"Traffic Car Unlocker page",()->external("https://www.moddb.com/mods/forza-horizon-udlc-pack/downloads/udlc-traffic-car-unlocker"));
         body.addView(FestivalUi.text(this,"UDLC and its traffic unlocker are optional community content. Cars and upgrades need device testing; some Fast & Furious cars are known to stall in the paint shop. Keep a save backup.",12,FestivalUi.MUTED));
-        for(JSONObject item:dlcItems){
-            String id=item.getString("package_id"),title=item.getString("display_name");boolean installed=item.optBoolean("installed"),enabled=item.optBoolean("enabled");
-            FestivalUi.listRow(this,body,"folder",title,item.optBoolean("conflict")?"Conflicting installed copies":enabled?"Enabled":installed?"Installed · disabled":"Not installed",()->dlcDetails(item));
-        }
+        contentTiles(body,missing);
     }
     private void dlcDetails(JSONObject item){
         String id=item.optString("package_id"),title=item.optString("display_name");boolean enabled=item.optBoolean("enabled");
@@ -135,9 +182,11 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
                 }showPanel(title,details);
     }
     private void shaders(LinearLayout body){
-        File file=ShaderPreparation.installed(this);body.addView(FestivalUi.text(this,file.isFile()?"A prepared free-roam pipeline list is installed.":"No prepared free-roam pipeline list is installed.",15,FestivalUi.TEXT));
+        File file=ShaderPreparation.installed(this);
+        FestivalUi.card(this,body,file.isFile()?"Prepared pipeline list installed":"No prepared pipeline list",
+            file.isFile()?android.text.format.Formatter.formatFileSize(this,file.length())+" · Free-roam pipelines":"The game prepares locally stored pipelines before play.");
         body.addView(FestivalUi.text(this,"Prepare the pipeline list with the updated PC setup from your own game files, then import the .xpso file here. The renderer checks its shader hashes while loading it.",13,FestivalUi.MUTED));
-        FestivalUi.action(this,body,"Import prepared pipeline list",()->pick(SHADERS,false,false));
+        FestivalUi.tileRow(this,body,FestivalUi.tile(this,"download","Import prepared pipeline list","Select a .xpso file",()->pick(SHADERS,false,false)));
         body.addView(FestivalUi.text(this,"Stored and imported pipelines are prepared before the game starts.",13,FestivalUi.MUTED));
     }
     private void pick(int request,boolean folder,boolean multiple){if(!available())return;Intent intent=new Intent(folder?Intent.ACTION_OPEN_DOCUMENT_TREE:Intent.ACTION_OPEN_DOCUMENT);if(!folder){intent.addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,multiple);}intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);try{startActivityForResult(intent,request);}catch(ActivityNotFoundException error){error("No file picker is available.");}}

@@ -13,12 +13,26 @@ final class PerformancePolicy {
             || cores <= 4 ? 1 : 2;
     }
     static int configured(String text, int automatic, int min, int max) {
+        if (text == null) return automatic;
         try { int n = Integer.parseInt(text); return n < 0 ? automatic : Math.max(min, Math.min(max, n)); }
         catch (NumberFormatException error) { return automatic; }
     }
     static float presentationTarget(String game, String host) {
         float g = rate(game), h = rate(host);
         return g == 0 ? h : h == 0 ? g : Math.min(g, h);
+    }
+    static float seamlessCadence(float fps, float current, float[] alternatives) {
+        if (!(fps>0) || !Float.isFinite(fps)) return 0;
+        if (evenCadence(fps,current)) return current;
+        float match = Float.POSITIVE_INFINITY;
+        for (float refresh : alternatives) if (evenCadence(fps,refresh)) match=Math.min(match,refresh);
+        return Float.isFinite(match)?match:0;
+    }
+    private static boolean evenCadence(float fps,float refresh) {
+        if (!Float.isFinite(refresh) || refresh<=0) return false;
+        float multiple = refresh / fps;
+        int repeat = Math.round(multiple);
+        return repeat >= 1 && Math.abs(multiple-repeat) <= repeat*.0015f;
     }
     private static float rate(String text) {
         if (text == null) return 0;

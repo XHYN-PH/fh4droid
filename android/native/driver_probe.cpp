@@ -481,18 +481,22 @@ Java_studio_deimos_pinyonshift_DriverProbeActivity_nativeProbe(JNIEnv* env,jclas
     std::string selection=Read(env,selected_value);
     void* loader=dlopen("/system/lib64/libvulkan.so",RTLD_NOW|RTLD_LOCAL);
     if(!loader)return env->NewStringUTF(Error("The system Vulkan loader could not be opened.").c_str());
+    std::string report;
     if(selection=="auto"){
-        std::string name;Probe(loader,&name);
-        selection=std::regex_search(name,std::regex("Adreno[^0-9]*[78][0-9]{2}"))&&
-            std::filesystem::is_directory(root/"turnip-gen8-v37")?"turnip-gen8-v37":"";
+        std::string name;
+        report=Probe(loader,&name,VK_API_VERSION_1_3,false,require_vertex_stores);
+        std::smatch model;
+        selection=std::regex_search(name,model,std::regex("Adreno[^0-9]*([78][0-9]{2})")) &&
+            model[1]!="730" && std::filesystem::is_directory(root/"turnip-gen8-v37") ? "turnip-gen8-v37" : "";
     }
     if(!selection.empty()){
         dlclose(loader);
         loader=rex::ui::vulkan::OpenAndroidCustomVulkanDriver(root,
             Read(env,internal_value),Read(env,native_value),selection);
         if(!loader)return env->NewStringUTF(Error("The selected custom driver could not be loaded.").c_str());
+        report.clear();
     }
-    std::string report=Probe(loader,nullptr,VK_API_VERSION_1_3,false,require_vertex_stores);
+    if (report.empty()) report=Probe(loader,nullptr,VK_API_VERSION_1_3,false,require_vertex_stores);
     if(!report.empty()&&report.back()=='}'){report.pop_back();report+=",\"effective_driver\":"+Quote(selection)+"}";}
     if(!require_vertex_stores && !report.empty() && report.back()=='}'){report.pop_back();report+=",\"vertex_stores_fallback\":true}";}
     // A fresh process is killed after reporting; do not unload live driver hooks.

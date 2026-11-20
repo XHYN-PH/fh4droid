@@ -49,18 +49,44 @@ final class DiscImage {
         }
     }
     void copy(String name,File output,String expectedHash)throws IOException{
-        Entry entry=files.get(name.toLowerCase(Locale.ROOT));if(entry==null)throw new IOException("Missing "+name+" on this disc.");
-        try{MessageDigest hash=MessageDigest.getInstance("SHA-256");output.getParentFile().mkdirs();
-            try(OutputStream out=new FileOutputStream(output)){long done=0;while(done<entry.size){byte[] b=read(entry.offset+done,(int)Math.min(65536,entry.size-done));hash.update(b);out.write(b);done+=b.length;FileOperation.progress(name,done,entry.size);}}
-            if(!hex(hash.digest()).equalsIgnoreCase(expectedHash)){output.delete();throw new IOException("Unsupported "+name+". Use the supported base-game disc.");}
-        }catch(NoSuchAlgorithmException impossible){throw new AssertionError(impossible);}
+        Entry entry = entry(name);
+        output.getParentFile().mkdirs();
+        String copied;
+        try(OutputStream out=new FileOutputStream(output)){copied=digest(entry,name,out);}
+        if(!copied.equalsIgnoreCase(expectedHash)){
+            output.delete();
+            throw new IOException("Unsupported "+name+". Use the supported base-game disc.");
+        }
     }
     String hash(String name)throws IOException{
-        Entry entry=files.get(name.toLowerCase(Locale.ROOT));if(entry==null)throw new IOException("Missing "+name+" on this disc.");
-        try{MessageDigest d=MessageDigest.getInstance("SHA-256");long done=0;
-            while(done<entry.size){byte[] b=read(entry.offset+done,(int)Math.min(65536,entry.size-done));d.update(b);done+=b.length;FileOperation.progress(name,done,entry.size);}
-            return hex(d.digest());
-        }catch(NoSuchAlgorithmException e){throw new AssertionError(e);}
+        return digest(entry(name),name,null);
+    }
+    private Entry entry(String name)throws IOException{
+        Entry entry=files.get(name.toLowerCase(Locale.ROOT));
+        if(entry==null)throw new IOException("Missing "+name+" on this disc.");
+        return entry;
+    }
+    private String digest(Entry entry,String name,OutputStream output)throws IOException{
+        try{
+            MessageDigest hash=MessageDigest.getInstance("SHA-256");
+            ByteBuffer block=ByteBuffer.allocate((int)Math.min(256*1024L,entry.size));
+            long done=0;
+            while(done<entry.size){
+                FileOperation.check();
+                block.clear();
+                int count=(int)Math.min(block.capacity(),entry.size-done);
+                block.limit(count);
+                while(block.hasRemaining()){
+                    int bytes=channel.read(block,entry.offset+done+block.position());
+                    if(bytes<=0)throw new IOException("Cannot read this disc image.");
+                }
+                hash.update(block.array(),0,count);
+                if(output!=null)output.write(block.array(),0,count);
+                done+=count;
+                FileOperation.progress(name,done,entry.size);
+            }
+            return hex(hash.digest());
+        }catch(NoSuchAlgorithmException impossible){throw new AssertionError(impossible);}
     }
     static String hex(byte[] data){StringBuilder s=new StringBuilder();for(byte b:data)s.append(String.format(Locale.ROOT,"%02x",b&255));return s.toString();}
     static String hash(File file)throws IOException{

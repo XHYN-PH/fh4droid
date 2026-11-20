@@ -167,7 +167,8 @@ final class OutlineIcon extends View {
     } else if (kind.equals("chevron")) {
       c.drawLine(x - r * .25f, y - r * .5f, x + r * .25f, y, p);
       c.drawLine(x + r * .25f, y, x - r * .25f, y + r * .5f, p);
-    } else {
+    } else if (!ControlGlyphs.draw(c, p, x, y, r, kind)) {
+      p.setStrokeWidth(Math.max(1.5f, r * .1f));
       c.drawArc(x - r * .45f, y - r * .8f, x + r * .45f, y + r * .3f, 0, 180, false, p);
       c.drawLine(x - r * .45f, y - r * .25f, x - r * .45f, y - r * .8f, p);
       c.drawLine(x + r * .45f, y - r * .25f, x + r * .45f, y - r * .8f, p);

@@ -230,6 +230,15 @@ std::string BuildLabel() {
   return label;
 }
 
+bool LoggingEnabled() {
+#if defined(__ANDROID__)
+  static const bool enabled = !platform::EnvironmentFlag("PINYON_SHIFT_ANDROID_NO_SESSION_LOGS");
+  return enabled;
+#else
+  return true;
+#endif
+}
+
 bool InitializeEarly() {
   if (!g_state_root.empty()) {
     return CpuHasSse41();
@@ -243,6 +252,8 @@ bool InitializeEarly() {
 
   std::error_code error;
   for (const char* directory : {"cache", "config", "crashes", "logs", "update", "user"}) {
+    if (!LoggingEnabled() && (std::string_view(directory) == "crashes" ||
+                              std::string_view(directory) == "logs")) continue;
     std::filesystem::create_directories(g_state_root / directory, error);
     if (error) {
       // The only trace of a silent exit on Android: logcat.
@@ -252,26 +263,27 @@ bool InitializeEarly() {
     }
   }
 
-  crash::Install(g_state_root / "crashes", g_session_id);
-  const std::string features = CpuFeatureSummary();
-  const BuildProvenance build = LoadBuildProvenance();
-  RecordEvent("process.start",
-              {{"diagnostics_schema", "1"},
-               {"build_config", REXGLUE_BUILD_CONFIG},
-               {"build_manifest_schema", build.schema},
-               {"pinyon_shift_commit", build.pinyon_shift_commit},
-               {"pinyon_shift_dirty", build.pinyon_shift_dirty},
-               {"pinyon_shift_source_payload_sha256", build.source_payload_sha256},
-               {"rexglue_commit", build.rexglue_commit},
-               {"rexglue_dirty", build.rexglue_dirty},
-               {"executable_sha256", build.executable_sha256},
-               {"build_label", BuildLabel()},
-               {"cpu_baseline", PINYON_SHIFT_CPU_BASELINE},
-               {"cpu_features", features},
-               {"state_root", rex::path_to_utf8(g_state_root)}});
+  if (LoggingEnabled()) {
+    crash::Install(g_state_root / "crashes", g_session_id);
+    const BuildProvenance build = LoadBuildProvenance();
+    RecordEvent("process.start",
+                {{"diagnostics_schema", "1"},
+                 {"build_config", REXGLUE_BUILD_CONFIG},
+                 {"build_manifest_schema", build.schema},
+                 {"pinyon_shift_commit", build.pinyon_shift_commit},
+                 {"pinyon_shift_dirty", build.pinyon_shift_dirty},
+                 {"pinyon_shift_source_payload_sha256", build.source_payload_sha256},
+                 {"rexglue_commit", build.rexglue_commit},
+                 {"rexglue_dirty", build.rexglue_dirty},
+                 {"executable_sha256", build.executable_sha256},
+                 {"build_label", BuildLabel()},
+                 {"cpu_baseline", PINYON_SHIFT_CPU_BASELINE},
+                 {"cpu_features", CpuFeatureSummary()},
+                 {"state_root", rex::path_to_utf8(g_state_root)}});
+  }
 
   if (!CpuHasSse41()) {
-    RecordEvent("cpu.unsupported", {{"required", "sse4.1"}, {"detected", features}});
+    RecordEvent("cpu.unsupported", {{"required", "sse4.1"}, {"detected", CpuFeatureSummary()}});
     platform::ShowFatalError("Unsupported processor",
                              "Pinyon Shift requires an x86-64 processor with SSE4.1 support.");
     return false;
@@ -300,7 +312,9 @@ bool InitializeEarly() {
   return true;
 }
 
-void RefreshCrashReporter() { crash::Refresh(); }
+void RefreshCrashReporter() {
+  if (LoggingEnabled()) crash::Refresh();
+}
 
 const std::filesystem::path& StateRoot() {
   return g_state_root;
@@ -315,6 +329,7 @@ void RecordEvent(std::string_view event, std::initializer_list<Field> fields) {
 }
 
 void RecordEvent(std::string_view event, std::span<const Field> fields) {
+  if (!LoggingEnabled() || g_event_path.empty()) return;
   std::ostringstream json;
   json << "{\"schema\":" << kDiagnosticsSchema << ",\"utc\":\"" << UtcTimestamp(false)
        << "\",\"session\":\"" << JsonEscape(g_session_id) << "\",\"event\":\""

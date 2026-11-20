@@ -15,6 +15,7 @@ using Field = std::pair<std::string_view, std::string_view>;
 // Installs the crash reporter, resolves the deterministic state root, and
 // checks the build's documented CPU floor before guest/runtime work begins.
 bool InitializeEarly();
+bool LoggingEnabled();
 
 // Reinstalls the top-level filter after runtime components that may replace it.
 // The vectored first-chance reporter remains installed for precursor faults.

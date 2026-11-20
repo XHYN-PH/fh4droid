@@ -13,10 +13,10 @@ import java.util.*;
 final class ProfilePage {
     static void show(Activity a,Runnable choosePicture,Runnable saves){
         LinearLayout body=FestivalUi.column(a);Map<String,String> settings=MobileConfig.read(a);
-        TextView identity=FestivalUi.text(a,"",18,FestivalUi.TEXT);body.addView(identity);FestivalUi.onRefresh(identity,()->identity.setText(MobileConfig.get(a,"user_name","User")+" · Offline profile"));
-        body.addView(FestivalUi.text(a,"Next launch: "+LocalProfile.configuredProfile(settings)+" · "+LocalProfile.backupStatus(settings),13,FestivalUi.MUTED));
-        LinearLayout actions=FestivalUi.column(a);
-        FestivalUi.action(a,actions,"Edit gamertag · next launch",()->{
+        body.addView(header(a,AchievementsPage.cachedProgress(a)));
+        body.addView(FestivalUi.text(a,LocalProfile.backupStatus(settings),13,FestivalUi.MUTED));
+        ArrayList<android.view.View> actions=new ArrayList<>();
+        actions.add(FestivalUi.tile(a,"user","Edit gamertag","Applies at the next launch.",()->{
             EditText input=new EditText(a);input.setSingleLine(true);input.setText(MobileConfig.get(a,"user_name","User"));
             input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(15)});
             AlertDialog dialog=new AlertDialog.Builder(a).setTitle("Local gamertag").setView(input).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
@@ -24,17 +24,67 @@ final class ProfilePage {
                 try{String name=LocalProfile.gamertag(input.getText().toString());MobileConfig.put(a,"user_name",MobileConfig.quote(name));dialog.dismiss();FestivalUi.refreshTree(body);Toast.makeText(a,"Gamertag saved for the next launch",Toast.LENGTH_SHORT).show();}
                 catch(IllegalArgumentException|IOException error){input.setError(error.getMessage());}
             }));dialog.show();
-        });
-        if(choosePicture!=null)FestivalUi.action(a,actions,"Choose gamer picture · next launch",choosePicture);
-        FestivalUi.action(a,actions,"Local achievements",()->AchievementsPage.show(a,null));
-        if(saves!=null)FestivalUi.action(a,actions,"Save backups",saves);
-        FestivalUi.action(a,actions,"Automatic save backups",()->FestivalUi.choose(a,"Automatic save backups · next launch",new String[]{"On","Off"},"false".equals(MobileConfig.get(a,"pinyon_shift_save_backups","true"))?1:0,index->{
-            try{MobileConfig.put(a,"pinyon_shift_save_backups",Boolean.toString(index==0));Toast.makeText(a,"Backup preference saved for the next launch",Toast.LENGTH_SHORT).show();}
-            catch(IOException error){SettingsHub.error(a,error);}
         }));
-        FestivalUi.action(a,actions,"About local profiles",()->FestivalUi.explain(a,"Offline profile","Your local name, picture and achievements stay on this device. Xbox LIVE, Rivals, storefront and online multiplayer are unavailable. Changing your name or picture preserves your save identity."));
-        while(actions.getChildCount()>0){LinearLayout pair=new LinearLayout(a);LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,-2);rp.topMargin=FestivalUi.dp(a,8);body.addView(pair,rp);for(int i=0;i<2&&actions.getChildCount()>0;i++){android.view.View button=actions.getChildAt(0);actions.removeViewAt(0);LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(0,FestivalUi.dp(a,48),1);if(i>0)bp.leftMargin=FestivalUi.dp(a,8);pair.addView(button,bp);}}
+        if(choosePicture!=null)actions.add(FestivalUi.tile(a,"camera","Choose gamer picture",
+            "Applies at the next launch.",choosePicture));
+        actions.add(FestivalUi.tile(a,"trophy","Local achievements","View your progress",
+            ()->AchievementsPage.show(a,null)));
+        if(saves!=null)actions.add(FestivalUi.tile(a,"save","Save backups","View, restore or export",saves));
+        for(int i=0;i<actions.size();i+=2){
+            if(i+1<actions.size())FestivalUi.tileRow(a,body,actions.get(i),actions.get(i+1));
+            else FestivalUi.tileRow(a,body,actions.get(i));
+        }
+        FestivalUi.listRow(a,body,"info","About local profiles","How local names, saves and achievements work.",()->FestivalUi.explain(a,"Offline profile","Your local name, picture and achievements stay on this device. Xbox LIVE, Rivals, storefront and online multiplayer are unavailable. Changing your name or picture preserves your save identity."));
         FestivalUi.present(a,"Profile",body);
+    }
+    static LinearLayout header(Activity a,String progress) {
+        LinearLayout row=new LinearLayout(a);
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        int pad=FestivalUi.dp(a,10);
+        row.setPadding(pad,pad,pad,pad);
+        row.setBackground(FestivalUi.outlined(a,FestivalUi.GLASS,FestivalUi.STROKE,1,12));
+        android.widget.FrameLayout emblem=new android.widget.FrameLayout(a);
+        emblem.setBackground(FestivalUi.surface(a,FestivalUi.BG,12));
+        emblem.setClipToOutline(true);
+        emblem.addView(FestivalUi.icon(a,"user",FestivalUi.TEXT),new android.widget.FrameLayout.LayoutParams(-1,-1));
+        ImageView picture=new ImageView(a);
+        picture.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        emblem.addView(picture,new android.widget.FrameLayout.LayoutParams(-1,-1));
+        row.addView(emblem,new LinearLayout.LayoutParams(FestivalUi.dp(a,46),FestivalUi.dp(a,46)));
+        LinearLayout details=FestivalUi.column(a);
+        details.setPadding(pad,0,0,0);
+        TextView tag=FestivalUi.text(a,"",16,FestivalUi.TEXT);
+        tag.setTypeface(Typeface.DEFAULT_BOLD);
+        details.addView(tag);
+        TextView state=FestivalUi.text(a,"",12,FestivalUi.MUTED);
+        details.addView(state);
+        if(progress!=null&&!progress.isEmpty())details.addView(FestivalUi.text(a,progress,12,FestivalUi.ORANGE));
+        row.addView(details,new LinearLayout.LayoutParams(0,-2,1));
+        FestivalUi.onRefresh(row,()->{
+            Map<String,String> current=MobileConfig.read(a);
+            tag.setText(current.getOrDefault("user_name","User"));
+            state.setText("Offline profile · "+LocalProfile.configuredProfile(current));
+            String value=current.getOrDefault("user_gamerpic","");
+            if(value.equals(picture.getTag()))return;
+            picture.setTag(value);
+            File file=new File(value);
+            File folder=new File(MobileConfig.base(a),"state/config");
+            try {
+                if(file.getName().matches("gamerpic-[a-f0-9]{64}\\.png")
+                    && file.getCanonicalFile().getParentFile().equals(folder.getCanonicalFile())
+                    && !Files.isSymbolicLink(file.toPath()) && file.length()<=1024*1024){
+                    BitmapFactory.Options bounds=new BitmapFactory.Options();
+                    bounds.inJustDecodeBounds=true;
+                    BitmapFactory.decodeFile(file.getPath(),bounds);
+                    if(bounds.outWidth==128 && bounds.outHeight==128){
+                        picture.setImageBitmap(BitmapFactory.decodeFile(file.getPath()));
+                        return;
+                    }
+                }
+            }catch(IOException|SecurityException ignored){}
+            picture.setImageDrawable(null);
+        });
+        return row;
     }
     static void importPicture(Activity a,Uri uri)throws Exception{
         byte[] data;

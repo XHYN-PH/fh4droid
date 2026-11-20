@@ -220,6 +220,13 @@ final class SaveArchive {
             this.label = label;
             this.nativeSlot = nativeSlot;
         }
+        String scope() {
+            if (nativeSlot) return "Normal saves";
+            try {
+                List<String> roots=backupRoots(new File(folder,"roots.txt"));
+                return roots.size()>1?"Normal and modded saves":roots.contains(MODDED)?"Modded saves":"Normal saves";
+            } catch (IOException error) { return "Normal saves"; }
+        }
     }
     private static boolean directory(File file) {
         return Files.isDirectory(file.toPath(), LinkOption.NOFOLLOW_LINKS);
@@ -233,6 +240,15 @@ final class SaveArchive {
         if (imports != null) for (File folder : imports) {
             result.add(new Backup(folder, "Before import or restore", false));
         }
+        File[] checkpoints=parent.listFiles(file->directory(file)
+            && file.getName().matches("checkpoint-[0-9]{13}-[a-f0-9-]{36}"));
+        if(checkpoints!=null) for(File folder:checkpoints) {
+            try {
+                String label=checkpointName(ContentFiles.text(new File(folder,"checkpoint.txt"),256));
+                backupRoots(new File(folder,"roots.txt"));
+                if (directory(new File(folder,"payload"))) result.add(new Backup(folder,label,false));
+            } catch (IOException ignored) {}
+        }
         File nativeParent = new File(parent, "saves");
         if (directory(nativeParent)) {
             File[] slots = nativeParent.listFiles(file -> directory(file)
@@ -242,6 +258,38 @@ final class SaveArchive {
         }
         result.sort((a, b) -> Long.compare(b.folder.lastModified(), a.folder.lastModified()));
         return result;
+    }
+    static String checkpointName(String input)throws IOException {
+        String name=input.trim();
+        if(name.isEmpty()||name.length()>48||name.codePoints().anyMatch(Character::isISOControl))
+            throw new IOException("Use a name from 1 to 48 characters without line breaks.");
+        return name;
+    }
+    static synchronized void checkpoint(File state,String scope,String name)throws IOException{
+        name=checkpointName(name);
+        List<String> roots=scopes(scope);
+        File backups=new File(state,"backups");
+        if(Files.isSymbolicLink(state.toPath())||Files.isSymbolicLink(backups.toPath()))
+            throw new IOException("Linked save folders are not supported.");
+        Files.createDirectories(backups.toPath());
+        Path stage=Files.createTempDirectory(backups.toPath(),".checkpoint-");
+        try {
+            long[] budget={0,0};
+            List<String> copied=new ArrayList<>();
+            for(String root:roots){
+                File source=new File(state,root);
+                if(!Files.exists(source.toPath(),LinkOption.NOFOLLOW_LINKS))continue;
+                long previous=budget[1];
+                stageBackup(source,source,stage.resolve("payload").resolve(root).toFile(),budget,0);
+                if(budget[1]>previous)copied.add(root);
+            }
+            if(copied.isEmpty())throw new IOException("No saves found in the selected profiles.");
+            Files.write(stage.resolve("checkpoint.txt"),name.getBytes(StandardCharsets.UTF_8));
+            Files.write(stage.resolve("roots.txt"),copied,StandardCharsets.UTF_8);
+            FileOperation.check();
+            Files.move(stage,backups.toPath().resolve("checkpoint-"+System.currentTimeMillis()+"-"+UUID.randomUUID()),
+                StandardCopyOption.ATOMIC_MOVE);
+        } finally { delete(stage.toFile()); }
     }
     private static Backup checkedBackup(File state, Backup selected) throws IOException {
         for (Backup backup : backups(state)) if (backup.folder.equals(selected.folder)) return backup;
@@ -335,6 +383,9 @@ final class SaveArchive {
         if(stages==null)return;
         for(File stage:stages)try{delete(stage);}
         catch(IOException error){android.util.Log.w("FH4Droid","Could not remove abandoned save staging",error);}
+        File[] checkpoints=new File(state,"backups").listFiles(f->directory(f)&&f.getName().matches("\\.checkpoint-[0-9]+"));
+        if(checkpoints!=null) for(File stage:checkpoints)try{delete(stage);}
+        catch(IOException error){android.util.Log.w("FH4Droid","Could not remove abandoned checkpoint",error);}
     }
     static void delete(File file)throws IOException{
         if(!Files.exists(file.toPath(),LinkOption.NOFOLLOW_LINKS))return;

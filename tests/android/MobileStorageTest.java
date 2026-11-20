@@ -47,6 +47,22 @@ public final class MobileStorageTest {
         rejects(()->SaveArchive.export(root,new ByteArrayOutputStream()),"export rejects symlinks");
         Files.delete(root.toPath().resolve("link"));
         check(!Files.exists(temp.resolve("escape")),"archive cannot escape state");
+        Path content=root.toPath().resolve("4D5309C9/00000002/package.bin");
+        Files.createDirectories(content.getParent());
+        Files.write(content,new byte[]{7});
+        SaveArchive.checkpoint(state,SaveArchive.BOTH,"Before car upgrade");
+        SaveArchive.Backup checkpoint=SaveArchive.backups(state).stream()
+            .filter(backup->backup.label.equals("Before car upgrade")).findFirst().orElseThrow(AssertionError::new);
+        check(checkpoint.scope().equals("Normal saves"),"checkpoint only advertises copied profiles");
+        check(!new File(checkpoint.folder,"payload/user/4D5309C9/00000002/package.bin").exists(),
+            "checkpoint excludes installed content");
+        Files.write(profile,new byte[]{8});
+        SaveArchive.restoreBackup(state,checkpoint);
+        check(new String(Files.readAllBytes(profile),StandardCharsets.UTF_8).equals("original"),"checkpoint restores saved progress");
+        check(Files.readAllBytes(content)[0]==7,"restoring checkpoint retains installed DLC");
+        rejects(()->SaveArchive.checkpoint(state,SaveArchive.MODDED,"Empty profile"),"checkpoint requires save data");
+        check(SaveArchive.backups(state).stream().noneMatch(backup->backup.label.equals("Empty profile")),
+            "failed checkpoint is never published");
     }
     private static byte[] disc(){
         byte[] bytes=new byte[60*2048];ByteBuffer image=ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);

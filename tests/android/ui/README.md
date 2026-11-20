@@ -25,7 +25,7 @@ scale and the ready/local-profile fixture state:
 
 | Screen | SHA-256 of ARGB pixels |
 | --- | --- |
-| B home | `d2e01e0391192b6bc2bee7c3fd9c9a18cff47241ae70f7b21258b75670ad7fe2` |
+| B home | `b95c48d2361a0f1f6348d977860ddc76eb77710c020e55f8e34e3d9304ca1a84` |
 | Management | `0873a07ec285d44bd4158f00ec6ec1e23e240c4ef10c398214e0009f8e58e928` |
 
 These checks always run in CI. Optional `-Dlauncher.preview.baseline=/path/B.png`

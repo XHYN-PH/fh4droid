@@ -26,6 +26,8 @@ final class FestivalUi {
   static final int FOCUS_KEY = 0x7f0a7f05;
   static final int DEFAULT_FOCUS = 0x7f0a7f06;
   static final int HEADER_ACTIONS = 0x7f0a7f07;
+  static final int SETTING_HELP = 0x7f0a7f09;
+  static final int SETTING_TITLE = 0x7f0a7f0a;
   private static final int SCROLL_STATE = 0x7f0a7f01;
   private static final int REFRESH = 0x7f0a7f02;
   private static final int PAGE_SCROLL = 0x7f0a7f03;
@@ -147,6 +149,17 @@ final class FestivalUi {
     b.setOnClickListener(v -> action.run());
     return b;
   }
+  static Button controlAction(Activity a, LinearLayout parent, String title, Runnable action) {
+    Button button = action(a, parent, title, action);
+    setActionIcon(a, button, ControlGlyphs.setting(title));
+    return button;
+  }
+  static void setActionIcon(Activity a, Button button, String kind) {
+    if (kind == null) return;
+    button.setCompoundDrawablesRelativeWithIntrinsicBounds(new MenuIcon(a, kind, TEXT), null, null, null);
+    button.setCompoundDrawablePadding(dp(a, 8));
+    button.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+  }
   static LinearLayout card(Activity a, LinearLayout parent, String title, String help) {
     LinearLayout c = column(a);
     int p = dp(a, 10);
@@ -265,7 +278,7 @@ final class FestivalUi {
     r.setGravity(Gravity.CENTER_VERTICAL);
     r.setPadding(dp(a, padDp + 4), dp(a, padDp), dp(a, padDp + 4), dp(a, padDp));
     r.setMinimumHeight(dp(a, 60));
-    r.setFocusable(true);
+    r.setFocusableInTouchMode(true);
     r.setClickable(true);
     glassBackground(a, r, selected, radius);
     r.addView(icon(a, icon, TEXT), new LinearLayout.LayoutParams(dp(a, iconDp), dp(a, iconDp)));
@@ -295,9 +308,25 @@ final class FestivalUi {
       String sub, Runnable action) {
     LinearLayout r = row(a, icon, title, sub, false, icon(a, "chevron", MUTED), 10, 24, 12);
     parent.addView(r, stacked(a));
+    r.setTag(SETTING_TITLE, title);
+    r.setTag(SETTING_HELP, sub);
     r.setOnClickListener(v -> action.run());
     role(r, "android.widget.Button", null);
     return r;
+  }
+  static LinearLayout settingsLink(Activity a, LinearLayout parent, String icon, String title,
+      String help, Runnable action) {
+    LinearLayout row = row(a,icon,title,"",false,icon(a,"chevron",MUTED),8,24,6);
+    row.setMinimumHeight(dp(a,48));
+    row.setTag(SETTING_TITLE,title);
+    row.setTag(SETTING_HELP,help);
+    row.setTag(FOCUS_KEY,title);
+    LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(-1,-2);
+    size.bottomMargin=dp(a,5);
+    parent.addView(row,size);
+    row.setOnClickListener(v->action.run());
+    role(row,"android.widget.Button",null);
+    return row;
   }
   /** A card for one choice in a list where exactly one entry is selected. */
   static LinearLayout radioRow(Activity a, LinearLayout parent, String icon, String title,
@@ -315,7 +344,7 @@ final class FestivalUi {
     t.setGravity(Gravity.CENTER_VERTICAL);
     t.setPadding(dp(a, 12), dp(a, 10), dp(a, 12), dp(a, 10));
     t.setMinimumHeight(dp(a, 64));
-    t.setFocusable(true);
+    t.setFocusableInTouchMode(true);
     t.setClickable(true);
     glassBackground(a, t, false, 10);
     t.addView(icon(a, icon, TEXT), new LinearLayout.LayoutParams(dp(a, 24), dp(a, 24)));
@@ -490,7 +519,7 @@ final class FestivalUi {
     LinearLayout pill = new LinearLayout(a);
     pill.setGravity(Gravity.CENTER);
     pill.setPadding(dp(a, 14), 0, dp(a, 18), 0);
-    pill.setFocusable(true);
+    pill.setFocusableInTouchMode(true);
     pill.setClickable(true);
     glassBackground(a, pill, false, 12);
     pill.addView(icon(a, "left", TEXT), new LinearLayout.LayoutParams(dp(a, 24), dp(a, 24)));
@@ -536,9 +565,7 @@ final class FestivalUi {
     d.setOnShowListener(x -> {
       Window w = d.getWindow();
       if (w != null) {
-        w.setBackgroundDrawableResource(android.R.color.transparent);
-        if(android.os.Build.VERSION.SDK_INT>=31)w.setBackgroundBlurRadius(dp(a,18));
-        w.setDimAmount(.6f);
+        styleOverlay(a,w,.6f);
         w.setLayout(
             Math.min(dp(a, 640), (int) (a.getResources().getDisplayMetrics().widthPixels * .94f)),
             (int) (a.getResources().getDisplayMetrics().heightPixels * .9f));
@@ -546,6 +573,11 @@ final class FestivalUi {
       enter(panel);
     });
     return d;
+  }
+  static void styleOverlay(Activity a, Window window, float dim) {
+    window.setBackgroundDrawable(surface(a,0xf2171d27,16));
+    if (android.os.Build.VERSION.SDK_INT>=31) window.setBackgroundBlurRadius(dp(a,18));
+    window.setDimAmount(dim);
   }
   static void present(Activity a, String title, View body) {
     if (a instanceof PanelHost)
@@ -579,12 +611,12 @@ final class FestivalUi {
     LinearLayout c = new LinearLayout(a);
     c.setGravity(Gravity.CENTER_VERTICAL);
     c.setPadding(dp(a, 8), dp(a, 2), dp(a, 8), dp(a, 2));
+    addControlIcon(a, c, title);
     TextView label = text(a, title, 14, TEXT);
     label.setPadding(0, dp(a, 5), dp(a, 8), dp(a, 5));
     c.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
     if (help != null && !help.isEmpty()) {
       label.setContentDescription(title + ". " + help);
-      label.setOnClickListener(v -> explain(a, title, help));
     }
     Switch s = new Switch(a);
     controlFocus(a,s);
@@ -592,6 +624,8 @@ final class FestivalUi {
     s.setChecked(enabled);
     s.setMinHeight(dp(a, 48));
     s.setContentDescription(title);
+    s.setTag(SETTING_TITLE, title);
+    s.setTag(SETTING_HELP, help);
     s.setThumbTintList(
         new ColorStateList(new int[][] {new int[] {android.R.attr.state_checked}, new int[0]},
             new int[] {ORANGE, MUTED}));
@@ -599,6 +633,7 @@ final class FestivalUi {
         new ColorStateList(new int[][] {new int[] {android.R.attr.state_checked}, new int[0]},
             new int[] {0x88d9145a, 0x44ffffff}));
     s.setOnCheckedChangeListener((v, on) -> { changed.accept(on); });
+    label.setOnClickListener(v -> { s.requestFocus(); s.performClick(); });
     c.addView(s, new LinearLayout.LayoutParams(-2, -2));
     parent.addView(c, new LinearLayout.LayoutParams(-1, -2));
     return s;
@@ -611,22 +646,31 @@ final class FestivalUi {
   }
   static SeekBar slider(Activity a, LinearLayout parent, String title, String help, int min,
       int max, int step, int initial, IntFunction<String> label, IntConsumer changed) {
-    LinearLayout c = card(a, parent, title, "");
+    LinearLayout c = card(a, parent, "", "");
+    c.removeAllViews();
+    LinearLayout heading = new LinearLayout(a);
+    heading.setGravity(Gravity.CENTER_VERTICAL);
+    addControlIcon(a, heading, title);
+    heading.addView(text(a,title,14,TEXT), new LinearLayout.LayoutParams(0,-2,1));
+    c.addView(heading);
     c.setOnLongClickListener(v -> {
       explain(a, title, help);
       return true;
     });
     initial = Math.max(min, Math.min(max, initial));
     TextView value = text(a, label.apply(initial), 13, ORANGE);
-    c.addView(value);
+    heading.addView(value);
     SeekBar s = new SeekBar(a);
     controlFocus(a,s);
     s.setMax((max - min) / step);
     s.setProgress(Math.max(0, Math.min(s.getMax(), (initial - min) / step)));
     s.setContentDescription(title);
+    s.setTag(SETTING_TITLE, title);
+    s.setTag(SETTING_HELP, help);
+    s.setKeyProgressIncrement(1);
     s.setProgressTintList(ColorStateList.valueOf(RED));
     s.setThumbTintList(ColorStateList.valueOf(TEXT));
-    c.addView(s, new LinearLayout.LayoutParams(-1, dp(a, 36)));
+    c.addView(s, new LinearLayout.LayoutParams(-1, dp(a, 40)));
     s.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
       private boolean tracking;
       public void onStartTrackingTouch(SeekBar b) {
@@ -642,7 +686,24 @@ final class FestivalUi {
         changed.accept(min + b.getProgress() * step);
       }
     });
+    IntConsumer adjust = direction -> {
+      int current = s.getProgress();
+      int next = Math.max(0, Math.min(s.getMax(), current + direction));
+      if (next != current) {
+        s.setProgress(next);
+        changed.accept(min + next * step);
+      }
+    };
+    s.setOnKeyListener((v, key, event) -> ControllerPrompts.horizontalKey(event, adjust));
+    ControllerPrompts.horizontalStick(s, adjust);
     return s;
+  }
+  private static void addControlIcon(Activity a, LinearLayout row, String title) {
+    String kind = ControlGlyphs.setting(title);
+    if (kind == null) return;
+    LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(dp(a,26),dp(a,26));
+    size.rightMargin = dp(a,8);
+    row.addView(icon(a,kind,TEXT),size);
   }
   static void controlFocus(Activity a,View control){
     control.setFocusable(true);control.setFocusableInTouchMode(true);touchFocus(control);
@@ -714,20 +775,17 @@ final class FestivalUi {
     scroll.post(() -> {
       if (body.getTag(PAGE_SCROLL) != scroll)
         return;
-      View focus=state.focus!=null&&state.focus.isAttachedToWindow()?state.focus:findFocusKey(body,state.focusKey);
-      if(focus!=null)focus.requestFocus();
-      scroll.scrollTo(0, state.y);
-      state.restoring = false;
+      restorePage(body);
     });
     return p;
   }
   static void explain(Activity a, String title, String help) {
-    if (help != null && !help.isEmpty())
-      new AlertDialog.Builder(a)
-          .setTitle(AppLanguage.text(a,title))
-          .setMessage(help)
-          .setPositiveButton("Got it", null)
-          .show();
+    if (help == null || help.isEmpty()) return;
+    LinearLayout body=column(a);
+    body.addView(text(a,help,14,TEXT));
+    AlertDialog explanation=dialog(a,AppLanguage.text(a,title),body);
+    action(a,body,"Got it",explanation::dismiss);
+    explanation.show();
   }
   static void onRefresh(View view, Runnable refresh) {
     view.setTag(REFRESH, refresh);

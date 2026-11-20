@@ -57,10 +57,23 @@ void CheckDescriptorReads(const std::filesystem::path& file, const std::vector<u
   size_t read = 0;
   assert(input->ReadSync(content, 1, &read) == X_STATUS_SUCCESS);
   assert(read == 4 && std::memcmp(content.data(), "est!", 4) == 0);
+  // Adjacent small reads warm the descriptor's read window.
+  assert(input->ReadSync(content, 2, &read) == X_STATUS_SUCCESS);
+  assert(read == 3 && std::memcmp(content.data(), "st!", 3) == 0);
+  const auto previous_write = std::filesystem::last_write_time(file);
+  {
+    std::fstream image(file, std::ios::binary | std::ios::in | std::ios::out);
+    image.seekp(50 * 2048 + 2);
+    image.put('X');
+    assert(image);
+  }
+  std::filesystem::last_write_time(file, previous_write - std::chrono::seconds(2));
+  assert(input->ReadSync(content, 2, &read) == X_STATUS_SUCCESS);
+  assert(read == 3 && std::memcmp(content.data(), "Xt!", 3) == 0);
   assert(input->ReadSync(content, 5, &read) == X_STATUS_END_OF_FILE && read == 0);
   // A provider may lose access or the selected file may change mid-session.
   std::filesystem::resize_file(file, 50 * 2048);
-  assert(input->ReadSync(content, 0, &read) == X_STATUS_UNSUCCESSFUL && read == 0);
+  assert(input->ReadSync(content, 2, &read) == X_STATUS_UNSUCCESSFUL && read == 0);
   input->Destroy();
 }
 #endif

@@ -57,6 +57,7 @@ import org.libsdl.app.SDLActivity;
  *       --esa args --gpu_backend=null
  */
 public class PinyonShiftActivity extends SDLActivity implements FestivalUi.PanelHost {
+    static final String NO_SESSION_LOGS = "no_session_logs";
     private static native void nativeHostMenu(boolean active);
     private static native void nativeOpenSettings();
     private static native void nativeAction(String action);
@@ -68,6 +69,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     private static native void nativeTilt(float value,boolean enabled);
     private static native long nativeFrameCount();
     private static native long[] nativePerformance();
+    private static native void nativeCpuHintTarget(int fps);
     private static native long[] nativeFrameHistory();
     private static native boolean nativeAudioOutputActive();
     private static native long[] nativePreparation();
@@ -84,9 +86,11 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     private android.widget.FrameLayout drawer;
     private android.widget.TextView fpsLabel;
     private android.widget.TextView preparationLabel;
+    private android.widget.LinearLayout preparationPanel;
+    private android.widget.ProgressBar preparationProgress;
     private boolean startupPreparationFailed;
     private boolean updateShaderPreparation() {
-        if (preparationLabel == null) return false;
+        if (preparationPanel == null) return false;
         long[] progress = nativePreparation();
         if (progress == null || progress.length < 5) return false;
         long phase = progress[4];
@@ -100,10 +104,18 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
                 .setCancelable(false).setPositiveButton("Return to launcher", (dialog, which) -> finish()).show();
         }
         boolean preparing = phase < 2 || phase == 2 && progress[1] > progress[0] && progress[3] == 0;
-        preparationLabel.setVisibility(preparing ? View.VISIBLE : View.GONE);
+        preparationPanel.setVisibility(preparing ? View.VISIBLE : View.GONE);
         if (preparing) {
-            String message = phase < 2 ? "Preparing shaders and graphics cache" : "Preparing graphics";
-            if (progress[1] > 0) message += " · " + progress[0] + " / " + progress[1];
+            long stage = progress.length > 5 ? progress[5] : 0;
+            String message = stage == 1 ? "Reading graphics caches" : stage == 2 ? "Preparing shaders"
+                : stage == 3 ? "Building graphics pipelines" : stage == 4 ? "Saving the graphics cache"
+                : "Starting graphics";
+            boolean countable = stage == 3 && progress[1] > 0;
+            preparationProgress.setIndeterminate(!countable);
+            if (countable) {
+                message += " · " + progress[0] + " / " + progress[1];
+                preparationProgress.setProgress((int)Math.min(1000,progress[0] * 1000 / progress[1]));
+            }
             if (!message.contentEquals(preparationLabel.getText())) preparationLabel.setText(message);
         }
         return preparing;
@@ -131,6 +143,9 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         };
     private long lastReportCapture;private boolean lastReportedMenu;
     private long lastPerformanceRecord;
+    private long overlayGeneration;
+    private int cpuHintTarget;
+    private final java.util.concurrent.atomic.AtomicBoolean samplePending = new java.util.concurrent.atomic.AtomicBoolean();
     private volatile String cachedSession;
     private volatile long sessionLookupTime;
     private final java.util.concurrent.ExecutorService telemetry=java.util.concurrent.Executors.newSingleThreadExecutor(r->new Thread(r,"MobileTelemetry"));
@@ -141,29 +156,25 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         if(!nativeReady){nativeReady=nativeBridgeReady();if(!nativeReady){uiHandler.postDelayed(this,200);return;}nativeHostMenu(closing||gameMenu!=null&&gameMenu.isShowing());reloadControls();refreshMobilePreferences();captureReportState();}
         android.content.SharedPreferences preferences = getSharedPreferences("mobile", 0);
         boolean overlay = fpsLabel != null && preferences.getBoolean("show_fps", false);
-        boolean diagnostic = getIntent().getBooleanExtra("debug_report", false);
+        boolean diagnostic = sessionLoggingEnabled() && getIntent().getBooleanExtra("debug_report", false);
         long now = android.os.SystemClock.elapsedRealtime(), frames = nativeFrameCount();
         if (fpsTime != 0 && now > fpsTime) {
             float fps = Math.max(0, frames - fpsFrames) * 1000f / (now - fpsTime);
-            if (overlay) updateFpsLabel(preferences, fps);
-            recordPerformance(fps);
+            samplePerformance(fps, overlay, diagnostic);
         }
         if (!overlay && fpsLabel != null && fpsLabel.getVisibility() != View.GONE) fpsLabel.setVisibility(View.GONE);
         if(diagnostic&&(now-lastReportCapture>=5000||lastReportedMenu!=nativeMenuContext())){captureReportState();lastReportCapture=now;}
         fpsTime=now;fpsFrames=frames;refreshFrameRateHint();
         uiHandler.postDelayed(this, preparing ? 250 : overlay || diagnostic ? 1000 : 5000);
     }};
-    private void updateFpsLabel(android.content.SharedPreferences preferences, float fps) {
+    private void updateFpsLabel(android.content.SharedPreferences preferences, float fps, long[] sample, int thermal) {
         boolean frameTime = preferences.getBoolean("show_frame_time", false);
         boolean memory = preferences.getBoolean("show_memory_heat", false);
         String text = String.format(Locale.ROOT, "%.1f FPS", fps);
-        long[] sample = frameTime || memory ? nativePerformance() : null;
         if (frameTime && sample != null && sample.length > 0 && sample[0] > 0) {
             text += String.format(Locale.ROOT, " · %.1f ms", sample[0] / 1000.0);
         }
         if (memory) {
-            android.os.PowerManager power = getSystemService(android.os.PowerManager.class);
-            int thermal = power == null ? -1 : power.getCurrentThermalStatus();
             text += "\n" + (sample != null && sample.length > 1 ? sample[1] + " MB RAM · " : "")
                 + ReportFiles.thermalLabel(thermal);
         }
@@ -175,6 +186,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     private android.app.AlertDialog gameMenu;
     private android.os.ParcelFileDescriptor gameIso;
     private String launchError;
+    private File comparisonState;
     private String cpuBaseline="armv8.2-a";private boolean validationBuild;
     private android.hardware.input.InputManager inputManager;
     private final android.hardware.input.InputManager.InputDeviceListener controllers=new android.hardware.input.InputManager.InputDeviceListener(){
@@ -191,10 +203,22 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         UiPreferences.load(this);
         File external = getExternalFilesDir(null);
         File base = external != null ? external : getFilesDir();
-        try{ContentFiles.recoverForLaunch(this);}catch(Exception error){launchError="Content recovery could not finish: "+error.getMessage();}
+        String trial=getIntent()==null?null:getIntent().getStringExtra("comparison_id");
+        if (trial!=null) {
+            try {
+                File parent=new File(base,"mobile-comparisons").getCanonicalFile();
+                File wanted=new File(parent,trial);
+                if (!trial.matches("[a-f0-9]{32}") || !wanted.equals(wanted.getCanonicalFile())
+                    || !new File(wanted,"config/pinyon_shift.toml").isFile())
+                    throw new IOException("Prepare a private benchmark state before starting the route.");
+                comparisonState=wanted;
+            } catch (IOException | SecurityException error) { launchError=error.getMessage(); }
+        } else {
+            try{ContentFiles.recoverForLaunch(this);}catch(Exception error){launchError="Content recovery could not finish: "+error.getMessage();}
+        }
         setDefaultEnvironment("HOME", getFilesDir().getAbsolutePath());
         setDefaultEnvironment("PINYON_SHIFT_STATE_ROOT",
-                new File(base, "state").getAbsolutePath());
+                (comparisonState==null?new File(base,"state"):comparisonState).getAbsolutePath());
         try {
             setDefaultEnvironment("PINYON_SHIFT_GAME_ROOT", GameFiles.root(this).getAbsolutePath());
         } catch (IOException | SecurityException error) {
@@ -234,7 +258,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         if (new File(base, "state/cache/rally_adapter/rally-stage.toml").isFile()) {
             setDefaultEnvironment("PINYON_SHIFT_RALLY_PREPARED", "1");
         }
-        if(launchError==null)applyPendingMods(base);
+        if(launchError==null && comparisonState==null)applyPendingMods(base);
         // The build's provenance, packaged as an asset, for logs and crash
         // reports (the game reads it beside the executable elsewhere).
         File manifest = new File(getFilesDir(), "pinyon_shift_build.json");
@@ -254,6 +278,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         if (extras != null) {
             for (String key : extras.keySet()) {
                 if (key.startsWith("env.")) {
+                    if(comparisonState!=null && key.equals("env.PINYON_SHIFT_STATE_ROOT"))continue;
                     Object value = extras.get(key);
                     if (value != null) {
                         setEnvironment(key.substring(4), value.toString());
@@ -261,9 +286,12 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
                 }
             }
         }
+        setEnvironment("PINYON_SHIFT_ANDROID_NO_SESSION_LOGS",sessionLoggingEnabled()?"0":"1");
         recordDisplayEnvironment();
-        if(!TouchLayout.file(this).isFile())try{TouchLayout initial=new TouchLayout();initial.modernDefaults(this);initial.save(this);}catch(IOException error){Log.w(TAG,"Could not save the initial touch layout",error);}
-        GameSession.record(this,true);
+        if (trial==null) {
+            if(!TouchLayout.file(this).isFile())try{TouchLayout initial=new TouchLayout();initial.modernDefaults(this);initial.save(this);}catch(IOException error){Log.w(TAG,"Could not save the initial touch layout",error);}
+            GameSession.record(this,true,sessionLoggingEnabled());
+        }
         super.onCreate(savedInstanceState);
         // A race played on a controller touches nothing, and a screen that
         // times out sends the game to the background, where it pauses (a
@@ -378,7 +406,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         // Set it first so the intent's args or a --pinyon_shift_sync_folder=
         // line in the arguments file override it (an empty value turns sync
         // off); scripted routes turn it off in the game.
-        if (getSharedPreferences("mobile", 0).getBoolean("save_folder_sync", false)) {
+        if (comparisonState==null && getSharedPreferences("mobile", 0).getBoolean("save_folder_sync", false)) {
             File sync = syncFolder();
             if (sync != null) {
                 arguments.add("--pinyon_shift_sync_folder=" + sync.getAbsolutePath());
@@ -388,7 +416,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         if (given != null) Collections.addAll(arguments, given);
         File external = getExternalFilesDir(null);
         File file = new File(external != null ? external : getFilesDir(), SetupActivity.ARGUMENTS_FILE);
-        if (file.isFile()) {
+        if (comparisonState==null && file.isFile()) {
             try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
                 for (String line; (line = reader.readLine()) != null; ) {
                     if (line.trim().startsWith("--")) arguments.add(line.trim());
@@ -399,28 +427,43 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         }
         String verified=getIntent().getStringExtra("verified_driver");
         if(verified!=null)arguments.add("--android_gpu_driver="+verified);
-        if(getIntent().getBooleanExtra("debug_report",false)){
+        if(!sessionLoggingEnabled()){
+            arguments.add("--log_level=off");
+            arguments.add("--perf_log_csv=");
+            arguments.add("--perf_thread_cpu=");
+            arguments.add("--perf_critical_path_trace=false");
+            arguments.add("--pinyon_shift_capture_performance=false");
+            arguments.add("--fh1_native_gpu_profile=false");
+            arguments.add("--android_audio_bank_diagnostics=false");
+        }else if(comparisonState!=null){
+            arguments.add("--pinyon_shift_capture_performance=true");
+            arguments.add("--android_audio_bank_diagnostics=true");
+            arguments.add("--perf_log_max_mb=64");
+            arguments.add("--pinyon_shift_sync_folder=");
+            arguments.add("--pinyon_shift_skip_opening_movies=true");
+            arguments.add("--pinyon_shift_repair_car_cards=false");
+        }else if(getIntent().getBooleanExtra("debug_report",false)){
             arguments.add("--pinyon_shift_capture_performance=true");
             arguments.add("--fh1_native_gpu_profile="+getSharedPreferences("mobile",0).getBoolean("detailed_gpu",false));
             arguments.add("--perf_log_max_mb="+(getSharedPreferences("mobile",0).getBoolean("extended_capture",false)?64:16));
             arguments.add("--perf_thread_cpu=Guest;GPU;Vulkan;XMA Decoder;Audio");
             arguments.add("--android_audio_bank_diagnostics=true");
         }else{arguments.add("--pinyon_shift_capture_performance=false");arguments.add("--fh1_native_gpu_profile=false");}
-        arguments.add("--android_gpu_turbo="+MobileConfig.get(this,"android_gpu_turbo","false"));
-        arguments.add("--android_gpu_driver_no_preamble="+MobileConfig.get(this,"android_gpu_driver_no_preamble","true"));
-        arguments.add("--android_gpu_driver_env="+MobileConfig.get(this,"android_gpu_driver_env",""));
+        java.util.Map<String,String> settings=launchSettings();
+        arguments.add("--android_gpu_turbo="+settings.getOrDefault("android_gpu_turbo","false"));
+        arguments.add("--android_gpu_driver_no_preamble="+settings.getOrDefault("android_gpu_driver_no_preamble","true"));
+        arguments.add("--android_gpu_driver_env="+settings.getOrDefault("android_gpu_driver_env",""));
         if(validationBuild){arguments.add("--vulkan_validation_enabled=true");arguments.add("--vulkan_validation_sync=true");}
         android.app.ActivityManager manager=getSystemService(android.app.ActivityManager.class);
         android.app.ActivityManager.MemoryInfo memory=new android.app.ActivityManager.MemoryInfo();
         if(manager!=null)manager.getMemoryInfo(memory);
         boolean lowRam=manager!=null&&manager.isLowRamDevice();
-        java.util.Map<String,String> settings=MobileConfig.read(this);
         int pool=PerformancePolicy.configured(settings.getOrDefault("vulkan_texture_memory_prealloc_mb","-1"),PerformancePolicy.texturePoolMb(memory.totalMem,lowRam),0,512);
         int workers=PerformancePolicy.configured(settings.getOrDefault("vulkan_pipeline_creation_threads","-1"),PerformancePolicy.shaderWorkers(memory.totalMem,lowRam,Runtime.getRuntime().availableProcessors()),0,16);
         arguments.add("--vulkan_texture_memory_prealloc_mb="+pool);
         arguments.add("--vulkan_pipeline_creation_threads="+workers);
         arguments.add("--vulkan_aot_prewarm_threads="+PerformancePolicy.configured(settings.getOrDefault("vulkan_aot_prewarm_threads","-1"),PerformancePolicy.shaderWorkers(memory.totalMem,lowRam,Runtime.getRuntime().availableProcessors()),1,16));
-        if (getSharedPreferences("mobile", 0).getBoolean("audio_compatibility", false)) {
+        if (comparisonState==null && getSharedPreferences("mobile", 0).getBoolean("audio_compatibility", false)) {
             arguments.add("--pinyon_shift_native_audio_output=false");
             arguments.add("--pinyon_shift_fmod_stereo=false");
             arguments.add("--pinyon_shift_fmod_native_parameq=false");
@@ -431,14 +474,24 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         arguments.add("--vulkan_aot_pipelines=true");
         arguments.add("--vulkan_pipeline_cache_persist=true");
         arguments.add("--vulkan_pipeline_prewarm_background=false");
-        recordLaunchSettings(arguments);
+        if(sessionLoggingEnabled())recordLaunchSettings(arguments);
         return arguments.toArray(new String[0]);
+    }
+    boolean sessionLoggingEnabled(){
+        return getIntent()==null || !getIntent().getBooleanExtra(NO_SESSION_LOGS,false);
+    }
+    private java.util.Map<String,String> launchSettings(){
+        return comparisonState==null?MobileConfig.read(this)
+            :MobileConfig.readFile(new File(comparisonState,"config/pinyon_shift.toml"));
+    }
+    private File reportFile(String name) {
+        File state=comparisonState==null?new File(MobileConfig.base(this),"state"):comparisonState;
+        return new File(state,"logs/"+name);
     }
 
     private boolean hasController(){
-        for(int id:android.view.InputDevice.getDeviceIds()){android.view.InputDevice device=android.view.InputDevice.getDevice(id);
-            if(device!=null&&!device.isVirtual()&&((device.getSources()&android.view.InputDevice.SOURCE_GAMEPAD)==android.view.InputDevice.SOURCE_GAMEPAD
-                ||(device.getSources()&android.view.InputDevice.SOURCE_JOYSTICK)==android.view.InputDevice.SOURCE_JOYSTICK))return true;}
+        for(int id:android.view.InputDevice.getDeviceIds())
+            if(ControllerPrompts.isGamepad(android.view.InputDevice.getDevice(id)))return true;
         return false;
     }
     private void updateController(){if(bridgeLoaded)nativeController(hasController());}
@@ -447,7 +500,21 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         android.widget.RelativeLayout.LayoutParams params=new android.widget.RelativeLayout.LayoutParams(FestivalUi.dp(this,48),FestivalUi.dp(this,48));params.addRule(android.widget.RelativeLayout.ALIGN_PARENT_RIGHT);params.addRule(android.widget.RelativeLayout.ALIGN_PARENT_TOP);params.setMargins(0,FestivalUi.dp(this,8),FestivalUi.dp(this,12),0);mLayout.addView(menu,params);menu.setOnClickListener(v->showGameMenu());menu.setOnApplyWindowInsetsListener((view,insets)->{android.graphics.Rect safe=PlatformCompat.safeInsets(insets);android.widget.RelativeLayout.LayoutParams p=(android.widget.RelativeLayout.LayoutParams)view.getLayoutParams();p.topMargin=FestivalUi.dp(this,8)+safe.top;p.rightMargin=FestivalUi.dp(this,12)+safe.right;view.setLayoutParams(p);return insets;});
         fpsLabel=FestivalUi.text(this,"— FPS",13,android.graphics.Color.WHITE);fpsLabel.setVisibility(android.view.View.GONE);android.widget.RelativeLayout.LayoutParams fps=new android.widget.RelativeLayout.LayoutParams(-2,-2);fps.addRule(android.widget.RelativeLayout.ALIGN_PARENT_LEFT);fps.setMargins(FestivalUi.dp(this,12),FestivalUi.dp(this,8),0,0);mLayout.addView(fpsLabel,fps);
         phoneVibrator=PlatformCompat.vibrator(this);
-        preparationLabel=FestivalUi.text(this,"",13,android.graphics.Color.WHITE);preparationLabel.setBackground(FestivalUi.surface(this,0xbb101419,8));preparationLabel.setPadding(FestivalUi.dp(this,8),FestivalUi.dp(this,4),FestivalUi.dp(this,8),FestivalUi.dp(this,4));preparationLabel.setVisibility(View.GONE);android.widget.RelativeLayout.LayoutParams prep=new android.widget.RelativeLayout.LayoutParams(-2,-2);prep.addRule(android.widget.RelativeLayout.CENTER_HORIZONTAL);prep.setMargins(0,FestivalUi.dp(this,40),0,0);mLayout.addView(preparationLabel,prep);
+        preparationPanel=FestivalUi.column(this);
+        preparationPanel.setBackground(FestivalUi.surface(this,FestivalUi.PANEL,8));
+        preparationPanel.setPadding(FestivalUi.dp(this,12),FestivalUi.dp(this,8),FestivalUi.dp(this,12),FestivalUi.dp(this,4));
+        preparationLabel=FestivalUi.text(this,"",13,FestivalUi.TEXT);
+        preparationLabel.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        preparationLabel.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        preparationPanel.addView(preparationLabel);
+        preparationProgress=new android.widget.ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);
+        preparationProgress.setMax(1000);
+        preparationPanel.addView(preparationProgress,new android.widget.LinearLayout.LayoutParams(-1,-2));
+        preparationPanel.setVisibility(View.GONE);
+        android.widget.RelativeLayout.LayoutParams prep=new android.widget.RelativeLayout.LayoutParams(FestivalUi.dp(this,224),-2);
+        prep.addRule(android.widget.RelativeLayout.CENTER_HORIZONTAL);
+        prep.topMargin=FestivalUi.dp(this,32);
+        mLayout.addView(preparationPanel,prep);
     }
     private MobileSettings.Runtime settingsRuntime(){return new MobileSettings.Runtime(){
         public void changed(String key,String value){if(!nativeReady)return;nativeApplySetting(key,value);if(key.equals("pinyon_shift_fh1_render_fps_limit")&&driveAssist!=null)driveAssist.applyTarget();refreshFrameRateHint();captureReportState();}
@@ -459,6 +526,17 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         if(driveAssist==null)driveAssist=new MobileDriveAssist(this,value->nativeTilt(value,driveAssist!=null&&driveAssist.tiltEnabled()),target->{nativeApplySetting("pinyon_shift_fh1_render_fps_limit",Integer.toString(target));refreshFrameRateHint();});
         if(gameResumed)driveAssist.resume();else driveAssist.reload();
         if(!getSharedPreferences("mobile",0).getBoolean("phone_rumble",true))stopPhoneRumble();
+        refreshCpuHintTarget();
+    }
+    private void refreshCpuHintTarget() {
+        int target = nativeReady && gameResumed && !closing && (gameMenu==null || !gameMenu.isShowing())
+            && (comparisonState!=null?getIntent().getBooleanExtra("comparison_cpu_hints",false)
+                :getSharedPreferences("mobile",0).getBoolean("cpu_hints",false))
+            ? Math.round(PerformancePolicy.presentationTarget(nativeSettingValue("pinyon_shift_fh1_render_fps_limit"),"0")) : 0;
+        if (target!=cpuHintTarget) {
+            cpuHintTarget=target;
+            nativeCpuHintTarget(target);
+        }
     }
     void calibrateTilt(){if(driveAssist==null||!driveAssist.calibrate())FestivalUi.explain(this,"Tilt calibration","Enable phone tilt while playing, then hold the phone in your normal driving position.");else toast("Tilt centre calibrated.");}
     int coarseShadingSupport(){return nativeReady?nativeCoarseShadingSupport():-1;}
@@ -466,13 +544,13 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     void openNativeAchievements(){resumeDriving();if(nativeReady)nativeAction("achievements");}
     void openNativeSettings(){resumeDriving();if(nativeReady)nativeOpenSettings();}
     private void showGameMenu(){
-        if(closing)return;if(!nativeReady){toast("The game is still starting.");return;}if(isFinishing()||gameMenu!=null&&gameMenu.isShowing())return;
-        ActionBreadcrumbs.record(this,"Game menu","opened");
+        if(closing||comparisonState!=null)return;if(!nativeReady){toast("The game is still starting.");return;}if(isFinishing()||gameMenu!=null&&gameMenu.isShowing())return;
+        if(sessionLoggingEnabled())ActionBreadcrumbs.record(this,"Game menu","opened");
         nativeHostMenu(true);stopPhoneRumble();drawerPages.clear();drawer=new android.widget.FrameLayout(this);
         gameMenu=new android.app.AlertDialog.Builder(this).setView(drawer).create();gameMenu.setCanceledOnTouchOutside(true);
         gameMenu.setOnKeyListener((d,key,event)->{if(ControllerPrompts.handle(this,gameMenu.getWindow(),key,event,this::backPanel))return true;if(key!=android.view.KeyEvent.KEYCODE_BACK)return false;if(event.getAction()==android.view.KeyEvent.ACTION_UP)backPanel();return true;});
-        gameMenu.setOnDismissListener(d->{drawerPages.clear();if(bridgeLoaded)nativeHostMenu(closing||!gameResumed);FestivalUi.immersive(this);});
-        gameMenu.setOnShowListener(d->{android.view.Window w=gameMenu.getWindow();if(w!=null){w.setBackgroundDrawableResource(android.R.color.transparent);if(android.os.Build.VERSION.SDK_INT>=31)w.setBackgroundBlurRadius(FestivalUi.dp(this,18));w.setGravity(android.view.Gravity.RIGHT|android.view.Gravity.CENTER_VERTICAL);w.setDimAmount(.35f);resizeGameMenu();}FestivalUi.slideIn(drawer);});
+        gameMenu.setOnDismissListener(d->{drawerPages.clear();if(bridgeLoaded)nativeHostMenu(closing||!gameResumed);refreshCpuHintTarget();FestivalUi.immersive(this);});
+        gameMenu.setOnShowListener(d->{android.view.Window w=gameMenu.getWindow();if(w!=null){FestivalUi.styleOverlay(this,w,.35f);w.setGravity(android.view.Gravity.RIGHT|android.view.Gravity.CENTER_VERTICAL);resizeGameMenu();}refreshCpuHintTarget();FestivalUi.slideIn(drawer);});
         MobileSettings.Runtime runtime=settingsRuntime();
         Runnable editor=()->{resumeDriving();startActivity(new Intent(this,TouchEditorActivity.class).putExtra("return_to_game",true));};
         GameMenuView body=new GameMenuView(this,label->{switch(label){
@@ -480,17 +558,30 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
           case "Settings":SettingsHub.show(this,runtime,editor,()->{});break;
           case "Touch controls":SettingsHub.page(this,"Controls",runtime,editor);break;
           case "Controller":SettingsHub.page(this,"Controller",runtime,editor);break;
-          case "Diagnostics":{android.widget.LinearLayout details=FestivalUi.column(this);FestivalUi.action(this,details,"Capture a problem",this::markDiagnosticIssue);ProblemReports.action(this,details,"Report a problem");showPanel("Diagnostics",details);break;}
-          case "Achievements":openNativeAchievements();break;
-          case "Profile":ProfilePage.show(this,null,()->FestivalUi.explain(this,"Save backups","Quit to the launcher to export, import or restore saves."));break;
-          case "More":{android.widget.LinearLayout more=FestivalUi.column(this);FestivalUi.action(this,more,"Capture a problem",this::markDiagnosticIssue);FestivalUi.action(this,more,"Trainer · separate profile",()->TrainerPage.show(this,runtime));ProblemReports.action(this,more,"Report a problem");showPanel("More tools",more);break;}
+          case "More":{
+              android.widget.LinearLayout more=FestivalUi.column(this);
+              FestivalUi.action(this,more,"Profile",()->ProfilePage.show(this,null,()->FestivalUi.explain(this,"Save backups","Quit to the launcher to export, import or restore saves.")));
+              FestivalUi.action(this,more,"Achievements",()->AchievementsPage.show(this,nativeAchievements()));
+              FestivalUi.action(this,more,"Diagnostics",()->{
+                  android.widget.LinearLayout details=FestivalUi.column(this);
+                  if(sessionLoggingEnabled())FestivalUi.action(this,details,"Capture a problem",this::markDiagnosticIssue);
+                  else details.addView(FestivalUi.text(this,
+                      "Session logging is off. Use Play with diagnostics from the launcher to record a new session.",
+                      14,FestivalUi.MUTED));
+                  ProblemReports.action(this,details,sessionLoggingEnabled()?"Report a problem":"Share existing reports");
+                  showPanel("Diagnostics",details);
+              });
+              FestivalUi.action(this,more,"Trainer · separate profile",()->TrainerPage.show(this,runtime));
+              showPanel("More tools",more);
+              break;
+          }
           case "Quit to launcher":new android.app.AlertDialog.Builder(this).setTitle("Quit the game?").setMessage("Wait for the game's save indicator to finish before quitting.").setNegativeButton("Keep playing",null).setPositiveButton("Quit",(d,w)->requestQuit()).show();break;
         }});
         showPanel("Game menu",body);gameMenu.show();
     }
     @Override public void showPanel(String title,android.view.View body){if(drawer!=null)FestivalUi.rememberTree(drawer);drawerPages.push(new DrawerPage(title,body));renderDrawer();}
     @Override public void replacePanel(String title,android.view.View body){if(!drawerPages.isEmpty())drawerPages.pop();showPanel(title,body);}
-    private void renderDrawer(){if(drawer==null||drawerPages.isEmpty())return;FestivalUi.rememberTree(drawer);drawer.removeAllViews();DrawerPage page=drawerPages.peek();android.view.View panel=page.body instanceof GameMenuView?page.body:FestivalUi.panel(this,page.title,page.body,this::backPanel);if(panel.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)panel.getParent()).removeView(panel);drawer.addView(panel,new android.widget.FrameLayout.LayoutParams(-1,page.body instanceof GameMenuView?-2:-1));resizeGameMenu();FestivalUi.refreshTree(panel);FestivalUi.slideIn(panel);}
+    private void renderDrawer(){if(drawer==null||drawerPages.isEmpty())return;FestivalUi.rememberTree(drawer);drawer.removeAllViews();DrawerPage page=drawerPages.peek();android.view.View panel=page.body instanceof GameMenuView?page.body:FestivalUi.panel(this,page.title,page.body,this::backPanel);if(panel.getParent() instanceof android.view.ViewGroup)((android.view.ViewGroup)panel.getParent()).removeView(panel);drawer.addView(panel,new android.widget.FrameLayout.LayoutParams(-1,page.body instanceof GameMenuView?-2:-1));resizeGameMenu();if(page.body instanceof GameMenuView)page.body.post(()->FestivalUi.restorePage(page.body));FestivalUi.refreshTree(panel);FestivalUi.slideIn(panel);}
     private void resizeGameMenu(){if(gameMenu==null||gameMenu.getWindow()==null||drawerPages.isEmpty())return;boolean home=drawerPages.peek().body instanceof GameMenuView;boolean settings=Boolean.TRUE.equals(drawerPages.peek().body.getTag(FestivalUi.FULL_PAGE));int screen=getResources().getDisplayMetrics().widthPixels;gameMenu.getWindow().setLayout(settings?(int)(screen*.96f):Math.min(FestivalUi.dp(this,500),screen-FestivalUi.dp(this,24)),home?-2:-1);}
     @Override public void backPanel(){if(drawerPages.size()>1){drawerPages.pop();renderDrawer();}else resumeDriving();}
     @Override public void onBackPressed(){if(gameMenu!=null&&gameMenu.isShowing())backPanel();else showGameMenu();}
@@ -510,6 +601,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     }
     void refreshFrameRateHint() {
         if (!nativeReady || !gameResumed || mSurface == null) return;
+        refreshCpuHintTarget();
         android.view.Surface surface = mSurface.getHolder().getSurface();
         if (!surface.isValid()) return;
         float target = getSharedPreferences("mobile", 0).getBoolean("match_refresh", true)
@@ -522,21 +614,32 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         if (surface == hintedSurface && target == lastFrameRateHint && now < nextFrameRateRequest) return;
         nextFrameRateRequest = now + 1000;
         if (PlatformCompat.frameRate(surface, target)) {
+            float cadence=display==null?0:PerformancePolicy.seamlessCadence(target,refresh,
+                display.getMode().getAlternativeRefreshRates());
+            WindowManager.LayoutParams attrs=getWindow().getAttributes();
+            if (attrs.preferredRefreshRate!=cadence) {
+                attrs.preferredRefreshRate=cadence;
+                getWindow().setAttributes(attrs);
+            }
             hintedSurface = surface;
             lastFrameRateHint = target;
             lastDisplayRefresh = refresh;
         }
     }
-    private void recordLaunchSettings(List<String> args){try{org.json.JSONObject data=new org.json.JSONObject();data.put("captured_ms",System.currentTimeMillis());data.put("source_commit",buildCommit);data.put("settings",new org.json.JSONObject(MobileConfig.read(this)));data.put("arguments",new org.json.JSONArray(args));
+    private void recordLaunchSettings(List<String> args){try{org.json.JSONObject data=new org.json.JSONObject();data.put("captured_ms",System.currentTimeMillis());data.put("source_commit",buildCommit);data.put("settings",new org.json.JSONObject(launchSettings()));data.put("arguments",new org.json.JSONArray(args));
         android.content.SharedPreferences preferences = getSharedPreferences("mobile", 0);
         data.put("game_source", !preferences.getString("iso_uri", "").isEmpty() ? "iso" : GameFiles.linked(this) ? "linked-folder" : "copied-folder");
-        Display display = mSurface == null ? null : mSurface.getDisplay();
-        if (display == null) display = getDisplay();
-        if (display != null) data.put("display_hz", display.getRefreshRate());
+        data.put("cpu_hints_requested",comparisonState!=null?getIntent().getBooleanExtra("comparison_cpu_hints",false):preferences.getBoolean("cpu_hints",false));
+        try {
+            Display display=mSurface==null?getDisplay():mSurface.getDisplay();
+            if(display!=null)data.put("display_hz",display.getRefreshRate());
+        } catch (UnsupportedOperationException | IllegalStateException ignored) {
+            // The launch snapshot is still useful if the display has not attached.
+        }
         writeReportJson("android-launch-settings.json",data);}catch(Exception e){Log.w(TAG,"Could not record launch settings",e);}}
     void captureReportState(){captureReportState(null);}
     void captureReportState(Runnable afterCapture){
-        if(!nativeReady){if(afterCapture!=null)afterCapture.run();return;}
+        if(!sessionLoggingEnabled()||!nativeReady){if(afterCapture!=null)afterCapture.run();return;}
         try{org.json.JSONObject live=new org.json.JSONObject();for(MobileSettings.Option option:MobileSettings.OPTIONS){String value=nativeSettingValue(option.key);if(value!=null)live.put(option.key,value);}
             for(String key:new String[]{"fh1_render_scale_percent","present_letterbox","pinyon_shift_hor_plus","pinyon_shift_fov_scale","fh1_msaa_single_sample","fh1_msaa_2x","pinyon_shift_cheats","android_gpu_turbo","android_gpu_driver_no_preamble","android_gpu_driver_env","vulkan_fh1_native_executor","vulkan_dynamic_rendering","pinyon_shift_save_backups"}){String value=nativeSettingValue(key);if(value!=null)live.put(key,value);}
             org.json.JSONObject data=new org.json.JSONObject();data.put("captured_ms",System.currentTimeMillis());data.put("source_commit",buildCommit);data.put("live",live);data.put("surface_frame_rate_hint",lastFrameRateHint);lastReportedMenu=nativeMenuContext();data.put("menu_context",lastReportedMenu);data.put("frame",nativeFrameCount());data.put("snapshot_interval_ms",getIntent().getBooleanExtra("debug_report",false)?5000:0);data.put("shader_preparation",new org.json.JSONArray(nativePreparation()));data.put("paused",!gameResumed);
@@ -544,7 +647,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             telemetry.execute(()->{
                 try{
                     data.put("session",currentSession());
-                    data.put("profile",LocalProfile.configuredProfile(MobileConfig.read(this)));
+                    data.put("profile",LocalProfile.configuredProfile(launchSettings()));
                     writeReportJson("android-live-settings.json",data);
                 }catch(Exception error){Log.w(TAG,"Could not write live settings snapshot",error);}
                 finally{if(afterCapture!=null)afterCapture.run();}
@@ -560,6 +663,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         "xma_frames", "xma_no_space", "xma_no_progress", "xma_recoveries", "audio_latency_us", "page_recoveries"
     };
     private void markDiagnosticIssue() {
+        if(!sessionLoggingEnabled())return;
         long timestamp = System.currentTimeMillis();
         long frame = nativeFrameCount();
         long[] history = nativeFrameHistory();
@@ -672,22 +776,61 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             if (!isDestroyed() && latestIncident == incident) toast(message);
         });
     }
-    private String currentSession(){long now=android.os.SystemClock.elapsedRealtime();if(cachedSession!=null)return cachedSession;if(now-sessionLookupTime<5000)return "starting-p"+android.os.Process.myPid();sessionLookupTime=now;File[] files=new File(MobileConfig.base(this),"state/logs").listFiles(f->f.getName().endsWith("-p"+android.os.Process.myPid()+".jsonl"));if(files==null||files.length==0)return "starting-p"+android.os.Process.myPid();Arrays.sort(files,(a,b)->Long.compare(b.lastModified(),a.lastModified()));cachedSession=files[0].getName().replaceFirst("\\.jsonl$","");return cachedSession;}
-    private void writeReportJson(String name,org.json.JSONObject data)throws Exception{File file=new File(MobileConfig.base(this),"state/logs/"+name);Files.createDirectories(file.getParentFile().toPath());java.nio.file.Path stage=Files.createTempFile(file.getParentFile().toPath(),"snapshot-",".part");try{Files.write(stage,data.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));Files.move(stage,file.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING,java.nio.file.StandardCopyOption.ATOMIC_MOVE);}finally{Files.deleteIfExists(stage);}}
-    private void recordPerformance(float fps){
-        long now=android.os.SystemClock.elapsedRealtime();boolean diagnostic=getIntent().getBooleanExtra("debug_report",false);if(now-lastPerformanceRecord<(diagnostic?1000:5000))return;lastPerformanceRecord=now;
-        android.os.PowerManager power=getSystemService(android.os.PowerManager.class);final int thermal=power==null?-1:power.getCurrentThermalStatus();final boolean menu=gameMenu!=null&&gameMenu.isShowing();
-        final long[] sample=nativePerformance();
-        try{telemetry.execute(()->{try{org.json.JSONObject event=new org.json.JSONObject();event.put("time_ms",System.currentTimeMillis());event.put("session",currentSession());event.put("source_commit",buildCommit);event.put("fps",fps);event.put("thermal_severity",thermal);event.put("thermal_status",ReportFiles.thermalLabel(thermal));event.put("host_menu",menu);event.put("diagnostic",diagnostic);if(sample!=null){String[] fields={"sample_frame_time_us","resident_mb","device_usage_mb","device_budget_mb","sample_process_cpu_ns","sample_guest_gpu_ns","sample_guest_gpu_count","texture_cache_mb"};for(int i=0;i<Math.min(fields.length,sample.length);i++)event.put(fields[i],sample[i]);}File file=new File(MobileConfig.base(this),"state/logs/android-performance.jsonl");if(file.length()>262144)Files.move(file.toPath(),new File(file.getParentFile(),"android-performance-previous.jsonl").toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING);try(OutputStream out=new FileOutputStream(file,true)){out.write((event.toString()+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));}}catch(Exception error){Log.w(TAG,"Could not record performance sample",error);}});}catch(java.util.concurrent.RejectedExecutionException ignored){}
+    private String currentSession(){long now=android.os.SystemClock.elapsedRealtime();if(cachedSession!=null)return cachedSession;if(now-sessionLookupTime<5000)return "starting-p"+android.os.Process.myPid();sessionLookupTime=now;File[] files=reportFile("").listFiles(f->f.getName().endsWith("-p"+android.os.Process.myPid()+".jsonl"));if(files==null||files.length==0)return "starting-p"+android.os.Process.myPid();Arrays.sort(files,(a,b)->Long.compare(b.lastModified(),a.lastModified()));cachedSession=files[0].getName().replaceFirst("\\.jsonl$","");return cachedSession;}
+    private void writeReportJson(String name,org.json.JSONObject data)throws Exception{File file=reportFile(name);Files.createDirectories(file.getParentFile().toPath());java.nio.file.Path stage=Files.createTempFile(file.getParentFile().toPath(),"snapshot-",".part");try{Files.write(stage,data.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));Files.move(stage,file.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING,java.nio.file.StandardCopyOption.ATOMIC_MOVE);}finally{Files.deleteIfExists(stage);}}
+    private void samplePerformance(float fps,boolean overlay,boolean diagnostic){
+        long now=android.os.SystemClock.elapsedRealtime();
+        boolean record=sessionLoggingEnabled() && now-lastPerformanceRecord>=(diagnostic?1000:5000);
+        android.content.SharedPreferences preferences=getSharedPreferences("mobile",0);
+        boolean detailedOverlay=overlay && (preferences.getBoolean("show_frame_time",false)
+            || preferences.getBoolean("show_memory_heat",false));
+        if (overlay && !detailedOverlay) updateFpsLabel(preferences,fps,null,-1);
+        if ((!record && !detailedOverlay) || !samplePending.compareAndSet(false,true)) return;
+        if (record) lastPerformanceRecord=now;
+        boolean menu=gameMenu!=null&&gameMenu.isShowing();
+        long generation=overlayGeneration, timestamp=System.currentTimeMillis();
+        try {
+            telemetry.execute(()->{
+                try {
+                    long[] sample=nativePerformance();
+                    android.os.PowerManager manager=getSystemService(android.os.PowerManager.class);
+                    int thermal=manager==null?-1:manager.getCurrentThermalStatus();
+                    if (detailedOverlay) uiHandler.post(()->{
+                        if(gameResumed && generation==overlayGeneration && !isFinishing()
+                            && preferences.getBoolean("show_fps",false))
+                            updateFpsLabel(preferences,fps,sample,thermal);
+                    });
+                    if (record) writePerformanceSample(fps,diagnostic,menu,timestamp,thermal,sample);
+                } catch (Exception error) { Log.w(TAG,"Could not sample performance",error); }
+                finally { samplePending.set(false); }
+            });
+        } catch(java.util.concurrent.RejectedExecutionException ignored) { samplePending.set(false); }
+    }
+    private void writePerformanceSample(float fps,boolean diagnostic,boolean menu,long timestamp,int thermal,long[] sample)throws Exception {
+        org.json.JSONObject event=new org.json.JSONObject();
+        event.put("time_ms",timestamp).put("session",currentSession()).put("source_commit",buildCommit).put("fps",fps)
+            .put("thermal_severity",thermal).put("thermal_status",ReportFiles.thermalLabel(thermal))
+            .put("host_menu",menu).put("diagnostic",diagnostic);
+        if(sample!=null){
+            String[] fields={"sample_frame_time_us","resident_mb","device_usage_mb","device_budget_mb","sample_process_cpu_ns",
+                "sample_guest_gpu_ns","sample_guest_gpu_count","texture_cache_mb"};
+            for(int i=0;i<Math.min(fields.length,sample.length);i++)event.put(fields[i],sample[i]);
+        }
+        File file=reportFile("android-performance.jsonl");
+        if(file.length()>262144)
+            Files.move(file.toPath(),reportFile("android-performance-previous.jsonl").toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        try(OutputStream out=new FileOutputStream(file,true)){
+            out.write((event.toString()+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
     }
     @Override public boolean dispatchKeyEvent(android.view.KeyEvent event){
         if(bridgeLoaded&&gameResumed&&(gameMenu==null||!gameMenu.isShowing())&&event.getAction()==android.view.KeyEvent.ACTION_DOWN){
-            int key=event.getKeyCode();if(key!=android.view.KeyEvent.KEYCODE_BACK&&key!=android.view.KeyEvent.KEYCODE_VOLUME_DOWN&&key!=android.view.KeyEvent.KEYCODE_VOLUME_UP&&key!=android.view.KeyEvent.KEYCODE_POWER)nativeController(true);
+            if(ControllerPrompts.isGamepad(event.getDevice()))nativeController(true);
         }
         return super.dispatchKeyEvent(event);
     }
     @Override public boolean dispatchGenericMotionEvent(android.view.MotionEvent event){
-        if(bridgeLoaded&&gameResumed&&(gameMenu==null||!gameMenu.isShowing())&&(event.getSource()&android.view.InputDevice.SOURCE_JOYSTICK)!=0&&
+        if(bridgeLoaded&&gameResumed&&(gameMenu==null||!gameMenu.isShowing())&&ControllerPrompts.isGamepad(event.getDevice())&&event.isFromSource(android.view.InputDevice.SOURCE_JOYSTICK)&&
             (Math.abs(event.getAxisValue(android.view.MotionEvent.AXIS_X))>.2f||Math.abs(event.getAxisValue(android.view.MotionEvent.AXIS_Y))>.2f||event.getAxisValue(android.view.MotionEvent.AXIS_LTRIGGER)>.1f||event.getAxisValue(android.view.MotionEvent.AXIS_RTRIGGER)>.1f))nativeController(true);
         return super.dispatchGenericMotionEvent(event);
     }
@@ -697,7 +840,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             getWindow().getDecorView().performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
         return super.dispatchTouchEvent(event);
     }
-    @Override protected void onPause(){gameResumed=false;captureReportState();if(driveAssist!=null)driveAssist.pause();if(bridgeLoaded)nativeHostMenu(true);uiHandler.removeCallbacksAndMessages(null);stopPhoneRumble();fpsTime=0;lastFrameRateHint=-1;super.onPause();}
+    @Override protected void onPause(){gameResumed=false;overlayGeneration++;refreshCpuHintTarget();captureReportState();if(driveAssist!=null)driveAssist.pause();if(bridgeLoaded)nativeHostMenu(true);uiHandler.removeCallbacksAndMessages(null);stopPhoneRumble();fpsTime=0;lastFrameRateHint=-1;super.onPause();}
     @Override public void onTrimMemory(int level){
         // SDL turns every super call into a full native low-memory purge.
         // Forward real pressure, keeping reloadable caches on UI_HIDDEN.
@@ -715,9 +858,10 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         if(gameIso!=null)try{gameIso.close();}catch(IOException ignored){}
         android.os.Process.killProcess(android.os.Process.myPid());
     }
-    public void recordCleanExit(){GameSession.record(this,false);}
+    public void recordCleanExit(){if(comparisonState==null)GameSession.record(this,false,sessionLoggingEnabled());}
     private void requestQuit(){
-        if(closing)return;closing=true;ActionBreadcrumbs.record(this,"Quit to launcher","finishing backup and cleanup");
+        if(closing)return;closing=true;
+        if(sessionLoggingEnabled())ActionBreadcrumbs.record(this,"Quit to launcher","finishing backup and cleanup");
         if(gameMenu!=null)gameMenu.dismiss();
         android.widget.LinearLayout body=FestivalUi.column(this);body.addView(FestivalUi.text(this,"Finishing save backup and closing the game…",18,FestivalUi.TEXT));body.addView(new android.widget.ProgressBar(this));
         closingDialog=new android.app.AlertDialog.Builder(this).setView(body).setCancelable(false).create();closingDialog.show();

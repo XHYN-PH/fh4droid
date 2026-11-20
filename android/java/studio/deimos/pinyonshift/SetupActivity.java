@@ -54,6 +54,10 @@ public final class SetupActivity extends Activity {
         cancelCopyButton.setVisibility(busy?View.VISIBLE:View.GONE);
     }
     @Override protected void onResume(){super.onResume();refresh();FestivalUi.immersive(this);}
+    @Override public boolean dispatchKeyEvent(android.view.KeyEvent event){
+        return ControllerPrompts.handle(this,getWindow(),event.getKeyCode(),event,this::onBackPressed)
+            || super.dispatchKeyEvent(event);
+    }
     @Override protected void onDestroy(){if(operation!=null)operation.cancel();super.onDestroy();}
     private void chooseFolder(boolean useInPlace){
         if(busy||GameFiles.running(this)){refresh();return;}
@@ -76,7 +80,7 @@ public final class SetupActivity extends Activity {
                 complete(link ? "Folder verified and linked. Return to the launcher to play." : "Import complete. Return to the launcher to play.", true);
             } catch(IOException|RuntimeException error) {
                 if(!current.isCancelled())Log.e(TAG,"Folder setup stopped",error);
-                complete(current.isCancelled()?FileOperation.cancelMessage():error.getMessage(),false);
+                complete(current.isCancelled()?"Cancelled. Your previous source is kept. Verified copies can be reused.":error.getMessage(),false);
             }
         },"FolderImport").start();
     }
@@ -89,9 +93,12 @@ public final class SetupActivity extends Activity {
         } catch (SecurityException error) {
             throw new IOException("Android could not retain access to this folder. Choose Copy extracted folder.", error);
         }
-        if (!getSharedPreferences("mobile", 0).edit().remove("iso_uri")
-                .putString(GameFiles.LINKED_FOLDER, tree.toString()).commit()) {
-            throw new IOException("Could not save the linked folder.");
+        try {
+            FileOperation.check();
+            GameFiles.selectSource(this,"","",tree.toString());
+        } catch (IOException error) {
+            GameFiles.releaseSource(this,tree.toString(),getSharedPreferences("mobile",0).getString(GameFiles.LINKED_FOLDER,""));
+            throw error;
         }
     }
     private void complete(String message,boolean success){runOnUiThread(()->{busy=false;operation=null;if(isFinishing()||isDestroyed())return;getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);status.finish(message==null?"Could not complete folder setup.":message,success);refresh();});}
@@ -186,7 +193,7 @@ public final class SetupActivity extends Activity {
         FileOperation.check();
         File incomplete = new File(base, INCOMPLETE);
         incomplete.getParentFile().mkdirs();
-        new FileOutputStream(incomplete).close();
+        if(!needed.isEmpty())new FileOutputStream(incomplete).close();
         long done = 0;
         final long started = System.currentTimeMillis(), total = remaining;
         for (int i = 0; i < needed.size(); i++) {
@@ -209,8 +216,8 @@ public final class SetupActivity extends Activity {
             done += expected.size;
         }
         FileOperation.check();
-        if(!getSharedPreferences("mobile", 0).edit().remove("iso_uri").remove(GameFiles.LINKED_FOLDER).commit())throw new IOException("cannot save folder mode; choose the same folder to finish");
         if (!incomplete.delete() && incomplete.exists()) throw new IOException("cannot finalize game import");
+        GameFiles.selectSource(this,"","","");
     }
 
     private void list(Uri tree,String document,String prefix,List<Entry> out)throws IOException{

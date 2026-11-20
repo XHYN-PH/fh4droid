@@ -13,6 +13,7 @@ import java.util.*;
 import org.json.JSONObject;
 
 public final class LauncherActivity extends Activity implements FestivalUi.PanelHost {
+    private enum SessionMode { WITHOUT_LOGS, STANDARD, DIAGNOSTICS }
     private final ArrayDeque<PanelPage> panels=new ArrayDeque<>();
     private RacingLauncherView launcher;private RacingLauncherView.Model launcherModel;private float builtScale;
     private String restoredPage="home",restoredFocus="play",restoredHomeFocus="play";
@@ -28,18 +29,32 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     private String pendingBackupPath;
     private Button cancelInstallation;
     private String installationResult;
-    private String pendingDriver,pendingSaveScope=SaveArchive.BOTH;private boolean playAfterProbe;private AlertDialog progress;private FileOperation operation;
+    private String pendingDriver,pendingSaveScope=SaveArchive.BOTH;private boolean playAfterProbe,oneOffProbe;private AlertDialog progress;private FileOperation operation;
+    private SessionMode pendingSessionMode=SessionMode.WITHOUT_LOGS;
     @Override public void onCreate(Bundle state){
         super.onCreate(state);UiPreferences.load(this);
         if (state != null) pendingBackupPath = state.getString("backup_path");
-        if(state!=null){pendingDriver=state.getString("driver");playAfterProbe=state.getBoolean("play_after_probe");pendingSaveScope=state.getString("save_scope",SaveArchive.BOTH);restoredPage=state.getString("launcher_page","home");restoredFocus=state.getString("launcher_focus","play");restoredHomeFocus=state.getString("launcher_home_focus","play");}
-        build();FestivalUi.immersive(this);
+        if (state != null) {
+            int mode=state.getInt("session_mode",0);
+            if(mode>=0&&mode<SessionMode.values().length)pendingSessionMode=SessionMode.values()[mode];
+        }
+        if(state!=null){pendingDriver=state.getString("driver");playAfterProbe=state.getBoolean("play_after_probe");oneOffProbe=state.getBoolean("one_off_probe");pendingSaveScope=state.getString("save_scope",SaveArchive.BOTH);restoredPage=state.getString("launcher_page","home");restoredFocus=state.getString("launcher_focus","play");restoredHomeFocus=state.getString("launcher_home_focus","play");}
+        immersiveLauncher();build();
         new Thread(()->{try{DriverStore.installBundled(this);}catch(IOException ignored){}},"BundledDrivers").start();
     }
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("backup_path",pendingBackupPath);state.putString("driver",pendingDriver);state.putBoolean("play_after_probe",playAfterProbe);state.putString("save_scope",pendingSaveScope);if(launcher!=null){state.putString("launcher_page",launcher.page());state.putString("launcher_focus",launcher.navigationFocus());state.putString("launcher_home_focus",launcher.homeFocus());}}
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("backup_path",pendingBackupPath);state.putString("driver",pendingDriver);state.putBoolean("play_after_probe",playAfterProbe);state.putBoolean("one_off_probe",oneOffProbe);state.putInt("session_mode",pendingSessionMode.ordinal());state.putString("save_scope",pendingSaveScope);if(launcher!=null){state.putString("launcher_page",launcher.page());state.putString("launcher_focus",launcher.navigationFocus());state.putString("launcher_home_focus",launcher.homeFocus());}}
     @Override protected void onResume(){super.onResume();UiPreferences.load(this);if(Math.abs(builtScale-FestivalUi.scale(this))>.001f)build();refresh();rebuildTop();recovery();}
-    @Override public void onConfigurationChanged(android.content.res.Configuration config){super.onConfigurationChanged(config);build();refresh();FestivalUi.immersive(this);}
-    @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus){UiPreferences.load(this);if(Math.abs(builtScale-FestivalUi.scale(this))>.001f)build();FestivalUi.immersive(this);refresh();if(launcher!=null)FestivalUi.refreshTree(launcher);}}
+    @Override public void onConfigurationChanged(android.content.res.Configuration config){super.onConfigurationChanged(config);build();refresh();immersiveLauncher();}
+    @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus){UiPreferences.load(this);if(Math.abs(builtScale-FestivalUi.scale(this))>.001f)build();immersiveLauncher();refresh();if(launcher!=null)FestivalUi.refreshTree(launcher);}}
+    private void immersiveLauncher() {
+        Window window = getWindow();
+        window.setDecorFitsSystemWindows(false);
+        WindowInsetsController controller = window.getDecorView().getWindowInsetsController();
+        if (controller != null) {
+            controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            controller.hide(WindowInsets.Type.systemBars());
+        }
+    }
     private android.graphics.Bitmap artwork(String name,int sample){
         try(InputStream input=getAssets().open(name)){
             android.graphics.BitmapFactory.Options options=new android.graphics.BitmapFactory.Options();options.inSampleSize=sample;
@@ -52,16 +67,25 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         launcher=new RacingLauncherView(this,RacingLauncherView.Design.GRID,launcherModel,
             artwork("menu-background.png",1),artwork("menu-logo.png",4),this::launcherAction);
         launcher.restoreHomeFocus(restoredHomeFocus);launcher.restoreNavigation(restoredPage,restoredFocus);
-        launcher.setOnApplyWindowInsetsListener((view,insets)->{android.graphics.Rect safe=PlatformCompat.safeInsets(insets);view.setPadding(safe.left,safe.top,safe.right,safe.bottom);return insets;});
-        setContentView(launcher);renderPanel(false);refresh();
+        launcher.setOnApplyWindowInsetsListener((view, insets) -> {
+            // Android can reveal hidden bars over the launcher on a swipe.
+            int reserved = WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout();
+            ((RacingLauncherView) view).setContentInsets(insets.getInsetsIgnoringVisibility(reserved));
+            return insets;
+        });
+        setContentView(launcher);
+        launcher.requestApplyInsets();
+        renderPanel(false);refresh();
     }
     private void launcherAction(String action){
         switch(action){
-            case "play":case "resume":play(false);break;
+            case "play":case "resume":play(defaultSessionMode());break;
             case "choose-game":case "choose-game-files":files();break;
             case "verify":files();verifyInstallation();break;
             case "storage":openPage("Storage",this::storagePage);break;
             case "touch-layout":controls();break;
+            case "touch-settings":settingPage("Touch");break;
+            case "saved-layouts":LayoutProfiles.show(this);break;
             case "controller":settingPage("Controller");break;
             case "tilt":settingPage("Phone");break;
             case "graphics":settingPage("Graphics");break;
@@ -131,14 +155,20 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         }catch(Exception error){body.addView(FestivalUi.text(this,"Lucide icons are used under the ISC license, with applicable Feather icons under the MIT license.",13,FestivalUi.MUTED));}
         FestivalUi.present(this,"Control artwork",body);
     }
-    void startDiagnosticRun(){play(true);}
+    void startDiagnosticRun(){startNewSession(SessionMode.DIAGNOSTICS);}
+    private void startNewSession(SessionMode mode) {
+        if(GameFiles.running(this))toast("Quit the current game before starting with different logging options.");
+        else play(mode);
+    }
+    private SessionMode defaultSessionMode() {
+        return getSharedPreferences("mobile",0).getBoolean("record_session_logs",false)
+            ? SessionMode.STANDARD : SessionMode.WITHOUT_LOGS;
+    }
     private void refresh(){
         if(launcherModel==null)return;
         launcherModel.ready=GameFiles.ready(this);launcherModel.running=GameFiles.running(this);launcherModel.busy=busy;
         Map<String,String> settings=MobileConfig.read(this);
-        String scale=settings.getOrDefault("fh1_render_scale_percent","100");
-        String fps=settings.getOrDefault("pinyon_shift_fh1_render_fps_limit","30");
-        launcherModel.graphics=scale+"% resolution · "+(fps.equals("0")?"Uncapped":fps+" FPS target");
+        launcherModel.graphics=GraphicsProfileStore.launchSummary(this,settings);
         launcherModel.version=installedVersion();
         launcherModel.notice=GameSession.interrupted(this)>0?"Last session stopped unexpectedly. Open More → Problem reports for help.":"";
         launcher.update();
@@ -147,19 +177,20 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         long interrupted=GameSession.interrupted(this);
         if(interrupted==0||busy||getSharedPreferences("mobile",0).getLong("recovery_seen",0)==interrupted)return;
         getSharedPreferences("mobile",0).edit().putLong("recovery_seen",interrupted).apply();
-        showRecovery("The last game stopped unexpectedly", "A report can help identify the cause.", true);
+        pendingSessionMode=defaultSessionMode();
+        showRecovery("The last game stopped unexpectedly", GameSession.recoveryMessage(this,interrupted), true);
     }
     private void showRecovery(String title, String message, boolean launch) {
         LinearLayout options = FestivalUi.column(this);
         options.addView(FestivalUi.text(this, message, 14, FestivalUi.MUTED));
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(title).setView(options)
             .setNegativeButton("Back", null).create();
-        FestivalUi.action(this, options, launch ? "Retry with system driver" : "Test system driver", () -> {
+        FestivalUi.action(this, options, launch ? "Try system driver once" : "Test system driver", () -> {
             dialog.dismiss();
             if (!launch || GameFiles.ready(this)) {
                 work("Checking the game executables…", () -> {
                     if (launch) { ContentFiles.recoverForLaunch(this); GameFiles.verify(this); }
-                }, () -> probe("", launch));
+                }, () -> probe("", launch, true));
             } else files();
         });
         if (GraphicsProfilePage.lastGood(this).isFile()) {
@@ -203,21 +234,22 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         cancel.setOnClickListener(view -> {
             current.cancel();
             view.setEnabled(false);
-            status.update("Stopping after the current read. Completed files are kept.", 0, 0);
+            status.update("Stopping after the current operation…", 0, 0);
         });
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         new Thread(() -> {
             try (FileOperation scope = current.attach()) {
                 task.run();
                 runOnUiThread(() -> {
-                    if (inline != null) installationResult = "Installation verified.";
+                    if (inline != null) installationResult = message.startsWith("Inspecting")
+                        ? "Disc image verified and ready." : "Verification complete.";
                     endWork();
                     if (!isFinishing() && !isDestroyed()) success.run();
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
                     boolean cancelled = current.isCancelled() || error instanceof InterruptedIOException;
-                    String detail = cancelled ? FileOperation.cancelMessage()
+                    String detail = cancelled ? (inline == null ? "Operation cancelled." : "Cancelled. Your selected source is kept.")
                         : error.getMessage() == null ? "The operation could not finish." : error.getMessage();
                     if (inline != null) installationResult = detail;
                     endWork();
@@ -239,16 +271,26 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         work(message,()->ContentFiles.locked(this,()->{task.run();return null;}),success);
     }
     interface Task{void run()throws Exception;}
-    private void play(boolean logging){
+    private void play(SessionMode mode){
         if(busy)return;if(!GameFiles.ready(this)){files();return;}
-        if(GameFiles.running(this)){startGame(logging);return;}
-        getSharedPreferences("mobile",0).edit().putBoolean("next_debug",logging).apply();
-        work("Checking the game executables…",()->{ContentFiles.recoverForLaunch(this);GameFiles.verify(this);},()->probe(MobileConfig.get(this,"android_gpu_driver","auto"),true));
+        if(GameFiles.running(this)){startGame(mode,null);return;}
+        pendingSessionMode=mode;
+        work("Checking the game executables…",()->{
+            ContentFiles.recoverForLaunch(this);
+            GameFiles.verify(this);
+        },()->{
+            Map<String,String> settings=MobileConfig.read(this);
+            String selection=settings.getOrDefault("android_gpu_driver","auto");
+            String cached=GameSession.interrupted(this)==0?DriverStore.cachedSelection(this,selection,settings):null;
+            if(cached!=null)startGame(mode,cached);
+            else probe(selection,true);
+        });
     }
-    private void startGame(boolean logging){
-        Intent i=new Intent(this,PinyonShiftActivity.class);i.putExtra("debug_report",logging);
-        String effective=getSharedPreferences("mobile",0).getString("verified_driver","");
-        i.putExtra("verified_driver",effective);
+    private void startGame(SessionMode mode,String effective){
+        Intent i=new Intent(this,PinyonShiftActivity.class);
+        i.putExtra("debug_report",mode==SessionMode.DIAGNOSTICS);
+        i.putExtra(PinyonShiftActivity.NO_SESSION_LOGS,mode==SessionMode.WITHOUT_LOGS);
+        if(effective!=null)i.putExtra("verified_driver",effective);
         i.putExtra("env.PINYON_SHIFT_ANDROID_LAUNCHER","1");startActivity(i);
     }
     private void files(){openPage("Game files",this::filesPage);}
@@ -256,29 +298,62 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         LinearLayout body = FestivalUi.column(this);
         boolean ready = GameFiles.ready(this);
         boolean linked = GameFiles.linked(this);
+        String iso=GameFiles.iso(this);
         boolean partial = new File(MobileConfig.base(this), "game/.copy-incomplete").exists();
-        String detail = ready ? linked ? "Linked extracted folder ready." : "Game files ready to play."
+        String source = !iso.isEmpty() ? "Disc image" : linked ? "Linked extracted folder"
+            : ready || partial ? "Copied game files" : "Installation status";
+        String detail = ready ? linked ? "Ready · uses the original folder in place."
+            : !iso.isEmpty() ? "Ready · streams from " + sourceLabel(Uri.parse(iso)) + "."
+            : "Ready · stored in the app’s game folder."
             : linked ? "Linked folder unavailable. Choose it again or copy it into app storage."
+            : !iso.isEmpty() ? "Disc files unavailable. Choose the ISO again."
             : partial ? "Import incomplete. Choose the same source again to resume."
             : "No game files installed yet.";
-        installationStatus = new InstallationStatus(this, installationResult == null ? detail : installationResult);
+        installationStatus = new InstallationStatus(this, source,
+            installationResult == null ? detail : detail + "\n" + installationResult);
         body.addView(installationStatus);
         cancelInstallation = FestivalUi.action(this, body, "Cancel", () -> {});
         cancelInstallation.setVisibility(View.GONE);
-        FestivalUi.listRow(this, body, "file", "Choose game ISO", "Play from the disc image.",
-            () -> { if (canManage()) pick(ISO, "*/*", false); });
-        FestivalUi.listRow(this, body, "folder", "Copy extracted folder", "Allow about 8 GB in app storage.",
-            () -> chooseExtracted(false));
-        FestivalUi.listRow(this, body, "folder", "Use extracted folder in place", "Use an accessible local folder without a duplicate copy.",
-            () -> chooseExtracted(true));
+        Runnable storage=()->openPage("Storage",this::storagePage);
         if (ready) {
-            FestivalUi.action(this, body, "Check installation", this::verifyInstallation);
-            FestivalUi.action(this, body, "Check collision sound files", () -> {
-                if (canManage()) work("Checking collision and glass audio…", () -> GameFiles.verifyCollisionAudio(this),
-                    () -> { installationResult = "Collision and glass audio files verified."; rebuildTop(); }, installationStatus);
-            });
+            FestivalUi.tileRow(this,body,
+                FestivalUi.tile(this,"folder","Change source","Choose another ISO or folder",this::changeSource),
+                FestivalUi.tile(this,"flask","Check installation","Verify supported game files",this::verifyInstallation),
+                FestivalUi.tile(this,"save","Storage","See how much space is used",storage));
+        } else {
+            addSourceChoices(body,false);
+            FestivalUi.action(this,body,"Storage",storage);
         }
         return body;
+    }
+    private static String sourceLabel(Uri uri) {
+        String path=uri.getLastPathSegment();
+        if(path==null||path.isEmpty())return "the selected ISO";
+        String name=path.substring(path.lastIndexOf('/')+1).replaceAll("[\\p{Cntrl}]","");
+        return name.length()>60?name.substring(0,57)+"…":name;
+    }
+    private void changeSource(){
+        if(!canManage())return;
+        LinearLayout options=FestivalUi.column(this);
+        addSourceChoices(options,true);
+        showPanel("Change game source",options);
+    }
+    private void addSourceChoices(LinearLayout body,boolean nested){
+        FestivalUi.listRow(this,body,"file","Choose game ISO","Stream from a disc image in local storage.",()->{
+            if(!canManage())return;
+            if(nested)backPanel();
+            pick(ISO,"*/*",false);
+        });
+        FestivalUi.listRow(this,body,"folder","Use extracted folder in place","Link an accessible folder and keep the files where they are.",()->{
+            if(!canManage())return;
+            if(nested)backPanel();
+            chooseExtracted(true);
+        });
+        FestivalUi.listRow(this,body,"download","Copy extracted folder","Keep the files in app storage. Allow about 8 GB.",()->{
+            if(!canManage())return;
+            if(nested)backPanel();
+            chooseExtracted(false);
+        });
     }
     private void chooseExtracted(boolean link) {
         if (!canManage()) return;
@@ -298,12 +373,13 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         FestivalUi.card(this,body,"Game storage",free>0?android.text.format.Formatter.formatFileSize(this,free)+" available on this storage volume.":"Storage availability is reported in Android settings.");
         TextView usage = FestivalUi.text(this, "Measuring installed data…", 14, FestivalUi.TEXT);
         body.addView(usage);
-        FestivalUi.action(this, body, "Manage graphics cache", () -> GraphicsCache.show(this));
         new Thread(() -> {
             try {
                 File base = MobileConfig.base(this);
                 File state = new File(base, "state");
                 long game = GraphicsCache.size(new File(base, "game/base"));
+                File isoCache = GameFiles.iso(this).isEmpty() ? null : GameFiles.isoCache(this);
+                long support = isoCache == null || isoCache.equals(new File(base,"game/base")) ? 0 : GraphicsCache.size(isoCache);
                 File title = new File(state, "user/" + DlcStore.TITLE);
                 long dlc = GraphicsCache.size(new File(title, "00000002"))
                     + GraphicsCache.size(new File(title, "Disabled/00000002"))
@@ -314,7 +390,11 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
                 File cache = GraphicsCache.root(this);
                 File[] directories = cache.listFiles(file -> GraphicsCache.graphicsDirectory(cache, file));
                 if (directories != null) for (File directory : directories) graphics += GraphicsCache.size(directory);
-                String text = storageLine("Local game files", game) + "\n" + storageLine("DLC", dlc)
+                String text = storageLine("Copied game files", game)
+                    + (support==0?"":"\n"+storageLine("Local ISO support files",support))
+                    + (GameFiles.linked(this)?"\nLinked folder uses storage outside the app.":"")
+                    + (!GameFiles.iso(this).isEmpty()?"\nDisc image uses storage outside the app.":"")
+                    + "\n" + storageLine("DLC", dlc)
                     + "\n" + storageLine("Mods", GraphicsCache.size(new File(state, "mods")))
                     + "\n" + storageLine("Graphics caches", graphics) + "\n" + storageLine("Saves", saves)
                     + "\n" + storageLine("Backups", GraphicsCache.size(new File(state, "backups")));
@@ -352,24 +432,51 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     private File saveState() { return new File(MobileConfig.base(this), "state"); }
     private View backupPage() {
         LinearLayout body = FestivalUi.column(this);
+        FestivalUi.listRow(this,body,"save","Create named checkpoint",
+            "Copy the selected saves with a name before making changes.",this::createCheckpoint);
         List<SaveArchive.Backup> backups = SaveArchive.backups(saveState());
         if (backups.isEmpty()) body.addView(FestivalUi.text(this, "No save backups yet.", 14, FestivalUi.MUTED));
         java.text.DateFormat dates = java.text.DateFormat.getDateTimeInstance();
         for (SaveArchive.Backup backup : backups) {
             String date = dates.format(new java.util.Date(backup.folder.lastModified()));
-            FestivalUi.listRow(this, body, "save", backup.label, date, () -> showBackup(backup, date));
+            FestivalUi.listRow(this, body, "save", backup.label, backup.scope()+" · "+date, () -> showBackup(backup, date))
+                .setTag(FestivalUi.FOCUS_KEY,backup.folder.getName());
         }
         return body;
+    }
+    private void createCheckpoint() {
+        if(!canManage())return;
+        String scope=pendingSaveScope;
+        EditText name=new EditText(this);
+        name.setSingleLine(true);
+        name.setHint("Checkpoint name");
+        name.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(48)});
+        LinearLayout body=FestivalUi.column(this);
+        String selected=scope.equals(SaveArchive.BOTH)?"Normal and modded saves"
+            :scope.equals(SaveArchive.MODDED)?"Modded saves":"Normal saves";
+        body.addView(FestivalUi.text(this,selected,14,FestivalUi.MUTED));
+        body.addView(name);
+        AlertDialog dialog=FestivalUi.dialog(this,"New save checkpoint",body);
+        FestivalUi.action(this,body,"Create checkpoint",()->{
+            String label;
+            try{label=SaveArchive.checkpointName(name.getText().toString());}
+            catch(IOException error){name.setError(error.getMessage());return;}
+            dialog.dismiss();
+            saveWork("Copying saves…",()->SaveArchive.checkpoint(saveState(),scope,label),
+                ()->toast("Checkpoint created."));
+        });
+        dialog.show();
     }
     private void showBackup(SaveArchive.Backup backup, String date) {
         if (!canManage()) return;
         LinearLayout actions = FestivalUi.column(this);
-        TextView description = FestivalUi.text(this, date, 14, FestivalUi.MUTED);
+        String info=backup.scope()+" · "+date;
+        TextView description = FestivalUi.text(this, info, 14, FestivalUi.MUTED);
         actions.addView(description);
         new Thread(() -> {
             try {
                 long bytes = GraphicsCache.size(backup.folder);
-                runOnUiThread(() -> { if (!isDestroyed()) description.setText(date + " · " + android.text.format.Formatter.formatFileSize(this, bytes)); });
+                runOnUiThread(() -> { if (!isDestroyed()) description.setText(info + " · " + android.text.format.Formatter.formatFileSize(this, bytes)); });
             } catch (IOException ignored) {}
         }, "SaveBackupSize").start();
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(backup.label).setView(actions)
@@ -445,12 +552,23 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     }
     private void reports(){
         LinearLayout body=FestivalUi.column(this);
+        FestivalUi.listRow(this,body,"play","Play without logs","Start without app session logs or diagnostic capture.",
+            ()->startNewSession(SessionMode.WITHOUT_LOGS));
         FestivalUi.listRow(this,body,"pulse","Play with diagnostics","Record detailed logs for this session.",this::startDiagnosticRun);
+        FestivalUi.listRow(this,body,"audio","Check collision sound files","Verify impact and glass assets from the selected game source.",()->{
+            if(canManage()&&GameFiles.ready(this))
+                work("Checking collision and glass audio…",()->GameFiles.verifyCollisionAudio(this),()->toast("Collision and glass audio files verified."));
+            else if(!GameFiles.ready(this))files();
+        });
         ProblemReports.action(this,body,"Share problem report");
         FestivalUi.present(this,"Problem reports",body);
     }
     private void probe(String choice,boolean launch){
-        pendingDriver=choice;playAfterProbe=launch;startActivityForResult(new Intent(this,DriverProbeActivity.class).putExtra("driver",choice),PROBE);
+        probe(choice,launch,false);
+    }
+    private void probe(String choice,boolean launch,boolean oneOff){
+        pendingDriver=choice;playAfterProbe=launch;oneOffProbe=oneOff;
+        startActivityForResult(new Intent(this,DriverProbeActivity.class).putExtra("driver",choice),PROBE);
     }
     private void pick(int request,String mime,boolean create){
         Intent i=new Intent(create?Intent.ACTION_CREATE_DOCUMENT:Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime);
@@ -464,7 +582,9 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         if(result!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();
         if(!canManage())return;
         if(request==ISO){try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);}catch(SecurityException e){error("This file provider cannot keep access. Choose an ISO in local storage.");return;}
-            work("Inspecting your disc and verifying the game…",()->installIso(uri),()->toast("Disc image ready."),installationStatus);}
+            work("Inspecting your disc and verifying the game…",()->{
+                try{installIso(uri);}finally{GameFiles.releaseSource(this,uri.toString(),GameFiles.iso(this));}
+            },()->toast("Disc image ready."),installationStatus);}
         else if(request==SAVE_OUT)saveWork("Exporting saves…",()->{try(OutputStream out=getContentResolver().openOutputStream(uri)){if(out==null)throw new IOException("Cannot create backup.");SaveArchive.exportState(new File(MobileConfig.base(this),"state"),pendingSaveScope,out);}},()->toast("Saves exported."));
         else if (request == BACKUP_OUT) {
             saveWork("Exporting backup…", () -> {
@@ -484,25 +604,29 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         else if(request==DRIVER_ZIP)work("Importing driver…",()->{try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Cannot open driver ZIP.");pendingDriver=DriverStore.importZip(this,in);}},()->probe(pendingDriver,false));
     }
     private void probeResult(int result,Intent data){
-        boolean launch=playAfterProbe;playAfterProbe=false;
+        boolean launch=playAfterProbe,oneOff=oneOffProbe;playAfterProbe=false;oneOffProbe=false;
         String report=result==RESULT_OK&&data!=null?data.getStringExtra("report"):null;
-        try{AdrenoSettings.record(this,pendingDriver,report==null?"{}":report);JSONObject json=new JSONObject(report==null?"{}":report);getSharedPreferences("mobile",0).edit().putString("last_probe",report).apply();
+        try{if(!oneOff)AdrenoSettings.record(this,pendingDriver,report==null?"{}":report);JSONObject json=new JSONObject(report==null?"{}":report);
             if(!json.optBoolean("ok",false))throw new IOException(json.optString("error","The graphics driver test stopped unexpectedly."));
-            MobileConfig.put(this,"android_gpu_driver",MobileConfig.quote(pendingDriver==null?"":pendingDriver));
-            getSharedPreferences("mobile",0).edit().putString("verified_driver",json.optString("effective_driver","")).commit();
-            if(launch)startGame(getSharedPreferences("mobile",0).getBoolean("next_debug",false));else toast("Driver passed and selected for the next launch.");
+            if(!oneOff&&!launch)MobileConfig.put(this,"android_gpu_driver",MobileConfig.quote(pendingDriver==null?"":pendingDriver));
+            if(launch)startGame(pendingSessionMode,json.getString("effective_driver"));
+            else toast(oneOff?"System driver passed the startup check.":"Driver passed and selected for the next launch.");
         }catch(Exception e){
             showRecovery("Graphics driver could not start", e.getMessage(), launch);
         }
         refresh();rebuildTop();
     }
     private void installIso(Uri uri)throws Exception{
-        File base=MobileConfig.base(this),game=new File(base,"game/base");game.getParentFile().mkdirs();File stage=Files.createTempDirectory(game.getParentFile().toPath(),".iso-inspect-").toFile();
-        try(ParcelFileDescriptor fd=getContentResolver().openFileDescriptor(uri,"r")){
-            if(fd==null)throw new IOException("Cannot open this ISO.");
-            try(FileInputStream in=new FileInputStream(fd.getFileDescriptor())){
+        File game=new File(MobileConfig.base(this),"game");
+        Files.createDirectories(game.toPath());
+        File stage=Files.createDirectory(game.toPath().resolve(".iso-support-"+UUID.randomUUID())).toFile();
+        boolean selected=false;
+        try {
+            try(FileInputStream in=GameFiles.openIso(this,uri.toString())){
                 DiscImage disc=new DiscImage(in.getChannel());
-                for(GameFiles.Expected expected:GameFiles.catalog(this).values()){
+                Map<String,GameFiles.Expected> catalog=GameFiles.catalog(this);
+                for(GameFiles.Expected expected:catalog.values()){
+                    FileOperation.check();
                     DiscImage.Entry entry=disc.files.get(expected.path.toLowerCase(Locale.ROOT));
                     if(entry==null||entry.size!=expected.size)throw new IOException("Missing or unexpected "+expected.path+" in this disc image.");
                 }
@@ -510,23 +634,14 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
                 // Only the host UI and mixer need small local support files.
                 // Guest game data continues to be read directly from the ISO.
                 for(String path:GameFiles.ISO_SUPPORT){
-                    GameFiles.Expected expected=GameFiles.catalog(this).get(path.toLowerCase(Locale.ROOT));
+                    GameFiles.Expected expected=catalog.get(path.toLowerCase(Locale.ROOT));
                     disc.copy(path,new File(stage,path),expected.hash);
                 }
             }
             FileOperation.check();
-            File incomplete=new File(base,"game/.copy-incomplete");incomplete.createNewFile();
-            game.mkdirs();for(String name:GameFiles.EXECUTABLES.keySet())Files.move(new File(stage,name).toPath(),new File(game,name).toPath(),StandardCopyOption.REPLACE_EXISTING);
-            for(String path:GameFiles.ISO_SUPPORT){
-                File to=new File(game,path);to.getParentFile().mkdirs();Files.move(new File(stage,path).toPath(),to.toPath(),StandardCopyOption.REPLACE_EXISTING);
-            }
-            // Persist only after all supported executables have been checked.
-            if (!getSharedPreferences("mobile", 0).edit().remove(GameFiles.LINKED_FOLDER)
-                    .putString("iso_uri", uri.toString()).commit()) {
-                throw new IOException("Could not save the selected ISO.");
-            }
-            new File(base,"game/.copy-incomplete").delete();
-        }finally{SaveArchive.delete(stage);}
+            GameFiles.selectSource(this,uri.toString(),stage.getName(),"");
+            selected=true;
+        }finally{if(!selected)SaveArchive.delete(stage);}
     }
     private void toast(String message){Toast.makeText(this,message,Toast.LENGTH_LONG).show();}
     private void error(String message){new AlertDialog.Builder(this).setTitle("FH4Droid").setMessage(message==null?"The operation could not finish.":message).setPositiveButton("Back",null).show();}

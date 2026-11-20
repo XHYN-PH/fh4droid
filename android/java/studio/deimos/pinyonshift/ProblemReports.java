@@ -39,12 +39,14 @@ final class ProblemReports {
             String latest="";Map<String,org.json.JSONObject> builds=new HashMap<>();
             for(File file:files){String session=ReportFiles.sessionName(file.getName());if(session!=null&&file.getName().endsWith(".jsonl")){if(session.compareTo(latest)>0)latest=session;builds.put(session,sessionBuild(file));}}
             info.append("\nLatest native session: ").append(latest.isEmpty()?"No native session recorded":latest).append("\nThe history folder contains earlier sessions. Shared logs can contain several builds. See report-index.json for provenance and truncation.\n");
+            boolean quiet=GameSession.lastSessionQuiet(c);
+            if(quiet)info.append("The last game was played without logs. This report contains only earlier session captures.\n");
             File runtimeLog=new File(state,"logs/runtime.log");
-            if(runtimeLog.isFile()){byte[] retained=ReportFiles.tail(runtimeLog,2*1024*1024);entry(zip,"current-warning-summary.txt",RuntimeWarnings.summarize(new String(retained,StandardCharsets.UTF_8),latest,retained.length<runtimeLog.length()).getBytes(StandardCharsets.UTF_8));}
+            if(runtimeLog.isFile()){byte[] retained=ReportFiles.tail(runtimeLog,2*1024*1024);entry(zip,quiet?"previous-warning-summary.txt":"current-warning-summary.txt",RuntimeWarnings.summarize(new String(retained,StandardCharsets.UTF_8),latest,retained.length<runtimeLog.length()).getBytes(StandardCharsets.UTF_8));}
             entry(zip,"device-and-settings.txt",info.toString().getBytes(StandardCharsets.UTF_8));
             if(manifest!=null)entry(zip,"build-manifest.json",manifest);
             org.json.JSONObject index=new org.json.JSONObject();org.json.JSONArray exported=new org.json.JSONArray();
-            try{index.put("schema",1);index.put("app_version",version);index.put("app_source_commit",appCommit);index.put("latest_session_matches_app",!appCommit.equals("unknown")&&builds.containsKey(latest)&&appCommit.equals(builds.get(latest).optString("pinyon_shift_commit")));index.put("exported_ms",System.currentTimeMillis());index.put("latest_session",latest);index.put("files",exported);}catch(org.json.JSONException error){throw new IOException(error);}
+            try{index.put("schema",1);index.put("app_version",version);index.put("app_source_commit",appCommit);index.put("last_play_without_logs",quiet);index.put("latest_session_matches_app",!quiet&&!appCommit.equals("unknown")&&builds.containsKey(latest)&&appCommit.equals(builds.get(latest).optString("pinyon_shift_commit")));index.put("exported_ms",System.currentTimeMillis());index.put("latest_session",quiet?"":latest);index.put("files",exported);}catch(org.json.JSONException error){throw new IOException(error);}
             final String latestSession=latest;
             files.sort((a,b)->{int pa=reportPriority(a,latestSession),pb=reportPriority(b,latestSession);return pa!=pb?Integer.compare(pa,pb):Long.compare(b.lastModified(),a.lastModified());});
             long budget=16L*1024*1024;int count=0;
@@ -54,7 +56,7 @@ final class ProblemReports {
                 if (image && original > limit) continue;
                 byte[] data = image ? java.nio.file.Files.readAllBytes(file.toPath()) : ReportFiles.tail(file, limit);
                 if (data.length == 0 || data.length > limit) continue;
-                String session=ReportFiles.sessionName(file.getName());boolean sameBuild=session!=null&&builds.containsKey(session)&&!appCommit.equals("unknown")&&appCommit.equals(builds.get(session).optString("pinyon_shift_commit"));String kind=session==null?"shared":session.equals(latest)&&sameBuild?"current":"history";
+                String session=ReportFiles.sessionName(file.getName());boolean sameBuild=session!=null&&builds.containsKey(session)&&!appCommit.equals("unknown")&&appCommit.equals(builds.get(session).optString("pinyon_shift_commit"));String kind=session==null?"shared":!quiet&&session.equals(latest)&&sameBuild?"current":"history";
                 String name="logs/"+kind+"/"+(++count)+"-"+file.getName().replaceAll("[^a-zA-Z0-9._-]","_");entry(zip,name,data);budget-=data.length;
                 try{org.json.JSONObject record=new org.json.JSONObject();record.put("entry",name);record.put("original_bytes",original);record.put("exported_bytes",data.length);record.put("tail_truncated",data.length<original);record.put("session",session==null?org.json.JSONObject.NULL:session);record.put("category",kind);
                     if(session!=null&&builds.containsKey(session)){org.json.JSONObject build=builds.get(session);record.put("source_commit",build.optString("pinyon_shift_commit","unknown"));record.put("build_label",build.optString("build_label","unknown"));}

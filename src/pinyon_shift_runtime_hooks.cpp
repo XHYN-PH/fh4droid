@@ -52,6 +52,7 @@
 #include "head_tracking/head_tracking.h"
 #include "ui/view_policy.h"
 #if defined(__ANDROID__)
+#include "android_bridge.h"
 #include "ui/touch_pad.h"
 #endif
 #include "fh1_guest_address.h"
@@ -6902,6 +6903,9 @@ void PinyonShiftTraceFrameTelemetry(PPCRegister& r28, PPCRegister& r31) {
     const int64_t cpu_ns = rex::perf::CurrentThreadCpuTimeNs();
     if (title_cpu_ns && cpu_ns >= title_cpu_ns) {
       PERF_counter_add(kFh1TitleThreadCpuTimeNs, cpu_ns - title_cpu_ns);
+#if defined(__ANDROID__)
+      pinyon_shift::android::ReportCpuFrame(cpu_ns - title_cpu_ns);
+#endif
     }
     title_cpu_ns = cpu_ns;
   }

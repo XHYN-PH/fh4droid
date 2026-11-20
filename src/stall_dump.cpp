@@ -128,11 +128,13 @@ void Watchdog() {
 namespace pinyon_shift::stall {
 
 void SetPaused(bool paused) {
+  if (!pinyon_shift::diagnostics::LoggingEnabled()) return;
   std::lock_guard lock(g_timer_mutex);
   g_timer.SetPaused(paused, NowNs());
 }
 
 void NoteFrame() {
+  if (!pinyon_shift::diagnostics::LoggingEnabled()) return;
   g_last_frame_ns.store(NowNs(), std::memory_order_release);
 #ifdef _WIN32
   pinyon_shift::hitch::NoteFrame();

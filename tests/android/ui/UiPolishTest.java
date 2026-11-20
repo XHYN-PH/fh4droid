@@ -98,6 +98,106 @@ public class UiPolishTest {
     System.out.println("Checked "+choices+" Android setting choices across "+reached.size()+" options");
   }
 
+  @Test public void resolutionAdjustsByArrowsStickAndFocusedSlider() throws Exception {
+    Activity a=activity();
+    MobileConfig.put(a,"fh1_render_scale_percent","90");
+    RacingLauncherView root=shell(a);
+    LinearLayout page=settings(a,"Graphics");
+    root.showContent("Graphics",page,false);
+    arrange(root,2400,1080);
+    View resolution=page.findViewWithTag("fh1_render_scale_percent");
+    resolution.requestFocus();
+    press(a,KeyEvent.KEYCODE_DPAD_LEFT);
+    assertEquals("89",MobileConfig.get(a,"fh1_render_scale_percent",""));
+    findByDescription(resolution,"Increase or next value, Render resolution").performClick();
+    assertEquals("90",MobileConfig.get(a,"fh1_render_scale_percent",""));
+    moveStick(root,-.85f);
+    assertEquals("89",MobileConfig.get(a,"fh1_render_scale_percent",""));
+    moveStick(root,-.90f);
+    assertEquals("89",MobileConfig.get(a,"fh1_render_scale_percent",""));
+    moveStick(root,0);
+    moveStick(root,.85f);
+    assertEquals("90",MobileConfig.get(a,"fh1_render_scale_percent",""));
+    resolution.performClick();
+    android.app.Dialog dialog=org.robolectric.shadows.ShadowDialog.getLatestDialog();
+    View decor=dialog.getWindow().getDecorView();
+    arrange(decor,1400,850);
+    assertTrue(decor.findFocus() instanceof SeekBar);
+    dialog.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_LEFT));
+    dialog.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP,KeyEvent.KEYCODE_DPAD_LEFT));
+    assertEquals("89",MobileConfig.get(a,"fh1_render_scale_percent",""));
+    moveStick(decor,1f);
+    assertEquals("90",MobileConfig.get(a,"fh1_render_scale_percent",""));
+    dialog.dismiss();
+  }
+
+  private void moveStick(View target,float x) {
+    MotionEvent.PointerProperties finger=new MotionEvent.PointerProperties();
+    finger.id=0;
+    MotionEvent.PointerCoords axes=new MotionEvent.PointerCoords();
+    axes.setAxisValue(MotionEvent.AXIS_X,x);
+    MotionEvent event=MotionEvent.obtain(0,10,MotionEvent.ACTION_MOVE,1,
+        new MotionEvent.PointerProperties[]{finger},new MotionEvent.PointerCoords[]{axes},0,0,1,1,
+        0,0,InputDevice.SOURCE_JOYSTICK,0);
+    target.dispatchGenericMotionEvent(event);
+    event.recycle();
+  }
+
+  private View findByDescription(View node,String label) {
+    if(label.contentEquals(node.getContentDescription()==null?"":node.getContentDescription()))return node;
+    if(node instanceof ViewGroup)for(int i=0;i<((ViewGroup)node).getChildCount();i++){
+      View result=findByDescription(((ViewGroup)node).getChildAt(i),label);
+      if(result!=null)return result;
+    }
+    return null;
+  }
+
+  @Test public void controlsOptionsUseDistinctIconsAndPersistInputChoices() throws Exception {
+    Activity a=activity();
+    Set<String> icons=new HashSet<>();
+    for(String section:new String[]{"Controls","Touch","Phone","Controller"}){
+      LinearLayout page=settings(a,section);
+      collectControlIcons(page,icons);
+    }
+    assertEquals("Controls needs a distinct icon for each row",23,icons.size());
+    LinearLayout touch=settings(a,"Touch");
+    a.setContentView(touch);
+    arrange(touch,2200,1000);
+    View steering=touch.findViewWithTag("touch-steering-mode");
+    assertTrue(steering.requestFocus());
+    press(a,KeyEvent.KEYCODE_DPAD_RIGHT);
+    TouchLayout stored=new TouchLayout();
+    stored.load(a);
+    assertEquals("stick",stored.steering);
+    press(a,KeyEvent.KEYCODE_DPAD_LEFT);
+    stored.load(a);
+    assertEquals("arrows",stored.steering);
+    LinearLayout phone=settings(a,"Phone");
+    a.setContentView(phone);
+    arrange(phone,2200,1000);
+    View range=findByDescription(phone,"Tilt steering range");
+    assertTrue(range instanceof SeekBar);
+    assertTrue(range.requestFocus());
+    press(a,KeyEvent.KEYCODE_DPAD_RIGHT);
+    assertEquals(36,a.getSharedPreferences("mobile",0).getInt("tilt_range",0));
+  }
+
+  private void collectControlIcons(View view,Set<String> seen) {
+    if(view instanceof OutlineIcon){
+      String kind=((OutlineIcon)view).kind;
+      if(!kind.equals("chevron"))assertTrue(kind,seen.add(kind));
+    }
+    if(view instanceof Button){
+      android.graphics.drawable.Drawable drawable=((Button)view).getCompoundDrawablesRelative()[0];
+      if(drawable instanceof MenuIcon){
+        String kind=org.robolectric.util.ReflectionHelpers.getField(drawable,"kind");
+        assertTrue(kind,seen.add(kind));
+      }
+    }
+    if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++)
+      collectControlIcons(((ViewGroup)view).getChildAt(i),seen);
+  }
+
   @Test public void nearestFilterSavesWithoutChangingResolutionOrAntiAliasing()throws Exception{
     Activity a=activity();
     Map<String,String> initial=new HashMap<>();
@@ -133,14 +233,14 @@ public class UiPolishTest {
     LinearLayout page=settings(a,"Graphics");
     a.setContentView(page);
     arrange(page,2400,1080);
-    TextView fsr=find(page,"FSR 1: Off");
+    View fsr=page.findViewWithTag("graphics-fsr");
     assertNotNull(fsr);fsr.performClick();
     android.app.Dialog dialog=org.robolectric.shadows.ShadowDialog.getLatestDialog();
     TextView quality=find(dialog.getWindow().getDecorView(),"Quality · 67%");
     assertNotNull(quality);quality.performClick();
     assertEquals("67",MobileConfig.get(a,"fh1_render_scale_percent",""));
     assertEquals("fsr",MobileConfig.get(a,"present_effect",""));
-    assertEquals("FSR 1: 67% render resolution",fsr.getText().toString());
+    assertTrue(text(fsr).contains("Quality · 67%"));
     assertTrue(text(page.findViewWithTag("fh1_render_scale_percent")).contains("67%"));
     assertTrue(text(page.findViewWithTag("present_effect")).contains("FSR 1"));
   }
@@ -188,11 +288,11 @@ public class UiPolishTest {
     a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, key));
     a.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, key));
   }
-  @Test public void gameMenuSingleTapAndTextOnlyActions()throws Exception{Activity a=activity();List<String> actions=new ArrayList<>();GameMenuView menu=new GameMenuView(a,actions::add);a.setContentView(menu);render(menu,1250,850,"test5-game-menu");Button settings=menu.findViewWithTag("Settings");assertFalse(settings.hasFocus());long t=android.os.SystemClock.uptimeMillis();for(int action:new int[]{MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP}){MotionEvent e=MotionEvent.obtain(t,t+30,action,settings.getWidth()/2f,settings.getHeight()/2f,0);settings.dispatchTouchEvent(e);e.recycle();}ShadowLooper.idleMainLooper();assertEquals(Collections.singletonList("Settings"),actions);for(String title:new String[]{"Resume","Settings","Touch controls","Controller","Diagnostics","Achievements","Profile","More","Quit to launcher"}){Button b=menu.findViewWithTag(title);assertNotNull(b);for(android.graphics.drawable.Drawable icon:b.getCompoundDrawables())assertNull(icon);Rect r=new Rect();assertTrue(b.getGlobalVisibleRect(r));assertEquals(b.getHeight(),r.height());}}
+  @Test public void gameMenuSingleTapAndTextOnlyActions()throws Exception{Activity a=activity();List<String> actions=new ArrayList<>();GameMenuView menu=new GameMenuView(a,actions::add);a.setContentView(menu);render(menu,1250,850,"test5-game-menu");Button settings=menu.findViewWithTag("Settings");assertFalse(settings.hasFocus());long t=android.os.SystemClock.uptimeMillis();for(int action:new int[]{MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP}){MotionEvent e=MotionEvent.obtain(t,t+30,action,settings.getWidth()/2f,settings.getHeight()/2f,0);settings.dispatchTouchEvent(e);e.recycle();}ShadowLooper.idleMainLooper();assertEquals(Collections.singletonList("Settings"),actions);for(String title:new String[]{"Resume","Settings","Touch controls","Controller","More","Quit to launcher"}){Button b=menu.findViewWithTag(title);assertNotNull(b);for(android.graphics.drawable.Drawable icon:b.getCompoundDrawables())assertNull(icon);Rect r=new Rect();assertTrue(b.getGlobalVisibleRect(r));assertEquals(b.getHeight(),r.height());}}
   @Test public void uiPreferencesSurviveProcessHandoff(){
     Activity a=activity();
     android.content.SharedPreferences prefs=a.getSharedPreferences("mobile",0);
-    String[] switches={"animations","show_fps","show_frame_time","show_memory_heat","match_refresh",
+    String[] switches={"animations","show_fps","show_frame_time","show_memory_heat","match_refresh","cpu_hints","record_session_logs",
         "phone_rumble","phone_tilt","tilt_invert","sustained_mode","advanced_settings","detailed_gpu",
         "extended_capture","save_folder_sync","audio_compatibility"};
     for(boolean enabled:new boolean[]{false,true}){
@@ -237,15 +337,59 @@ public class UiPolishTest {
     assertTrue(Arrays.asList(game.getArguments()).contains("--pinyon_shift_sync_folder=" + sync.getAbsolutePath()));
     assertTrue(sync.isDirectory());
   }
+  @Test public void launcherOffersQuietAndDiagnosticPlay() throws Exception {
+    LauncherActivity a=Robolectric.buildActivity(LauncherActivity.class).setup().visible().get();
+    a.getSharedPreferences("mobile",0).edit().remove("record_session_logs").commit();
+    Method defaultMode=LauncherActivity.class.getDeclaredMethod("defaultSessionMode");
+    defaultMode.setAccessible(true);
+    assertEquals("WITHOUT_LOGS",defaultMode.invoke(a).toString());
+    Method reports=LauncherActivity.class.getDeclaredMethod("reports");
+    reports.setAccessible(true);
+    reports.invoke(a);
+    View root=a.findViewById(android.R.id.content);
+    render(root,2400,1080,"refinements-problem-reports");
+    assertNotNull(find(root,"Play without logs"));
+    assertNotNull(find(root,"Play with diagnostics"));
+    a.getSharedPreferences("mobile",0).edit().putBoolean("record_session_logs",true).commit();
+    assertEquals("STANDARD",defaultMode.invoke(a).toString());
+  }
+  @Test public void quietPlaySuppressesRecordingAndLeavesEarlierLogsAlone() throws Exception {
+    SaveSyncActivity game=Robolectric.buildActivity(SaveSyncActivity.class).get();
+    File log=new File(MobileConfig.base(game),"state/logs/android-launch-settings.json");
+    log.getParentFile().mkdirs();
+    byte[] earlier={12,34};
+    java.nio.file.Files.write(log.toPath(),earlier);
+    game.setIntent(new android.content.Intent().putExtra(PinyonShiftActivity.NO_SESSION_LOGS,true)
+        .putExtra("debug_report",true));
+    assertFalse(game.sessionLoggingEnabled());
+    List<String> quiet=Arrays.asList(game.getArguments());
+    assertTrue(quiet.contains("--log_level=off"));
+    assertTrue(quiet.contains("--perf_log_csv="));
+    assertTrue(quiet.contains("--pinyon_shift_capture_performance=false"));
+    assertFalse(quiet.contains("--pinyon_shift_capture_performance=true"));
+    assertArrayEquals(earlier,java.nio.file.Files.readAllBytes(log.toPath()));
+    SettingsHub.apply(game,null,Collections.singletonMap("pinyon_shift_master_volume","80"),false);
+    assertFalse(new File(log.getParentFile(),"android-settings-changes.jsonl").exists());
+    GameSession.record(game,false,game.sessionLoggingEnabled());
+    assertTrue(GameSession.lastSessionQuiet(game));
+    assertEquals("80",MobileConfig.get(game,"pinyon_shift_master_volume",""));
+
+    game.setIntent(new android.content.Intent().putExtra("debug_report",true));
+    assertTrue(game.sessionLoggingEnabled());
+    assertTrue(Arrays.asList(game.getArguments()).contains("--pinyon_shift_capture_performance=true"));
+    assertNotEquals(earlier.length,log.length());
+    GameSession.record(game,false,game.sessionLoggingEnabled());
+    assertFalse(GameSession.lastSessionQuiet(game));
+  }
   @Test public void adreno730AutomaticUsesSystem()throws Exception{Method m=PinyonShiftActivity.class.getDeclaredMethod("recommendedDriver",String.class);m.setAccessible(true);assertNull(m.invoke(null,"730"));assertNull(m.invoke(null,(Object)null));assertEquals("turnip-gen8-v37",m.invoke(null,"740"));}
   @Test public void profileAndAchievementsUseCompactPages()throws Exception{
     Activity a=activity();org.json.JSONArray achievements=new org.json.JSONArray();for(int i=0;i<13;i++)achievements.put(new org.json.JSONObject().put("id",i).put("name",String.format("Achievement %02d",i)).put("score",10).put("unlocked",i%2==0));AchievementsPage.show(a,new org.json.JSONObject().put("achievements",achievements).toString());android.app.Dialog dialog=org.robolectric.shadows.ShadowDialog.getLatestDialog();assertNotNull(dialog);View root=dialog.getWindow().getDecorView();arrange(root,2400,1080);assertTrue(text(root).contains("Achievement 00"));assertFalse(text(root).contains("Achievement 06"));TextView next=find(root,"Next");assertNotNull(next);next.performClick();assertTrue(text(root).contains("Achievement 06"));assertFalse(text(root).contains("Achievement 00"));find(root,"Unlocked").performClick();assertTrue(text(root).contains("Achievement 00"));assertFalse(text(root).contains("Achievement 01"));dialog.dismiss();
     ProfilePage.show(a,()->{},()->{});dialog=org.robolectric.shadows.ShadowDialog.getLatestDialog();assertNotNull(dialog);assertTrue(text(dialog.getWindow().getDecorView()).contains("Edit gamertag"));dialog.dismiss();
   }
-  @Test public void editorCanvasAndPropertiesFillWindowAndGridIsOptional()throws Exception{
+  @Test public void editorKeepsFullCanvasWithDockedInspectorAndOptionalGrid()throws Exception{
     org.robolectric.android.controller.ActivityController<TouchEditorActivity> controller=Robolectric.buildActivity(TouchEditorActivity.class);TouchEditorActivity a=controller.get();a.getPreferences(0).edit().clear().commit();File assets=new File("editor-fixture.zip");try(java.util.zip.ZipOutputStream zip=new java.util.zip.ZipOutputStream(new FileOutputStream(assets))){for(String name:new String[]{"menu-background.png","touch-controls.png"}){zip.putNextEntry(new java.util.zip.ZipEntry("assets/"+name));java.nio.file.Files.copy(new File(System.getProperty("launcher.source.root"),"android/art/"+name).toPath(),zip);zip.closeEntry();}}org.robolectric.util.ReflectionHelpers.callInstanceMethod(a.getAssets(),"addAssetPath",org.robolectric.util.ReflectionHelpers.ClassParameter.from(String.class,assets.getCanonicalPath()));controller.setup().visible();FrameLayout root=(FrameLayout)((ViewGroup)a.findViewById(android.R.id.content)).getChildAt(0);arrange(root,2400,1080);View canvas=root.getChildAt(1);assertEquals(root.getWidth(),canvas.getWidth());assertEquals(root.getHeight(),canvas.getHeight());assertTrue(a.getPreferences(0).getBoolean("grid",true));render(root,2400,1080,"test5-touch-editor-grid");
     find(root,"Edit").performClick();android.app.AlertDialog dialog=(android.app.AlertDialog)org.robolectric.shadows.ShadowDialog.getLatestDialog();find(dialog.getWindow().getDecorView(),"Gridlines: On").performClick();assertFalse(a.getPreferences(0).getBoolean("grid",true));find(root,"Edit").performClick();dialog=(android.app.AlertDialog)org.robolectric.shadows.ShadowDialog.getLatestDialog();find(dialog.getWindow().getDecorView(),"Snapping: On").performClick();assertFalse(a.getPreferences(0).getBoolean("snap",true));
-    find(root,"Properties").performClick();arrange(root,2400,1080);assertEquals(View.VISIBLE,root.getChildAt(2).getVisibility());assertTrue(root.getChildAt(3).getWidth() < root.getWidth());assertTrue(root.getChildAt(2).getWidth() > root.getWidth() * .9f);find(root,"Canvas").performClick();render(root,2400,1080,"test5-touch-editor-text");a.finish();
+    find(root,"Properties").performClick();arrange(root,2400,1080);assertEquals(View.VISIBLE,root.getChildAt(2).getVisibility());assertTrue(root.getChildAt(3).getWidth() < root.getWidth());assertTrue(root.getChildAt(2).getWidth() < root.getWidth() * .5f);render(root,2400,1080,"refinements-touch-inspector");find(root,"Canvas").performClick();render(root,2400,1080,"test5-touch-editor-text");a.finish();
   }
   @Test public void editorAddsHiddenControlAndSavesOnlyItsOpacity()throws Exception{
     TouchEditorActivity a=Robolectric.buildActivity(TouchEditorActivity.class).setup().visible().get();

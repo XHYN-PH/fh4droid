@@ -3,6 +3,7 @@ import importlib.util
 import json
 import pathlib
 import tempfile
+import tomllib
 import unittest
 
 ROOT=pathlib.Path(__file__).resolve().parents[2]
@@ -24,6 +25,22 @@ class AndroidPerformanceSuiteTests(unittest.TestCase):
             root=pathlib.Path(temporary);data=suite.plan(root)
             self.assertGreaterEqual(len(data["cases"]),20)
             with self.assertRaises(ValueError):suite.plan(root)
+
+    def test_trial_keeps_unrelated_settings_and_scopes(self):
+        original = '# seed\nvsync = false\nportrait = false\n[custom]\nvsync = false\n'
+        trial = tomllib.loads(suite.trial_config(original, {"vsync": "true"}))
+        self.assertEqual(trial, {"vsync": True, "portrait": False, "custom": {"vsync": False}})
+
+    def test_gpu_qualification_requires_each_check(self):
+        fixture = {key:key for key in ("device","gpu","android","driver","renderer","build")}
+        checks = {check:{"result":"pass","evidence":check+".txt"} for check in suite.QUALIFICATION_CHECKS}
+        checks.pop("collision_and_engine_audio")
+        result = suite.qualifications([fixture|{"checks":checks}])[0]
+        self.assertEqual(result["status"], "unqualified")
+        self.assertEqual(result["unverified"], ["collision_and_engine_audio"])
+
+        checks["collision_and_engine_audio"] = {"result":"pass","evidence":"manual-listening.txt"}
+        self.assertEqual(suite.qualifications([fixture|{"checks":checks}])[0]["status"], "qualified")
 
     def test_matching_capture_compares_without_qualifying_device(self):
         with tempfile.TemporaryDirectory() as temporary:

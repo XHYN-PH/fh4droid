@@ -30,7 +30,11 @@ public final class RacingLauncherView extends FrameLayout {
   private final Design design;
   private final Actions actions;
   private final Bitmap photo, logo;
-  private final boolean compact;
+  private int viewportWidth, viewportHeight;
+  private float layoutScale = 1f;
+  private boolean compact;
+  private Insets contentInsets = Insets.NONE;
+  private LinearLayout content;
   private final Map<String, View> focus = new LinkedHashMap<>();
   private String page = "home", lastHome = "play", lastContentFocus = "play";
   private int heldDirection;
@@ -93,6 +97,7 @@ public final class RacingLauncherView extends FrameLayout {
   private View externalBody;
   private String externalTitle = "", signature = "";
   private boolean reversing;
+  private Runnable restoreAfterResize;
 
   private float uiScale() {
     Object raw = getContext().getSharedPreferences("mobile", 0).getAll().get("ui_scale");
@@ -101,14 +106,15 @@ public final class RacingLauncherView extends FrameLayout {
   }
 
   private int columns() {
-    return getResources().getConfiguration().screenWidthDp < 780
-            && getResources().getConfiguration().fontScale * uiScale() > 1.2f
-        ? 2
-        : 3;
+    return viewportWidth < dp(580) || (viewportWidth < dp(780) && largeText()) ? 2 : 3;
   }
 
   private boolean largeText() {
-    return getResources().getConfiguration().fontScale * uiScale() > 1.2f;
+    return textScale() > 1.2f;
+  }
+
+  private float textScale() {
+    return getResources().getConfiguration().fontScale * uiScale();
   }
 
   private boolean home() {
@@ -169,12 +175,11 @@ public final class RacingLauncherView extends FrameLayout {
     return false;
   }
 
-  private View firstFocusable(View root, boolean last) {
+  private View firstFocusable(View root) {
     if (root instanceof ViewGroup) {
       ViewGroup group = (ViewGroup) root;
-      for (int n = 0; n < group.getChildCount(); n++) {
-        int i = last ? group.getChildCount() - 1 - n : n;
-        View found = firstFocusable(group.getChildAt(i), last);
+      for (int i = 0; i < group.getChildCount(); i++) {
+        View found = firstFocusable(group.getChildAt(i));
         if (found != null) return found;
       }
     }
@@ -182,7 +187,7 @@ public final class RacingLauncherView extends FrameLayout {
   }
 
   public void focusContent() {
-    View view = externalBody == null ? null : firstFocusable(externalBody, false);
+    View view = externalBody == null ? null : firstFocusable(externalBody);
     if (view != null) view.requestFocus();
   }
 
@@ -204,26 +209,85 @@ public final class RacingLauncherView extends FrameLayout {
     this.photo = photo;
     this.logo = logo;
     this.actions = actions;
-    compact = context.getResources().getConfiguration().screenHeightDp < 400;
+    android.content.res.Configuration configuration = getResources().getConfiguration();
+    viewportWidth = dp(configuration.screenWidthDp);
+    viewportHeight = dp(configuration.screenHeightDp);
     setFocusableInTouchMode(true);
     setClipChildren(false);
     render();
   }
 
+  void setContentInsets(Insets insets) {
+    if (contentInsets.equals(insets)) return;
+    contentInsets = insets;
+    padContent();
+  }
+
+  @Override
+  protected void onMeasure(int widthSpec, int heightSpec) {
+    int width = MeasureSpec.getMode(widthSpec) == MeasureSpec.UNSPECIFIED ? viewportWidth
+        : Math.max(1, MeasureSpec.getSize(widthSpec) - contentInsets.left - contentInsets.right);
+    int height = MeasureSpec.getMode(heightSpec) == MeasureSpec.UNSPECIFIED ? viewportHeight
+        : Math.max(1, MeasureSpec.getSize(heightSpec) - contentInsets.top - contentInsets.bottom);
+    boolean changed = width != viewportWidth || (height != viewportHeight && externalBody == null);
+    viewportWidth = width;
+    viewportHeight = height;
+    if (changed) {
+      remember();
+      render(false);
+    }
+    super.onMeasure(widthSpec, heightSpec);
+  }
+
+  @Override
+  protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+    super.onLayout(changed, left, top, right, bottom);
+    Runnable restore = restoreAfterResize;
+    restoreAfterResize = null;
+    if (restore != null) restore.run();
+  }
+
+  private float dashboardScale() {
+    if (!home() || design != Design.GRID) return 1f;
+    float widthFit = viewportWidth / (float) screenDp(640);
+    float heightFit = viewportHeight / (float) screenDp(348);
+    return Math.max(.72f, Math.min(1f, Math.min(widthFit, heightFit)));
+  }
+
+  private int sidePadding() {
+    return dp(viewportWidth < screenDp(460) ? 12 : compact ? 24 : 30);
+  }
+
+  private int contentWidth() {
+    return Math.max(1, viewportWidth - 2 * sidePadding());
+  }
+
+  private void padContent() {
+    int side = sidePadding();
+    int top = compact ? 8 : 18;
+    int bottom = compact ? 4 : 10;
+    content.setPadding(side + contentInsets.left, dp(top) + contentInsets.top,
+        side + contentInsets.right, dp(bottom) + contentInsets.bottom);
+  }
+
   private int cardHeight(int value) {
-    return Math.round(
-        value * Math.max(1f, getResources().getConfiguration().fontScale * uiScale()));
+    return Math.round(value * Math.max(1f, textScale()));
+  }
+
+  private int screenDp(float value) {
+    return Math.round(value * getResources().getDisplayMetrics().density);
   }
 
   private int dp(float value) {
-    return Math.round(value * getResources().getDisplayMetrics().density);
+    return screenDp(value * layoutScale);
   }
 
   private TextView text(String value, float size, int color, boolean strong) {
     TextView t = new TextView(getContext());
     t.setText(AppLanguage.text(getContext(), value));
     t.setTextColor(color);
-    t.setTextSize(size * uiScale());
+    float compactTypeScale = compact && home() && design == Design.GRID ? .90f : 1f;
+    t.setTextSize(size * uiScale() * layoutScale * compactTypeScale);
     t.setIncludeFontPadding(false);
     t.setTypeface(Typeface.create(strong ? "sans-serif-medium" : "sans-serif", Typeface.NORMAL));
     t.setMaxLines(1);
@@ -256,8 +320,13 @@ public final class RacingLauncherView extends FrameLayout {
   }
 
   private void render() {
+    render(true);
+  }
+
+  private void render(boolean animate) {
     stopStick();
     MenuMotion.stop(this);
+    restoreAfterResize = null;
     removeAllViews();
     focus.clear();
     tileScroller = null;
@@ -273,15 +342,20 @@ public final class RacingLauncherView extends FrameLayout {
             + model.version
             + "|"
             + model.notice;
+    compact = viewportHeight < screenDp(400);
+    layoutScale = dashboardScale();
     addView(new Backdrop(getContext()), new FrameLayout.LayoutParams(-1, -1));
-    LinearLayout content = column();
-    int side = dp(compact ? 24 : 30);
-    content.setPadding(side, dp(compact ? 12 : 18), side, dp(compact ? 6 : 10));
+    content = column();
+    padContent();
     addView(content, new FrameLayout.LayoutParams(-1, -1));
-    content.addView(header(), lp(-1, 48));
+    content.addView(header(), lp(-1, compact ? 44 : 48));
     gap(content, compact ? 8 : 16);
     LinearLayout slot = column();
+    slot.setTag("launcher-menu-viewport");
     slot.setClipChildren(true);
+    // Clip menu drawing and animations to the space above the footer.
+    slot.addOnLayoutChangeListener((view, l, t, r, b, oldL, oldT, oldR, oldB) ->
+        view.setClipBounds(new Rect(0, 0, r - l, b - t)));
     content.addView(slot, new LinearLayout.LayoutParams(-1, 0, 1));
     ScrollView scroll = new ScrollView(getContext());
     pageScroller = scroll;
@@ -293,6 +367,12 @@ public final class RacingLauncherView extends FrameLayout {
     body.setGravity(Gravity.CENTER_VERTICAL);
     scroll.addView(body);
     slot.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+    if (home()) {
+      gap(content, 12);
+      LinearLayout footer = footer();
+      footer.setTag("launcher-footer");
+      content.addView(footer, lp(-1, -2));
+    }
     if (externalBody != null) {
       LinearLayout headingRow=row();TextView heading=text(externalTitle,compact?23:25,WHITE,true);heading.setTypeface(Typeface.create("sans-serif-condensed",Typeface.BOLD));headingRow.addView(heading,new LinearLayout.LayoutParams(0,-2,1));Object header=externalBody.getTag(FestivalUi.HEADER_ACTIONS);if(header instanceof View){View actions=(View)header;if(actions.getParent() instanceof ViewGroup)((ViewGroup)actions.getParent()).removeView(actions);headingRow.addView(actions,new LinearLayout.LayoutParams(-2,-2));}body.addView(headingRow,lp(-1,-2));
       gap(body,compact?8:12);
@@ -312,29 +392,42 @@ public final class RacingLauncherView extends FrameLayout {
       }
     } else if (page.equals("home")) {
       if (design == Design.FESTIVAL) festival(body);
-      else grid(body);
+      else {
+        // Measure the actual header and footer before sharing the space left for the cards.
+        content.measure(MeasureSpec.makeMeasureSpec(viewportWidth + contentInsets.left
+            + contentInsets.right, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(viewportHeight + contentInsets.top
+                + contentInsets.bottom, MeasureSpec.EXACTLY));
+        grid(body, scroll.getMeasuredHeight());
+      }
     } else secondary(body);
-    gap(content, compact ? 8 : 12);
-    content.addView(footer(), lp(-1, largeText() && compact ? 60 : 36));
     wireFocus();
     final View expected = externalBody;
     final String expectedPage = page;
-    post(
-        () -> {
-          if (externalBody != expected || !page.equals(expectedPage)) return;
-          if (externalBody != null) FestivalUi.restorePage(externalBody);
-          else {
-            requestActionFocus(
-                pageFocus.getOrDefault(page, page.equals("home") ? lastHome : firstCard()));
-            scroll.scrollTo(0, pageScroll.getOrDefault(page, 0));
-          }
-        });
-    MenuMotion.page(slot, reversing);
+    Runnable restore = () -> {
+      if (pageScroller != scroll || externalBody != expected || !page.equals(expectedPage)) return;
+      if (externalBody != null) FestivalUi.restorePage(externalBody);
+      else {
+        scroll.scrollTo(0, pageScroll.getOrDefault(page, 0));
+        requestActionFocus(pageFocus.getOrDefault(page, page.equals("home") ? lastHome : firstCard()));
+      }
+    };
+    if (animate) {
+      post(restore);
+      MenuMotion.page(slot, reversing);
+    } else restoreAfterResize = restore;
     reversing = false;
   }
 
   private LinearLayout header() {
     LinearLayout head = row(), brand = row();
+    boolean isHome = home();
+    FocusCard action = isHome ? card("profile", "user", "Local profile", "", false, false)
+        : card("back", "arrow", "Back", "", false, false);
+    int actionMargin = isHome ? dp(compact ? 12 : 18) : 0;
+    boolean largeLabel = textScale() * layoutScale > 1.2f;
+    int preferredAction = isHome ? (largeLabel ? 210 : 143) : (largeLabel ? 130 : 92);
+    int actionWidth = Math.min(Math.max(dp(preferredAction), preferredWidth(action)), contentWidth() * 45 / 100);
     ImageView mark = new ImageView(getContext());
     mark.setScaleType(ImageView.ScaleType.FIT_CENTER);
     mark.setImageBitmap(logo);
@@ -343,15 +436,15 @@ public final class RacingLauncherView extends FrameLayout {
     TextView title = text("FH4DROID", compact ? 22 : 24, WHITE, true);
     title.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
     title.setLetterSpacing(.035f);
+    title.setMaxWidth(Math.max(0, contentWidth() - actionWidth - actionMargin - dp(68)));
     LinearLayout.LayoutParams label = lp(-2, -2);
     label.leftMargin = dp(10);
     brand.addView(title, label);
     head.addView(brand, lp(-2, -2));
     head.addView(new View(getContext()), new LinearLayout.LayoutParams(0, 1, 1));
-    if (!home()) {
-      FocusCard back = card("back", "arrow", "Back", "", false, false);
-      head.addView(back, lp(largeText() ? 130 : 92, 40));
-      back.setOnClickListener(v -> back());
+    if (!isHome) {
+      head.addView(action, new LinearLayout.LayoutParams(actionWidth, dp(40)));
+      action.setOnClickListener(v -> back());
     } else {
       LinearLayout state = row();
       View dot = new View(getContext());
@@ -374,13 +467,12 @@ public final class RacingLauncherView extends FrameLayout {
       LinearLayout.LayoutParams stat = lp(-2, -2);
       stat.leftMargin = dp(7);
       state.addView(ready, stat);
-      if (!(largeText() && getResources().getConfiguration().screenWidthDp < 780))
+      if (preferredWidth(brand) + preferredWidth(state) + actionMargin + actionWidth <= contentWidth())
         head.addView(state, lp(-2, -2));
-      FocusCard profile = card("profile", "user", "Local profile", "", false, false);
-      LinearLayout.LayoutParams pp = lp(largeText() ? 210 : 143, 40);
-      pp.leftMargin = dp(compact ? 12 : 18);
-      head.addView(profile, pp);
-      profile.setOnClickListener(v -> open("profile"));
+      LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(actionWidth, dp(40));
+      pp.leftMargin = actionMargin;
+      head.addView(action, pp);
+      action.setOnClickListener(v -> open("profile"));
     }
     return head;
   }
@@ -388,10 +480,13 @@ public final class RacingLauncherView extends FrameLayout {
   private void title(LinearLayout body, String heading, String sub, int size) {
     TextView title = text(heading, size, WHITE, true);
     title.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+    title.setTag("launcher-heading");
     body.addView(title, lp(-1, -2));
     title.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
     title.setAccessibilityHeading(true);
-    TextView summary = text(sub, 12, MUTED, false);
+    TextView summary = text(compact && home() ? sub.replace("\n", " · ") : sub, 12, MUTED, false);
+    summary.setTag("launcher-summary");
+    if (home() && !compact) summary.setMaxLines(2);
     LinearLayout.LayoutParams sl = lp(-1, -2);
     sl.topMargin = dp(6);
     body.addView(summary, sl);
@@ -431,7 +526,8 @@ public final class RacingLauncherView extends FrameLayout {
         "controls",
         "controller",
         "Controls",
-        "Touch & controller");
+        "Touch & controller",
+        10);
     addPair(
         second,
         "files",
@@ -441,7 +537,8 @@ public final class RacingLauncherView extends FrameLayout {
         "more",
         "grid",
         "More",
-        "Mods, saves & tools");
+        "Mods, saves & tools",
+        10);
   }
 
   private void addPair(
@@ -453,11 +550,12 @@ public final class RacingLauncherView extends FrameLayout {
       String b,
       String bi,
       String bt,
-      String bs) {
+      String bs,
+      int spacing) {
     FocusCard left = card(a, ai, at, as, false, false), right = card(b, bi, bt, bs, false, false);
     LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(0, -1, 1),
         r = new LinearLayout.LayoutParams(0, -1, 1);
-    r.leftMargin = dp(10);
+    r.leftMargin = dp(spacing);
     row.addView(left, l);
     row.addView(right, r);
     left.setOnClickListener(v -> open(a));
@@ -466,28 +564,55 @@ public final class RacingLauncherView extends FrameLayout {
 
   private int menuCardHeight(){return cardHeight(compact ? 74 : 84);}
 
-  private boolean stackedHome(){return getResources().getConfiguration().screenWidthDp<540 || largeText();}
-  private void grid(LinearLayout body) {
-    body.setGravity(Gravity.CENTER_VERTICAL);
-    title(body, model.running?"Game running":model.ready?"Ready to drive":"Game files needed", model.graphics, compact ? 23 : 29);
-    if(!model.notice.isEmpty()){TextView notice=text(model.notice,11,0xfff4bf6a,false);notice.setMaxLines(2);body.addView(notice,lp(-1,-2));}
-    gap(body,compact?10:16);
-    if(stackedHome()){
-      FocusCard play=card("play","play",model.running?"Resume":model.ready?"Play":"Set up game","Start Forza Horizon",true,false);
-      body.addView(play,lp(-1,cardHeight(compact?72:80)));play.setOnClickListener(v->activate("play"));
-      gap(body,compact?6:10);
-      LinearLayout first=row(),second=row();body.addView(first,lp(-1,menuCardHeight()));gap(body,compact?6:10);body.addView(second,lp(-1,menuCardHeight()));
-      addPair(first,"settings","sliders","Settings","Graphics & sound","controls","controller","Controls","Touch & controller");
-      addPair(second,"files","folder","Game files","Installation & storage","more","grid","More","Mods, saves & tools");
-    }else{
-      LinearLayout area=row();body.addView(area,new LinearLayout.LayoutParams(-1,2*dp(menuCardHeight())+dp(10)));
-      FocusCard play=card("play","play",model.running?"Resume":model.ready?"Play":"Set up game","Start Forza Horizon",true,true);
-      area.addView(play,new LinearLayout.LayoutParams(0,-1,1));play.setOnClickListener(v->activate("play"));
-      LinearLayout options=column();LinearLayout.LayoutParams op=new LinearLayout.LayoutParams(dp(10),-1,2);op.leftMargin=dp(10);area.addView(options,op);
-      LinearLayout first=row(),second=row();options.addView(first,new LinearLayout.LayoutParams(-1,0,1));gap(options,10);options.addView(second,new LinearLayout.LayoutParams(-1,0,1));
-      addPair(first,"settings","sliders","Settings","Graphics & sound","controls","controller","Controls","Touch & controller");
-      addPair(second,"files","folder","Game files","Installation & storage","more","grid","More","Mods, saves & tools");
+  private int categoryColumns() {
+    return page.equals("settings") && (viewportWidth < screenDp(540) || largeText()) ? 2 : columns();
+  }
+
+  private void grid(LinearLayout body, int availableHeight) {
+    title(body, model.running ? "Game running" : model.ready ? "Ready to drive" : "Game files needed",
+        model.graphics, compact ? 23 : 29);
+    if (!model.notice.isEmpty()) {
+      TextView notice = text(model.notice, 11, 0xfff4bf6a, false);
+      notice.setMaxLines(2);
+      body.addView(notice, lp(-1, -2));
     }
+    gap(body, compact ? 10 : 16);
+    body.measure(MeasureSpec.makeMeasureSpec(contentWidth(), MeasureSpec.EXACTLY),
+        MeasureSpec.UNSPECIFIED);
+    int spacing = compact ? 12 : 10;
+    int cardGap = dp(spacing);
+    int cardWidth = Math.max(1, (contentWidth() - 2 * cardGap) / 3);
+    int availableForCards = availableHeight - body.getMeasuredHeight();
+    String playTitle = model.running ? "Resume" : model.ready ? "Play" : "Set up game";
+    String playCaption = model.running ? "Return to your session"
+        : model.ready ? "Start Forza Horizon" : "Choose your game files";
+    FocusCard play = card("play", "play", playTitle, playCaption, true, true);
+    LinearLayout first = row(), second = row();
+    addPair(first, "settings", "sliders", "Settings", "Graphics & sound", "controls", "controller",
+        "Controls", "Touch & controller", spacing);
+    addPair(second, "files", "folder", "Game files", "Installation & storage", "more", "grid",
+        "More", "Mods, saves & tools", spacing);
+    FocusCard[] cards = {(FocusCard) first.getChildAt(0), (FocusCard) first.getChildAt(1),
+        (FocusCard) second.getChildAt(0), (FocusCard) second.getChildAt(1)};
+    // Play spans both rows. Size the shared rows to the available space and their text.
+    int minimumRow = (play.minimumHeight(cardWidth) - cardGap + 1) / 2;
+    for (FocusCard card : cards) minimumRow = Math.max(minimumRow, card.minimumHeight(cardWidth));
+    int rowHeight = Math.max(minimumRow, Math.min(dp(menuCardHeight()), (availableForCards - cardGap) / 2));
+    int areaHeight = 2 * rowHeight + cardGap;
+
+    LinearLayout area = row();
+    body.addView(area, new LinearLayout.LayoutParams(-1, areaHeight));
+    area.addView(play, new LinearLayout.LayoutParams(0, -1, 1));
+    play.setOnClickListener(v -> activate("play"));
+    play.fitHeight(cardWidth, areaHeight);
+    LinearLayout options = column();
+    LinearLayout.LayoutParams optionColumns = new LinearLayout.LayoutParams(cardGap, -1, 2);
+    optionColumns.leftMargin = cardGap;
+    area.addView(options, optionColumns);
+    options.addView(first, new LinearLayout.LayoutParams(-1, rowHeight));
+    gap(options, spacing);
+    options.addView(second, new LinearLayout.LayoutParams(-1, rowHeight));
+    for (FocusCard card : cards) card.fitHeight(cardWidth, rowHeight);
   }
 
   private void secondary(LinearLayout body) {
@@ -504,9 +629,11 @@ public final class RacingLauncherView extends FrameLayout {
         description = "Touch and controller options, in one place.";
         entries =
             new String[][] {
-              {"touch-layout", "touch", "Touch layout", "Edit buttons & steering"},
+              {"touch-layout", "layout-edit", "Touch layout", "Edit buttons & steering"},
+              {"touch-settings", "touch-steering", "Touch buttons", "Racing labels & input"},
               {"controller", "controller", "Controller", "Mappings & calibration"},
-              {"tilt", "tilt", "Phone steering", "Tilt & sensitivity"}
+              {"tilt", "phone-motion", "Phone steering", "Tilt & vibration"},
+              {"saved-layouts", "layout-library", "Saved layouts", "Switch or apply presets"}
             };
         break;
       case "files":
@@ -543,7 +670,7 @@ public final class RacingLauncherView extends FrameLayout {
     }
     title(body, heading, description, compact ? 25 : 30);
     gap(body, compact ? 14 : 20);
-    int columns = page.equals("settings") && stackedHome() ? 2 : columns();
+    int columns = categoryColumns();
     for (int index = 0; index < entries.length; index += columns) {
       LinearLayout line = row();
       body.addView(line, lp(-1, menuCardHeight()));
@@ -565,18 +692,18 @@ public final class RacingLauncherView extends FrameLayout {
 
   private LinearLayout footer() {
     LinearLayout footer = row(), hints = row();
+    int linkHeight = 32;
     hints.addView(new Icon(getContext(), "dpad", MUTED), lp(17, 17));
     hints.addView(text(" Move", 10, MUTED, false));
     key(hints, "A", 0xff89d9a6, "Select");
     key(hints, "B", 0xfff4a4a6, "Back");
     footer.addView(hints, lp(-2, -2));
-    footer.addView(new View(getContext()), new LinearLayout.LayoutParams(0, 1, 1));
     LinearLayout social = row();
     for (String link : new String[] {"YouTube", "Telegram", "GitHub"}) {
       TextView view = text(link, 10.5f, MUTED, false);
       view.setGravity(Gravity.CENTER);
       view.setPadding(dp(8), 0, dp(8), 0);
-      view.setMinimumHeight(dp(32));
+      view.setMinimumHeight(dp(linkHeight));
       view.setFocusable(true);
       view.setFocusableInTouchMode(true);
       FestivalUi.touchFocus(view);
@@ -595,24 +722,36 @@ public final class RacingLauncherView extends FrameLayout {
       register(link.toLowerCase(Locale.ROOT), view);
       view.setOnClickListener(v -> actions.open(link.toLowerCase(Locale.ROOT)));
       view.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
-      social.addView(view, lp(-2, 32));
+      social.addView(view, lp(-2, linkHeight));
     }
-    footer.addView(social, lp(-2, -2));
-    footer.addView(new View(getContext()), new LinearLayout.LayoutParams(0, 1, 1));
     TextView version = text(model.version, 10.5f, MUTED, false);
+    version.setTag("installed-version");
     version.setGravity(Gravity.RIGHT);
-    if (largeText() && compact) {
+    int width = contentWidth();
+    int socialWidth = preferredWidth(social);
+    if (preferredWidth(hints) + preferredWidth(version) + socialWidth > width) {
       LinearLayout both = column();
-      footer.removeView(social);
-      version.setTextSize(10);
-      footer.addView(version, lp(-2, -2));
-      both.addView(footer, lp(-1, 32));
+      footer.addView(version, new LinearLayout.LayoutParams(0, -2, 1));
+      both.addView(footer, lp(-1, linkHeight));
       social.setGravity(Gravity.CENTER);
-      both.addView(social, lp(-1, 28));
+      if (socialWidth > width) {
+        for (int i = 0; i < social.getChildCount(); i++)
+          social.getChildAt(i).setLayoutParams(new LinearLayout.LayoutParams(0, dp(linkHeight), 1));
+      }
+      both.addView(social, lp(-1, linkHeight));
       return both;
     }
+    footer.addView(new View(getContext()), new LinearLayout.LayoutParams(0, 1, 1));
+    footer.addView(social, lp(-2, -2));
+    footer.addView(new View(getContext()), new LinearLayout.LayoutParams(0, 1, 1));
     footer.addView(version, lp(-2, -2));
+    footer.setMinimumHeight(dp(compact ? linkHeight : 36));
     return footer;
+  }
+
+  private int preferredWidth(View view) {
+    view.measure(MeasureSpec.UNSPECIFIED, MeasureSpec.UNSPECIFIED);
+    return view.getMeasuredWidth();
   }
 
   private void key(LinearLayout row, String value, int color, String caption) {
@@ -727,6 +866,7 @@ public final class RacingLauncherView extends FrameLayout {
   private void open(String action) {
     lastHome = action;
     if (action.equals("controls")) actions.open("control-settings");
+    else if (action.equals("profile")) actions.open("edit-profile");
     else showPage(action);
   }
 
@@ -779,8 +919,8 @@ public final class RacingLauncherView extends FrameLayout {
         edge("files", View.FOCUS_DOWN, "youtube");
         edge("more", View.FOCUS_DOWN, "github");
       } else {
-        edge("play",View.FOCUS_RIGHT,"settings");edge("play",View.FOCUS_DOWN,stackedHome()?"settings":"youtube");
-        edge("settings",View.FOCUS_UP,stackedHome()?"play":"profile");edge("controls",View.FOCUS_UP,stackedHome()?"play":"profile");
+        edge("play",View.FOCUS_RIGHT,"settings");edge("play",View.FOCUS_DOWN,"youtube");
+        edge("settings",View.FOCUS_UP,"profile");edge("controls",View.FOCUS_UP,"profile");
         edge("settings",View.FOCUS_LEFT,"play");edge("files",View.FOCUS_LEFT,"play");
         edge("settings",View.FOCUS_RIGHT,"controls");edge("controls",View.FOCUS_LEFT,"settings");edge("controls",View.FOCUS_RIGHT,"controls");
         edge("settings",View.FOCUS_DOWN,"files");edge("files",View.FOCUS_UP,"settings");edge("controls",View.FOCUS_DOWN,"more");edge("more",View.FOCUS_UP,"controls");
@@ -790,42 +930,30 @@ public final class RacingLauncherView extends FrameLayout {
       edge("youtube", View.FOCUS_UP, "files");
       edge("telegram", View.FOCUS_UP, "more");
       edge("github", View.FOCUS_UP, "more");
+      edge("youtube", View.FOCUS_RIGHT, "telegram");
+      edge("telegram", View.FOCUS_LEFT, "youtube");
+      edge("telegram", View.FOCUS_RIGHT, "github");
+      edge("github", View.FOCUS_LEFT, "telegram");
     } else if (externalBody != null) {
-      View first = firstFocusable(externalBody, false), last = firstFocusable(externalBody, true);
+      View first = firstFocusable(externalBody);
       if (first != null) {
         if (first.getId() == NO_ID) first.setId(View.generateViewId());
         focus.get("back").setNextFocusDownId(first.getId());
       }
-      if (last != null) {
-        if (last.getId() == NO_ID) last.setId(View.generateViewId());
-        for (String id : new String[] {"youtube", "telegram", "github"})
-          focus.get(id).setNextFocusUpId(last.getId());
-      }
     } else {
-      int columns = page.equals("settings") && stackedHome() ? 2 : columns();
-      java.util.List<String> cards = new ArrayList<>(focus.keySet());
-      cards.removeAll(Arrays.asList("back", "youtube", "telegram", "github"));
+      int columns = categoryColumns();
+      List<String> cards = new ArrayList<>(focus.keySet());
+      cards.remove("back");
       for (int i = 0; i < cards.size(); i++) {
         String current = cards.get(i);
         edge(current, View.FOCUS_UP, i < columns ? "back" : cards.get(i - columns));
-        edge(
-            current,
-            View.FOCUS_DOWN,
-            i + columns < cards.size() ? cards.get(i + columns) : "youtube");
+        if (i + columns < cards.size()) edge(current, View.FOCUS_DOWN, cards.get(i + columns));
         if (i % columns > 0) edge(current, View.FOCUS_LEFT, cards.get(i - 1));
         if (i % columns < columns - 1 && i + 1 < cards.size())
           edge(current, View.FOCUS_RIGHT, cards.get(i + 1));
       }
-      if (!cards.isEmpty()) {
-        edge("back", View.FOCUS_DOWN, cards.get(0));
-        for (String s : new String[] {"youtube", "telegram", "github"})
-          edge(s, View.FOCUS_UP, cards.get(cards.size() - 1));
-      }
+      if (!cards.isEmpty()) edge("back", View.FOCUS_DOWN, cards.get(0));
     }
-    edge("youtube", View.FOCUS_RIGHT, "telegram");
-    edge("telegram", View.FOCUS_LEFT, "youtube");
-    edge("telegram", View.FOCUS_RIGHT, "github");
-    edge("github", View.FOCUS_LEFT, "telegram");
   }
 
   private boolean move(int direction) {
@@ -902,6 +1030,10 @@ public final class RacingLauncherView extends FrameLayout {
   public boolean dispatchGenericMotionEvent(MotionEvent event) {
     if ((event.getSource() & InputDevice.SOURCE_JOYSTICK) != InputDevice.SOURCE_JOYSTICK)
       return super.dispatchGenericMotionEvent(event);
+    if (externalBody != null && super.dispatchGenericMotionEvent(event)) {
+      stopStick();
+      return true;
+    }
     if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
       stopStick();
       return true;
@@ -998,11 +1130,12 @@ public final class RacingLauncherView extends FrameLayout {
       setWillNotDraw(false);
       setOrientation(vertical ? VERTICAL : HORIZONTAL);
       setGravity(vertical ? Gravity.LEFT | Gravity.CENTER_VERTICAL : Gravity.CENTER_VERTICAL);
+      int verticalPadding = subtitle.isEmpty() ? 6 : compact ? 7 : 10;
       setPadding(
           dp(vertical ? 17 : 16),
-          dp(subtitle.isEmpty() ? 6 : compact ? 7 : 10),
+          dp(verticalPadding),
           dp(14),
-          dp(subtitle.isEmpty() ? 6 : compact ? 7 : 10));
+          dp(verticalPadding));
       setClickable(true);
       setFocusable(true);
       setFocusableInTouchMode(true);
@@ -1022,11 +1155,8 @@ public final class RacingLauncherView extends FrameLayout {
           });
       int foreground = primary ? 0xff11141b : WHITE;
       Icon symbol = new Icon(context, icon, foreground);
-      addView(
-          symbol,
-          lp(
-              subtitle.isEmpty() ? 18 : primary ? 26 : compact ? 20 : 22,
-              subtitle.isEmpty() ? 18 : primary ? 26 : compact ? 20 : 22));
+      int iconSize = subtitle.isEmpty() ? 18 : primary ? 26 : compact ? 20 : 22;
+      addView(symbol, lp(iconSize, iconSize));
       LinearLayout words = column();
       if (vertical) {
         LinearLayout.LayoutParams wp = lp(-1, -2);
@@ -1048,16 +1178,16 @@ public final class RacingLauncherView extends FrameLayout {
       if (largeText() && !subtitle.isEmpty()) label.setMaxLines(2);
       words.addView(label, lp(-1, -2));
       if (!subtitle.isEmpty()) {
-        TextView sub =
+        TextView details =
             text(
                 subtitle,
                 primary ? 12 : compact ? 10.5f : 11.5f,
                 primary ? 0xff62656b : MUTED,
                 false);
-        if (largeText()) sub.setMaxLines(2);
+        if (largeText()) details.setMaxLines(2);
         LinearLayout.LayoutParams sp = lp(-1, -2);
         sp.topMargin = dp(compact ? 3 : 5);
-        words.addView(sub, sp);
+        words.addView(details, sp);
       }
       setOnFocusChangeListener((v, focused) -> invalidate());
       setOnTouchListener(
@@ -1065,6 +1195,21 @@ public final class RacingLauncherView extends FrameLayout {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) requestFocus();
             return false;
           });
+    }
+
+    private int contentHeight(int width) {
+      measure(MeasureSpec.makeMeasureSpec(Math.max(1, width), MeasureSpec.EXACTLY),
+          MeasureSpec.UNSPECIFIED);
+      return getMeasuredHeight() - getPaddingTop() - getPaddingBottom();
+    }
+
+    private int minimumHeight(int width) {
+      return Math.max(dp(44), contentHeight(width) + 2 * dp(3));
+    }
+
+    private void fitHeight(int width, int height) {
+      int padding = Math.max(dp(3), (height - contentHeight(width)) / 2);
+      if (padding < getPaddingTop()) setPadding(getPaddingLeft(), padding, getPaddingRight(), padding);
     }
 
     @Override
@@ -1083,7 +1228,8 @@ public final class RacingLauncherView extends FrameLayout {
       }
       if (primary) {
         paint.setColor(PINK);
-        c.drawRoundRect(new RectF(dp(2), dp(22), dp(5), getHeight() - dp(22)), dp(2), dp(2), paint);
+        float edge = Math.min(dp(22), getHeight() * .25f);
+        c.drawRoundRect(new RectF(dp(2), edge, dp(5), getHeight() - edge), dp(2), dp(2), paint);
       }
       super.onDraw(c);
     }
@@ -1217,6 +1363,9 @@ public final class RacingLauncherView extends FrameLayout {
           line(
               c, 9, 3, 15, 3, 15, 9, 21, 9, 21, 15, 15, 15, 15, 21, 9, 21, 9, 15, 3, 15, 3, 9, 9, 9,
               9, 3);
+          break;
+        default:
+          ControlGlyphs.draw(c,p,12,12,10,name);
           break;
       }
       c.restore();

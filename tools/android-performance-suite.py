@@ -6,11 +6,17 @@ player's files. Results require per-frame CSVs plus explicit device, route,
 seed, cache and thermal provenance. Missing evidence is not a passing result.
 """
 import argparse
+import hashlib
 import importlib.util
 import json
 import math
 import pathlib
 import re
+import shutil
+import subprocess
+import tempfile
+import time
+import uuid
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 SPEC=importlib.util.spec_from_file_location("performance_summary",ROOT/"tools/summarize-performance.py")
@@ -68,6 +74,7 @@ def cases():
         "pacing-spin":{"host_present_sleep_spin":"true","host_present_fps_limit":"30"},
         "target-40":{"pinyon_shift_fh1_render_fps_limit":"40"},
         "target-60":{"pinyon_shift_fh1_render_fps_limit":"60"},
+        "cpu-hints":{},
     }
     for name,values in changes.items():out[name]=BASE|values
     return out
@@ -98,6 +105,155 @@ def plan(directory):
         "result_format":{"runs":[{"case":"baseline","csv":"capture.csv","device":"model / GPU","driver":"version","build":"source commit","route":"route ID","seed_sha256":"64 hex characters","cache":"warm","storage":"iso","display_hz":120,"target_fps":30,"render_scale_percent":75,"thermal_start":0,"thermal_end":0,"host_menu":False}]}}
     (directory/"plan.json").write_text(json.dumps(result,indent=2)+"\n",encoding="utf-8")
     return result
+
+
+QUALIFICATION_CHECKS = (
+    "startup", "race", "autoshow_paint", "car_select_tiles", "collision_and_engine_audio",
+    "low_resolution", "photo_and_widescreen", "background_resume", "sustained_drive",
+)
+
+
+def qualifications(rows):
+    results = []
+    for row in rows:
+        required = ("device", "gpu", "android", "driver", "renderer", "build")
+        if any(not isinstance(row.get(key), str) or not row[key].strip() for key in required):
+            raise ValueError("Qualification requires device, GPU, Android, driver, renderer and build")
+        checks = row.get("checks", {})
+        missing = []
+        for name in QUALIFICATION_CHECKS:
+            item = checks.get(name, {})
+            if (item.get("result") != "pass" or not isinstance(item.get("evidence"), str)
+                    or not item["evidence"].strip()):
+                missing.append(name)
+        results.append({**{key: row[key] for key in required},
+                        "status": "qualified" if not missing else "unqualified", "unverified": missing})
+    return results
+
+
+def trial_config(source, changes):
+    """Replace root options, keeping unrelated options and TOML tables."""
+    root, tables = [], []
+    current = root
+    for line in source.splitlines():
+        if line.lstrip().startswith("["):
+            current = tables
+        key = line.split("=", 1)[0].strip()
+        if current is root and key in changes and "=" in line:
+            continue
+        current.append(line)
+    root.extend(f"{key} = {value}" for key, value in changes.items())
+    return "\n".join(root + tables) + "\n"
+
+
+def seed_digest(seed, include_cache):
+    digest = hashlib.sha256()
+    roots = ("user", "config", "cache/shaders") if include_cache else ("user", "config")
+    for folder in roots:
+        for path in sorted((seed / folder).rglob("*")):
+            if path.is_symlink():
+                raise ValueError("Use a render seed without linked files")
+            if not path.is_file():
+                continue
+            digest.update(path.relative_to(seed).as_posix().encode() + b"\0")
+            with path.open("rb") as stream:
+                content = hashlib.file_digest(stream, "sha256").digest()
+            digest.update(content)
+    return digest.hexdigest()
+
+
+def capture_pair(args):
+    import pinyon_android as android
+
+    seed, route = args.seed.resolve(), args.route.resolve()
+    config = seed / "config"
+    config_file = config / "pinyon_shift.toml"
+    if not (seed / "user").is_dir() or not config_file.is_file() or not route.is_file():
+        raise ValueError("Supply a pinned render seed with user and config folders, and a route file")
+    if args.trial in ("iso-streaming", "folder-streaming"):
+        raise ValueError("Select each storage source on the device and capture it separately")
+    if args.cache == "warm" and not (seed / "cache/shaders").is_dir():
+        raise ValueError("A warm comparison needs a pinned shader cache in the seed")
+    digest = seed_digest(seed, args.cache == "warm")
+    configs = cases()
+    original = config_file.read_text(encoding="utf-8-sig")
+    output = args.output.resolve()
+    tools = android.Tools()
+
+    def adb(*command, **kwargs):
+        return android.adb(tools, args, *command, **kwargs)
+
+    def game_running():
+        probe = subprocess.run([str(tools.adb), *(["-s", args.serial] if args.serial else []),
+                                "shell", "pidof", android.PACKAGE + ":game"],
+                               capture_output=True, text=True)
+        return bool(probe.stdout.strip())
+
+    if game_running():
+        raise ValueError("Quit the running game before starting the comparison")
+    model = adb("shell", "getprop", "ro.product.model", capture_output=True, text=True).stdout.strip()
+    route_hash = hashlib.sha256(route.read_bytes()).hexdigest()
+    output.mkdir(parents=True, exist_ok=False)
+    manifest = {"device": model, "route": route.name, "route_sha256": route_hash,
+                "seed_sha256": digest, "cache": args.cache, "captures": []}
+    for label, variant in (("baseline-a", "baseline"), ("baseline-repeat", "baseline"),
+                           ("trial", args.trial)):
+        if game_running():
+            raise ValueError("A game session is still active. Quit it before continuing")
+        case = output / label
+        case.mkdir()
+        identifier = uuid.uuid4().hex
+        remote = f"{android.DEVICE_FILES}/mobile-comparisons/{identifier}"
+        with tempfile.TemporaryDirectory(prefix="fh4droid-comparison-") as temporary:
+            copied_cfg = pathlib.Path(temporary) / "config"
+            shutil.copytree(config, copied_cfg)
+            overlay = configs[variant]
+            (copied_cfg / config_file.name).write_text(trial_config(original, overlay), encoding="utf-8")
+            adb("shell", "mkdir", "-p", f"{remote}/captures")
+            adb("push", seed / "user", f"{remote}/user")
+            adb("push", copied_cfg, f"{remote}/config")
+            if args.cache == "warm":
+                adb("shell", "mkdir", "-p", f"{remote}/cache")
+                adb("push", seed / "cache" / "shaders", f"{remote}/cache/shaders")
+            adb("push", route, f"{remote}/route.fh1test")
+            android.share_with_app(tools, args, remote)
+
+        adb("shell", "am", "start", "-W", "-n", f"{android.PACKAGE}/{android.ACTIVITY}",
+            "--es", "comparison_id", identifier, "--ez", "comparison_cpu_hints",
+            str(variant == "cpu-hints").lower(), "--ez", "show_when_locked", "true",
+            "--es", "env.PINYON_SHIFT_FH1_RENDER_TEST_SCRIPT", f"{remote}/route.fh1test",
+            "--es", "env.PINYON_SHIFT_FH1_RENDER_TEST_OUTPUT", f"{remote}/captures")
+        deadline = time.monotonic() + args.timeout
+        while game_running() and time.monotonic() < deadline:
+            time.sleep(2)
+        if game_running():
+            raise ValueError(f"{label} did not finish. Partial device captures are in {remote}")
+        adb("pull", f"{remote}/logs", case)
+        if adb("shell", "ls", "-A", f"{remote}/captures", capture_output=True, text=True).stdout.strip():
+            adb("pull", f"{remote}/captures", case)
+        logs = case / "logs"
+        route_logs = [path for path in logs.glob("*.jsonl") if not path.name.startswith("android-")]
+        timings = list(logs.glob("*.perf.csv"))
+        completed = False
+        for path in route_logs:
+            events = []
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    events.append(json.loads(line).get("event", ""))
+                except json.JSONDecodeError:
+                    continue
+            completed |= "fh1.render_test.complete" in events and not any(
+                event.endswith(".failure") for event in events
+            )
+        manifest["captures"].append({
+            "case": variant, "directory": label, "route_completed": completed,
+            "csv": str(timings[0].relative_to(output)) if len(timings) == 1 else None,
+        })
+        (output / "captures.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        if not completed or len(timings) != 1:
+            raise ValueError(f"{label} lacks a completed route or one timing CSV. Captures are in {case}")
+        adb("shell", "rm", "-rf", remote)
+    print(f"Saved the A/A/B captures in {output}")
 
 def scale_trials(results):
     """Choose a measured next-launch scale for each matching route and FPS cap."""
@@ -182,15 +338,31 @@ def compare(manifest,threshold=5):
         regressed = delta > threshold or p99_delta is not None and p99_delta > threshold
         comparisons.append({"case":run["case"],"status":"regression" if regressed else "within-threshold",
                             "p95_delta_percent":delta,"p99_delta_percent":p99_delta})
+    qualification = qualifications(data.get("qualification", []))
     return {"schema":"fh4droid.performance-suite.v1","runs":results,"comparisons":comparisons,
-            "scale_trials":scale_trials(results),"qualified_devices":[],"note":"Timing comparisons do not qualify visuals, audio, long-session stability or a GPU family. A/A repeats establish measurement noise before interpreting small changes."}
+            "scale_trials":scale_trials(results),
+            "qualified_devices":[row for row in qualification if row["status"]=="qualified"],
+            "qualification":qualification,
+            "note":"Timing comparisons do not qualify visuals, audio, long-session stability or a GPU family. A/A repeats establish measurement noise before interpreting small changes."}
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest="action",required=True)
     create=sub.add_parser("plan");create.add_argument("directory",type=pathlib.Path)
     analyze=sub.add_parser("compare");analyze.add_argument("manifest",type=pathlib.Path);analyze.add_argument("--threshold",type=float,default=5);analyze.add_argument("--output",type=pathlib.Path,required=True)
+    capture=sub.add_parser("capture-pair",help="capture an A/A/B route on a connected Android device")
+    capture.add_argument("--seed",type=pathlib.Path,required=True)
+    capture.add_argument("--route",type=pathlib.Path,required=True)
+    capture.add_argument("--trial",choices=sorted(set(cases())-{"baseline","iso-streaming","folder-streaming"}),required=True)
+    capture.add_argument("--cache",choices=("cold","warm"),default="cold")
+    capture.add_argument("--output",type=pathlib.Path,required=True)
+    capture.add_argument("--serial")
+    capture.add_argument("--timeout",type=int,default=1800)
     args=parser.parse_args()
-    if args.action=="plan":result=plan(args.directory);print(f"Prepared {len(result['cases'])} experiment overlays; no device results yet.")
-    else:args.output.write_text(json.dumps(compare(args.manifest,args.threshold),indent=2)+"\n",encoding="utf-8")
+    try:
+        if args.action=="plan":result=plan(args.directory);print(f"Prepared {len(result['cases'])} experiment overlays; no device results yet.")
+        elif args.action=="capture-pair":capture_pair(args)
+        else:args.output.write_text(json.dumps(compare(args.manifest,args.threshold),indent=2)+"\n",encoding="utf-8")
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        parser.exit(1, f"{error}\n")
     return 0
 if __name__=="__main__":raise SystemExit(main())

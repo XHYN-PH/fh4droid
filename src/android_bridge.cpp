@@ -1,7 +1,9 @@
 #include "android_bridge.h"
 
 #include <SDL3/SDL_system.h>
+#include <android/performance_hint.h>
 #include <jni.h>
+#include <unistd.h>
 #include <rex/cvar.h>
 #include <rex/perf/counter.h>
 #include <rex/ui/vulkan/android_gpu_driver.h>
@@ -21,6 +23,7 @@
 extern "C" __attribute__((used, visibility("default")))
 const char fh4droid_native_bridge_abi[] = "fh4droid-native-bridge:r7-budget-controls-v1";
 extern "C" void rex_android_preparation_progress(uint64_t* values);
+extern "C" uint64_t rex_android_preparation_stage();
 namespace pinyon_shift::guest_native {
 bool MobileNativeAudioOutputActive();
 }
@@ -30,6 +33,16 @@ Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeAudioOutputActive(JNIEn
 }
 namespace {
 std::mutex bridge_mutex;
+std::mutex cpu_hint_mutex;
+std::atomic<int64_t> cpu_frame_budget{0};
+APerformanceHintSession* cpu_hint_session = nullptr;
+int32_t cpu_hint_thread = 0;
+int64_t cpu_hint_budget = 0;
+
+void CloseCpuHintSession() {
+  if (cpu_hint_session) APerformanceHint_closeSession(cpu_hint_session);
+  cpu_hint_session = nullptr;
+}
 std::atomic<int> coarse_shading_available{-1};
 std::function<void(bool)> menu_handler;
 std::function<void()> settings_handler;
@@ -44,6 +57,22 @@ std::string Read(JNIEnv *env, jstring value) {
 }
 }  // namespace
 namespace pinyon_shift::android {
+void ReportCpuFrame(int64_t work_ns) {
+  if (cpu_frame_budget.load(std::memory_order_relaxed) == 0 || work_ns <= 0) return;
+  std::lock_guard lock(cpu_hint_mutex);
+  const int64_t target = cpu_frame_budget.load(std::memory_order_relaxed);
+  if (target == 0 || work_ns > target * 8) return;
+  const int32_t thread = gettid();
+  if (thread != cpu_hint_thread || target != cpu_hint_budget) {
+    CloseCpuHintSession();
+    cpu_hint_thread = thread;
+    cpu_hint_budget = target;
+    if (auto* manager = APerformanceHint_getManager())
+      cpu_hint_session = APerformanceHint_createSession(manager, &thread, 1, target);
+  }
+  if (cpu_hint_session && APerformanceHint_reportActualWorkDuration(cpu_hint_session, work_ns) != 0)
+    CloseCpuHintSession();
+}
 void SetCoarseShadingAvailable(bool available){coarse_shading_available.store(available?1:0,std::memory_order_release);}
 void RecordCleanExit(){rex::ui::vulkan::CallAndroidActivityMethod("recordCleanExit");}
 void InstallBridge(std::function<void(bool)> menu,
@@ -78,7 +107,7 @@ void RefreshAchievements() {
   if (!achievements_handler) return;
   const auto snapshot = achievements_handler();
   auto path =
-      pinyon_shift::diagnostics::StateRoot() / "logs/android-achievements.json";
+      pinyon_shift::diagnostics::StateRoot() / "cache/android-achievements.json";
   auto temporary = path;
   temporary += ".tmp";
   std::error_code ec;
@@ -211,8 +240,20 @@ Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeCoarseShadingSupport(JN
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativePreparation(JNIEnv* env,jclass) {
   uint64_t progress[5]{};rex_android_preparation_progress(progress);
-  jlong values[5];for(size_t i=0;i<5;i++)values[i]=jlong(progress[i]);
-  auto out=env->NewLongArray(5);if(out)env->SetLongArrayRegion(out,0,5,values);return out;
+  jlong values[6];for(size_t i=0;i<5;i++)values[i]=jlong(progress[i]);
+  values[5]=jlong(rex_android_preparation_stage());
+  auto out=env->NewLongArray(6);if(out)env->SetLongArrayRegion(out,0,6,values);return out;
+}
+extern "C" JNIEXPORT void JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeCpuHintTarget(JNIEnv*,jclass,jint fps) {
+  std::lock_guard lock(cpu_hint_mutex);
+  cpu_frame_budget.store(fps >= 15 && fps <= 240 ? 1000000000LL / fps : 0,
+                         std::memory_order_relaxed);
+  if (!fps) {
+    CloseCpuHintSession();
+    cpu_hint_thread = 0;
+    cpu_hint_budget = 0;
+  }
 }
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeFrameHistory(JNIEnv* env, jclass) {

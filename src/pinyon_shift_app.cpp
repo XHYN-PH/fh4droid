@@ -863,7 +863,7 @@ void PinyonShiftApp::OnConfigurePaths(rex::PathConfig& paths) {
 
   config_created_ = config_created;
   g_user_data_root = paths.user_data_root;
-  if (REXCVAR_GET(log_file).empty()) {
+  if (diagnostics::LoggingEnabled() && REXCVAR_GET(log_file).empty()) {
     REXCVAR_SET(log_file, rex::path_to_utf8(state_root / "logs" / "runtime.log"));
   }
   // Controllers the player mapped in CONTROLS > MAP CONTROLLER (#432).
@@ -923,6 +923,7 @@ void PinyonShiftApp::OnConfigureStyle(ImGuiStyle& imgui_style, rex::ui::Style& u
 }
 
 void PinyonShiftApp::OnPostInitLogging() {
+  if (!pinyon_shift::diagnostics::LoggingEnabled()) return;
   std::string perf_csv = rex::cvar::GetFlagByName("perf_log_csv");
   if (perf_csv.empty() && REXCVAR_GET(pinyon_shift_capture_performance)) {
     // UTF-8, as the SDK reads it; string() would use the ANSI code page and

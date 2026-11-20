@@ -21,6 +21,12 @@ public final class PerformancePolicyTest {
         check(PerformancePolicy.presentationTarget("40","0")==40);
         check(PerformancePolicy.presentationTarget("0","60")==60);
         check(PerformancePolicy.presentationTarget("NaN","Infinity")==0);
+        check(PerformancePolicy.seamlessCadence(40,60,new float[]{60,90,120})==120);
+        check(PerformancePolicy.seamlessCadence(30,59.94f,new float[]{90,120})==59.94f);
+        check(PerformancePolicy.seamlessCadence(40,60,new float[]{60,90})==0);
+        check(PerformancePolicy.seamlessCadence(0,120,new float[]{60})==0);
+        check(Math.abs(ControllerTools.shaped(.5f,0,1,2)-.25f)<.0001f);
+        check(ControllerTools.shaped(-.3f,.4f,.9f,1)==0);
         for(int level:new int[]{0,5,20})check(!PerformancePolicy.trim(level));
         for(int level:new int[]{10,15,40,60,80})check(PerformancePolicy.trim(level));
         System.out.println("PASS: "+checks+" memory, shader, pacing and trim policies");

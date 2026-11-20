@@ -17,8 +17,9 @@ final class LayoutProfiles {
   private static File folder(Activity a){return new File(MobileConfig.base(a),"state/config/layouts");}
   static void show(Activity a){
     LinearLayout body=FestivalUi.column(a);
-    TouchLayout modern=new TouchLayout();modern.modernDefaults(a);FestivalUi.action(a,body,"Modern racing preset",()->apply(a,modern));
-    FestivalUi.action(a,body,"Save current layout as…",()->{
+    TouchLayout modern=new TouchLayout();modern.modernDefaults(a);
+    FestivalUi.setActionIcon(a,FestivalUi.action(a,body,"Modern racing preset",()->apply(a,modern)),"flag");
+    Button save=FestivalUi.action(a,body,"Save current layout as…",()->{
       EditText field=new EditText(a);field.setSingleLine(true);
       AlertDialog dialog=new AlertDialog.Builder(a).setTitle("Layout name").setView(field).setNegativeButton("Cancel",null).setPositiveButton("Save",null).create();
       dialog.setOnShowListener(v->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(w->{
@@ -33,17 +34,20 @@ final class LayoutProfiles {
         }catch(IOException error){field.setError(error.getMessage());}
       }));dialog.show();
     });
+    FestivalUi.setActionIcon(a,save,"save");
     for(boolean left:new boolean[]{false,true}){
-      FestivalUi.action(a,body,(left?"Left":"Right")+"-handed driving template",()->apply(a,template(left,false)));
+      Button handed=FestivalUi.action(a,body,(left?"Left":"Right")+"-handed driving template",()->apply(a,template(left,false)));
+      FestivalUi.setActionIcon(a,handed,left?"left":"right");
     }
-    FestivalUi.action(a,body,"Compact driving template",()->apply(a,template(false,true)));
-    FestivalUi.action(a,body,"Full controller template",()->apply(a,controllerTemplate()));
+    FestivalUi.setActionIcon(a,FestivalUi.action(a,body,"Compact driving template",()->apply(a,template(false,true))),"resize");
+    FestivalUi.setActionIcon(a,FestivalUi.action(a,body,"Full controller template",()->apply(a,controllerTemplate())),"controller");
     File[] files=folder(a).listFiles(f->f.isFile()&&!Files.isSymbolicLink(f.toPath())&&f.getName().endsWith(".layout"));
     if(files!=null){
       Arrays.sort(files,Comparator.comparing(File::getName));
       for(File file:Arrays.copyOf(files,Math.min(files.length,100))){
         LinearLayout row=new LinearLayout(a);body.addView(row);
         Button use=FestivalUi.button(a,file.getName().replaceFirst("\\.layout$",""),false);
+        FestivalUi.setActionIcon(a,use,"file");
         row.addView(use,new LinearLayout.LayoutParams(0,-2,1));
         use.setOnClickListener(v->{try{
           if(file.length()>65536||Files.isSymbolicLink(file.toPath()))throw new IOException("Layout is unavailable or too large.");

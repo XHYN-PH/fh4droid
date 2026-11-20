@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <functional>
 #include <string>
 namespace pinyon_shift::android {
@@ -9,4 +10,5 @@ void RefreshAchievements();
 void ClearBridge();
 void RecordCleanExit();
 void SetCoarseShadingAvailable(bool available);
+void ReportCpuFrame(int64_t work_ns);
 }

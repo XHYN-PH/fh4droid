@@ -17,7 +17,7 @@ final class SettingsHub {
   static final String[][] CATEGORY_CARDS = {
       {"graphics", "sliders", "Graphics", "Resolution, quality & FPS"},
       {"audio", "audio", "Audio", "Volume & music"},
-      {"control-settings", "controller", "Controls", "Touch, tilt & gamepad"},
+      {"control-settings", "touch-steering", "Controls", "Touch, tilt & gamepad"},
       {"interface", "grid", "Interface", "Display & readability"},
       {"gameplay", "flag", "Gameplay", "Camera & preferences"},
       {"advanced", "chip", "Advanced", "Drivers & diagnostics"}
@@ -25,12 +25,12 @@ final class SettingsHub {
   private static final String SEARCH = "All settings";
   private static final String RESOLUTION_HELP =
       "Lower resolution reduces GPU work and loses some detail. The upscaling filter controls "
-          + "display smoothing. Applies next launch. Left / right changes by 1% (25–100%).";
+          + "display smoothing. Applies next launch. Use left or right to adjust in 1% steps (25–100%).";
   private static final Set<String> ADVANCED =
       new HashSet<>(Arrays.asList("swap_post_effect_scene_only", "texture_mip_lod_bias",
           "fh1_untile_predicated_tiling", "vulkan_pipeline_creation_threads",
           "host_present_fps_limit", "host_present_sleep_spin",
-          "vulkan_present_wait", "present_dither", "pad_gyro_steering", "pad_gyro_sensitivity",
+          "vulkan_present_wait", "present_dither",
           "present_cas_additional_sharpness", "present_fsr_sharpness_reduction"));
   private static final Map<Activity, Change> UNDO = new WeakHashMap<>();
   private static final List<MobileSettings.Option> OPTIONS =
@@ -103,20 +103,37 @@ final class SettingsHub {
     ScrollView helpScroll=new ScrollView(a);details.addView(helpScroll,new LinearLayout.LayoutParams(-1,0,1));LinearLayout helpBody=FestivalUi.column(a);helpScroll.addView(helpBody);
     TextView detailHelp=FestivalUi.text(a,"Select a setting to read its explanation.",12,FestivalUi.MUTED);helpBody.addView(detailHelp);
     TextView detailValue=FestivalUi.text(a,"",11,FestivalUi.TEXT);detailValue.setPadding(0,FestivalUi.dp(a,8),0,0);helpBody.addView(detailValue);
-    Button more=FestivalUi.button(a,"Y  More details",false);more.setTextSize(11);more.setMinHeight(0);more.setMinimumHeight(0);details.addView(more,new LinearLayout.LayoutParams(-1,FestivalUi.dp(a,32)));more.setOnClickListener(v->FestivalUi.explain(a,detailTitle.getText().toString(),detailHelp.getText()+"\n\n"+detailValue.getText()));
-    LinearLayout.LayoutParams dp=new LinearLayout.LayoutParams(0,-1,1);dp.leftMargin=FestivalUi.dp(a,8);content.addView(details,dp);
-    java.util.function.Consumer<MobileSettings.Option> inspect=o->{detailTitle.setText(o.title);detailHelp.setText(o.help+(o.restart?"\n\nApplies next launch.":""));String saved=value(a,o.key,o.initial),live=active(runtime,o.key);detailValue.setText(live==null?"Saved: "+MobileSettings.label(o,saved):"Running: "+MobileSettings.label(o,live)+"\nSaved: "+MobileSettings.label(o,saved));};
-    Runnable resolutionDetails=()->{detailTitle.setText("Render resolution");detailHelp.setText(RESOLUTION_HELP);String saved=value(a,"fh1_render_scale_percent","100"),live=active(runtime,"fh1_render_scale_percent");detailValue.setText(live==null?"Next launch: "+saved+"%":"Running: "+SettingValues.plain(live)+"%\nNext launch: "+saved+"%");};
+    Button more=FestivalUi.button(a,"More details",false);more.setTextSize(11);more.setMinHeight(0);more.setMinimumHeight(0);details.addView(more,new LinearLayout.LayoutParams(-1,FestivalUi.dp(a,32)));more.setOnClickListener(v->FestivalUi.explain(a,detailTitle.getText().toString(),detailHelp.getText()+"\n\n"+detailValue.getText()));
+    LinearLayout.LayoutParams dp=new LinearLayout.LayoutParams(0,-1,FestivalUi.wideLayout(a)?1:1.25f);dp.leftMargin=FestivalUi.dp(a,8);content.addView(details,dp);
+    java.util.function.Consumer<MobileSettings.Option> inspect = o -> {
+      detailTitle.setText(o.title);
+      String reason = SettingAvailability.reason(a, o.key);
+      String timing = o.restart ? "Applies at the next launch." : "Applies during play.";
+      detailHelp.setText(o.help + "\n\n" + (reason.isEmpty() ? timing : reason));
+      String saved = value(a, o.key, o.initial), live = active(runtime, o.key);
+      String actual = live == null ? null : MobileSettings.label(o, live);
+      detailValue.setText(settingState(runtime, o.restart, actual, MobileSettings.label(o, saved),
+          live != null && !SettingValues.same(live, saved)));
+    };
+    Runnable resolutionDetails = () -> {
+      detailTitle.setText("Render resolution");
+      detailHelp.setText(RESOLUTION_HELP);
+      String saved = value(a, "fh1_render_scale_percent", "100");
+      String live = active(runtime, "fh1_render_scale_percent");
+      detailValue.setText(settingState(runtime, true, live == null ? null : SettingValues.plain(live) + "%",
+          saved + "%", live != null && !SettingValues.same(live,saved)));
+    };
     LinearLayout column;
     if (section.equals("Controls")) {
       column = FestivalUi.column(a);
-      FestivalUi.listRow(a,column,"touch","Edit touch layout","Move, resize or add on-screen buttons.",editor);
-      FestivalUi.listRow(a,column,"controller","Touch buttons and steering","Steering style and touch behavior.",()->page(a,"Touch",runtime,editor));
-      FestivalUi.listRow(a,column,"tilt","Phone tilt and vibration","Motion steering and feedback.",()->page(a,"Phone",runtime,editor));
-      FestivalUi.listRow(a,column,"controller","Physical controller","Button mapping and calibration.",()->page(a,"Controller",runtime,editor));
-      FestivalUi.listRow(a,column,"save","Saved layouts and presets","Switch between your layouts.",()->LayoutProfiles.show(a));
+      FestivalUi.settingsLink(a,column,"layout-edit","Edit touch layout","Move, resize or add on-screen buttons.",editor);
+      FestivalUi.settingsLink(a,column,"touch-steering","Touch buttons and steering","Choose arrows or stick steering, text labels and shift buttons.",()->page(a,"Touch",runtime,editor));
+      FestivalUi.settingsLink(a,column,"phone-motion","Phone tilt and vibration","Adjust motion steering independently of touch and controller settings.",()->page(a,"Phone",runtime,editor));
+      FestivalUi.settingsLink(a,column,"controller","Physical controller","Test a connected gamepad and adjust rumble, gyro, stick and trigger response.",()->page(a,"Controller",runtime,editor));
+      FestivalUi.settingsLink(a,column,"layout-library","Saved layouts and presets","Save your current layout or apply a template.",()->LayoutProfiles.show(a));
     } else {
-      column = createPage(a, section, runtime, editor, inspect, resolutionDetails);
+      column = createPage(a, section, runtime, editor, inspect, resolutionDetails,
+          rows->bindDetails(rows,detailTitle,detailHelp,detailValue));
     }
     options.addView(column);
     bindDetails(column, detailTitle, detailHelp, detailValue);
@@ -144,10 +161,17 @@ final class SettingsHub {
       popup.show();
     });
     if (a instanceof FestivalUi.PanelHost && !section.equals(SEARCH)) {
-      String category = Arrays.asList("Touch", "Phone", "Controller").contains(section)
-          ? "Controls" : section;
+      List<String> inputPages = Arrays.asList("Touch", "Phone", "Controller");
+      int inputIndex = inputPages.indexOf(section);
+      if (inputIndex >= 0) {
+        ControllerPrompts.tabs(root, direction -> {
+          String next = inputPages.get(Math.floorMod(inputIndex + direction, inputPages.size()));
+          ((FestivalUi.PanelHost)a).replacePanel(pageTitle(next),buildPage(a,next,runtime,editor));
+        });
+        return root;
+      }
       for (int i = 0; i < CATEGORY_CARDS.length; i++) {
-        if (!CATEGORY_CARDS[i][2].equals(category)) continue;
+        if (!CATEGORY_CARDS[i][2].equals(section)) continue;
         int current = i;
         ControllerPrompts.tabs(root, direction -> {
           String next = CATEGORY_CARDS[Math.floorMod(current + direction, CATEGORY_CARDS.length)][2];
@@ -169,8 +193,30 @@ final class SettingsHub {
     return button;
   }
   private static void bindDetails(View view,TextView title,TextView help,TextView value){
-    if(view.isFocusable()&&view.getOnFocusChangeListener()==null)view.setOnFocusChangeListener((v,on)->{if(on){CharSequence caption=v instanceof TextView?((TextView)v).getText():v.getContentDescription();if(caption==null||caption.length()==0)caption=v.getContentDescription();title.setText(caption);Object desc=v.getTag(0x7f0a7f08);help.setText(desc instanceof String?(String)desc:toolHelp(title.getText().toString()));value.setText("");}});
+    if (view.isFocusable() && view.getOnFocusChangeListener() == null) {
+      Runnable inspect = () -> {
+        View v = view;
+        Object labelled = v.getTag(FestivalUi.SETTING_TITLE);
+        CharSequence caption = labelled instanceof String ? (String) labelled :
+            v instanceof TextView ? ((TextView)v).getText() : v.getContentDescription();
+        if (caption == null || caption.length() == 0) caption = v.getContentDescription();
+        if (caption == null) return;
+        title.setText(caption);
+        Object description = v.getTag(FestivalUi.SETTING_HELP);
+        help.setText(description instanceof String && !((String)description).isEmpty()
+            ? (String)description : toolHelp(caption.toString()));
+        value.setText("");
+      };
+      if (view instanceof SettingRow) ((SettingRow)view).inspection = inspect;
+      view.setOnFocusChangeListener((v,on) -> { if(on)inspect.run(); });
+    }
     if(view instanceof ViewGroup){ViewGroup group=(ViewGroup)view;for(int i=0;i<group.getChildCount();i++)bindDetails(group.getChildAt(i),title,help,value);}
+  }
+  private static String settingState(MobileSettings.Runtime runtime, boolean restart, String live,
+      String saved, boolean changed) {
+    if (live == null) return (restart && runtime == null ? "Next launch   " : "Saved   ") + saved;
+    if (changed) return "Running   " + live + "\n" + (restart ? "Next launch   " : "Saved   ") + saved;
+    return "Running   " + live;
   }
   private static String toolHelp(String title){
     String[][] descriptions={
@@ -196,6 +242,8 @@ final class SettingsHub {
       {"Show FPS","Show the game's frame rate in a small overlay while playing."},
       {"Show latest frame time","Display the latest frame time alongside FPS to help spot inconsistent delivery."},
       {"Show RAM","Display memory use and Android thermal severity while playing."},
+      {"CPU performance hints","Optional Android scheduling hints for the game thread. Compare a repeatable route before enabling them for regular play."},
+      {"Record standard session logs","Save startup and runtime logs during normal Play. Use Play with diagnostics for per-frame captures."},
       {"Adreno options","Advanced Turnip settings. Change one at a time and compare the same route; a faster driver on another GPU may be slower on yours."},
       {"Graphics cache","Manage recognized graphics caches while the game is closed. Caches may need preparation again after removal."},
       {"Record a performance","Record a diagnostic run for a problem report. Capture adds overhead."}
@@ -211,7 +259,8 @@ final class SettingsHub {
   }
   private static LinearLayout createPage(
       Activity a, String page, MobileSettings.Runtime runtime, Runnable editor,
-      java.util.function.Consumer<MobileSettings.Option> inspect, Runnable resolutionDetails) {
+      java.util.function.Consumer<MobileSettings.Option> inspect, Runnable resolutionDetails,
+      java.util.function.Consumer<View> bind) {
     LinearLayout body = FestivalUi.column(a);
     EditText search = new EditText(a);
     search.setSingleLine(true);
@@ -221,6 +270,10 @@ final class SettingsHub {
     search.setHint("Search " + page.toLowerCase(Locale.ROOT));
     search.setMinHeight(FestivalUi.dp(a,44));
     if(page.equals("All settings"))body.addView(search, new LinearLayout.LayoutParams(-1, -2));
+    if (page.equals("Graphics")) {
+      buildGraphics(a, body, runtime, editor, inspect, resolutionDetails);
+      return body;
+    }
     boolean[] advanced = {
         page.equals("Advanced")||page.equals("All settings")&&a.getSharedPreferences("mobile",0).getBoolean("advanced_settings",false)};
     boolean[] pinned = {false};
@@ -240,12 +293,7 @@ final class SettingsHub {
     Runnable rebuild = () -> {
       rows.removeAllViews();
       String query = search.getText().toString().trim().toLowerCase(Locale.ROOT);
-      LinearLayout graphicsExtras=FestivalUi.column(a);
-      boolean graphics=page.equals("Graphics")&&!pinned[0]&&query.isEmpty();
-      if(graphics){extras(a,graphicsExtras,"Graphics",runtime,editor,resolutionDetails);View resolution=graphicsExtras.getChildAt(0);graphicsExtras.removeView(resolution);rows.addView(resolution);}
-      List<MobileSettings.Option> ordered=new ArrayList<>(OPTIONS);
-      if(graphics){String[] keys={"pinyon_shift_fh1_render_fps_limit","vulkan_texture_max_size","present_effect"};for(int n=keys.length-1;n>=0;n--){final String key=keys[n];for(int i=0;i<ordered.size();i++)if(ordered.get(i).key.equals(key)){ordered.add(0,ordered.remove(i));break;}}}
-      for (MobileSettings.Option option : ordered) {
+      for (MobileSettings.Option option : OPTIONS) {
         if(!belongs(page,option))continue;
         if (!advanced[0] && !pinned[0] && query.isEmpty() && ADVANCED.contains(option.key))
           continue;
@@ -258,7 +306,6 @@ final class SettingsHub {
       }
       if (!pinned[0]) {
         for (String category : page.equals("All settings") ? new String[]{"Graphics","Audio","Touch","Phone","Controller","Interface","Gameplay","Advanced"} : new String[] {page}) {
-          if(category.equals("Graphics")&&graphics){while(graphicsExtras.getChildCount()>0){View child=graphicsExtras.getChildAt(0);graphicsExtras.removeViewAt(0);rows.addView(child);}continue;}
           LinearLayout extra = FestivalUi.column(a);
           extras(a, extra, category, runtime, editor,resolutionDetails);
           while (extra.getChildCount() > 0) {
@@ -271,6 +318,7 @@ final class SettingsHub {
       }
       if (rows.getChildCount() == 0)
         rows.addView(FestivalUi.text(a, "No matching settings.", 13, FestivalUi.MUTED));
+      bind.accept(rows);
     };
     expert.setOnCheckedChangeListener((v, on) -> {
       advanced[0] = on;
@@ -291,6 +339,50 @@ final class SettingsHub {
     });
     rebuild.run();
     return body;
+  }
+  private static final Set<String> DISPLAY_SETTINGS = new LinkedHashSet<>(Arrays.asList(
+      "pinyon_shift_fh1_render_fps_limit", "present_effect", "vsync"));
+  private static final Set<String> RENDERER_SETTINGS = new HashSet<>(Arrays.asList(
+      "vulkan_fh1_native_executor", "vulkan_dynamic_rendering", "vulkan_require_vertex_pipeline_stores_and_atomics"));
+
+  private static void buildGraphics(Activity a, LinearLayout body, MobileSettings.Runtime runtime,
+      Runnable editor, java.util.function.Consumer<MobileSettings.Option> inspect, Runnable resolutionDetails) {
+    LinearLayout actions = FestivalUi.column(a);
+    extras(a, actions, "Graphics", runtime, editor, resolutionDetails);
+    heading(a, body, "Display");
+    move(actions, body, "fh1_render_scale_percent");
+    for (String key : DISPLAY_SETTINGS)
+      for (MobileSettings.Option option : OPTIONS)
+        if (option.key.equals(key)) optionRow(a,body,option,runtime,inspect);
+    move(actions, body, "graphics-screen");
+    move(actions, body, "graphics-fsr");
+    heading(a, body, "Quality");
+    move(actions, body, "graphics-msaa");
+    for (MobileSettings.Option option : OPTIONS)
+      if (belongs("Graphics",option) && !DISPLAY_SETTINGS.contains(option.key)
+          && !RENDERER_SETTINGS.contains(option.key)) optionRow(a,body,option,runtime,inspect);
+    heading(a, body, "Renderer");
+    for (MobileSettings.Option option : OPTIONS)
+      if (RENDERER_SETTINGS.contains(option.key)) optionRow(a,body,option,runtime,inspect);
+    heading(a, body, "Presets");
+    while (actions.getChildCount() > 0) {
+      View child = actions.getChildAt(0);
+      actions.removeViewAt(0);
+      body.addView(child);
+    }
+  }
+  private static void move(LinearLayout source, LinearLayout destination, String key) {
+    View view = source.findViewWithTag(key);
+    if (view == null) return;
+    source.removeView(view);
+    destination.addView(view);
+  }
+  private static void heading(Activity a, LinearLayout body, String title) {
+    TextView heading = FestivalUi.text(a,title,11,FestivalUi.MUTED);
+    heading.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+    heading.setPadding(FestivalUi.dp(a,10),FestivalUi.dp(a,7),0,FestivalUi.dp(a,6));
+    heading.setAccessibilityHeading(true);
+    body.addView(heading);
   }
   private static boolean matches(android.view.View view, String query) {
     if (view instanceof TextView
@@ -336,30 +428,101 @@ final class SettingsHub {
   private static void optionRow(
       Activity a, LinearLayout rows, MobileSettings.Option o, MobileSettings.Runtime runtime,
       java.util.function.Consumer<MobileSettings.Option> inspect) {
-    SettingRow row=new SettingRow(a,o.title);row.setTag(o.key);
+    SettingRow row=new SettingRow(a,o.title,ControlGlyphs.setting(o.title));row.setTag(o.key);
+    row.setTag(FestivalUi.FOCUS_KEY, o.key);
     java.util.function.IntConsumer change=direction->{
+      if (!SettingAvailability.reason(a,o.key).isEmpty()) return;
       int selected=choiceIndex(o,value(a,o.key,o.initial));
       int next=selected<0 ? (direction<0 ? o.values.length-1 : 0)
           : Math.max(0,Math.min(o.values.length-1,selected+direction));
       if(next!=selected){
-        apply(a,runtime,Collections.singletonMap(o.key,literal(o,o.values[next])),o.restart);
+        apply(a,runtime,Collections.singletonMap(o.key,literal(o,o.values[next])),o.restart,false);
         FestivalUi.refreshTree(row);
       }
       if(inspect!=null)inspect.accept(o);
     };
-    FestivalUi.onRefresh(row,()->{String saved=value(a,o.key,o.initial),reason=SettingAvailability.reason(a,o.key);row.label.setText((isPinned(a,o.key)?"• ":"")+o.title);row.value.setText("‹  "+MobileSettings.label(o,saved)+"  ›");row.setEnabled(reason.isEmpty());row.setContentDescription(o.title+": "+MobileSettings.label(o,saved)+(reason.isEmpty()?"":". "+reason));});
+    FestivalUi.onRefresh(row,()->{
+      String saved=value(a,o.key,o.initial),reason=SettingAvailability.reason(a,o.key);
+      row.label.setText((isPinned(a,o.key)?"• ":"")+AppLanguage.text(a,o.title));
+      row.value.setText(MobileSettings.label(o,saved));
+      row.value.setTextColor(reason.isEmpty()?FestivalUi.TEXT:FestivalUi.MUTED);
+      row.arrowsEnabled(reason.isEmpty());
+      row.setContentDescription(o.title+", "+MobileSettings.label(o,saved)+(reason.isEmpty()?"":". "+reason));
+      if (row.hasFocus() && inspect != null) inspect.accept(o);
+    });
     row.setOnFocusChangeListener((v,on)->{if(on&&inspect!=null)inspect.accept(o);});
-    row.setOnKeyListener((v,key,event)->{if(key==KeyEvent.KEYCODE_BUTTON_Y){if(event.getAction()==KeyEvent.ACTION_UP)FestivalUi.explain(a,o.title,o.help+(o.restart?" Applies next launch.":""));return true;}if(key!=KeyEvent.KEYCODE_DPAD_LEFT&&key!=KeyEvent.KEYCODE_DPAD_RIGHT)return false;if(event.getAction()==KeyEvent.ACTION_DOWN)change.accept(key==KeyEvent.KEYCODE_DPAD_LEFT?-1:1);return true;});
+    row.adjust(change, () -> FestivalUi.explain(a,o.title,o.help+(o.restart?" Applies next launch.":"")));
     row.setOnLongClickListener(v->{boolean pin=!isPinned(a,o.key);a.getSharedPreferences("setting_pins",0).edit().putBoolean(o.key,pin).apply();UiPreferences.save(a);FestivalUi.refreshTree(row);return true;});
-    row.setOnClickListener(v->{if(inspect!=null)inspect.accept(o);String saved=value(a,o.key,o.initial);String[] labels=new String[o.values.length];for(int i=0;i<labels.length;i++)labels[i]=MobileSettings.label(o,o.values[i]);FestivalUi.choose(a,o.title,labels,choiceIndex(o,saved),index->{apply(a,runtime,Collections.singletonMap(o.key,literal(o,o.values[index])),o.restart);FestivalUi.refreshTree(row);if(inspect!=null)inspect.accept(o);});});
+    row.setOnClickListener(v->{
+      if(inspect!=null)inspect.accept(o);
+      String reason = SettingAvailability.reason(a,o.key);
+      if (!reason.isEmpty()) { FestivalUi.explain(a,o.title,reason); return; }
+      String saved=value(a,o.key,o.initial);String[] labels=new String[o.values.length];for(int i=0;i<labels.length;i++)labels[i]=MobileSettings.label(o,o.values[i]);FestivalUi.choose(a,o.title,labels,choiceIndex(o,saved),index->{apply(a,runtime,Collections.singletonMap(o.key,literal(o,o.values[index])),o.restart);FestivalUi.refreshTree(row);if(inspect!=null)inspect.accept(o);});
+    });
     LinearLayout.LayoutParams params=new LinearLayout.LayoutParams(-1,-2);params.bottomMargin=FestivalUi.dp(a,5);rows.addView(row,params);
   }
   private static final class SettingRow extends LinearLayout {
-    final TextView label,value;
-    SettingRow(Activity a,String title){super(a);setOrientation(HORIZONTAL);setGravity(Gravity.CENTER_VERTICAL);setFocusable(true);setFocusableInTouchMode(true);setClickable(true);setMinimumHeight(FestivalUi.dp(a,44));setPadding(FestivalUi.dp(a,12),FestivalUi.dp(a,6),FestivalUi.dp(a,12),FestivalUi.dp(a,6));FestivalUi.glassBackground(a,this,false,8);label=FestivalUi.text(a,title,13,FestivalUi.TEXT);label.setMaxLines(2);label.setEllipsize(android.text.TextUtils.TruncateAt.END);addView(label,new LayoutParams(0,-2,1));value=FestivalUi.text(a,"",13,FestivalUi.TEXT);value.setMaxLines(2);value.setGravity(Gravity.RIGHT);value.setPadding(FestivalUi.dp(a,8),0,0,0);addView(value,new LayoutParams(-2,-2));}
+    final TextView label,value,left,right;
+    Runnable inspection;
+    SettingRow(Activity a,String title,String icon) {
+      super(a);
+      setGravity(Gravity.CENTER_VERTICAL);
+      setFocusableInTouchMode(true);
+      setClickable(true);
+      setMinimumHeight(FestivalUi.dp(a,48));
+      FestivalUi.glassBackground(a,this,false,8);
+      setPadding(FestivalUi.dp(a,10),0,FestivalUi.dp(a,4),0);
+      if (icon != null) {
+        LayoutParams size = new LayoutParams(FestivalUi.dp(a,24), FestivalUi.dp(a,24));
+        size.rightMargin = FestivalUi.dp(a,8);
+        addView(FestivalUi.icon(a,icon,FestivalUi.TEXT),size);
+      }
+      label=FestivalUi.text(a,title,13,FestivalUi.TEXT);
+      label.setMaxLines(2);
+      label.setEllipsize(TextUtils.TruncateAt.END);
+      addView(label,new LayoutParams(0,-2,1.6f));
+      left = arrow(a,"‹","Decrease or previous value",title);
+      value=FestivalUi.text(a,"",13,FestivalUi.TEXT);
+      value.setMaxLines(2);
+      value.setEllipsize(TextUtils.TruncateAt.END);
+      value.setGravity(Gravity.CENTER);
+      addView(value,new LayoutParams(0,-2,1));
+      right = arrow(a,"›","Increase or next value",title);
+    }
+    private TextView arrow(Activity a,String glyph,String description,String title) {
+      TextView arrow = FestivalUi.text(a,glyph,19,FestivalUi.TEXT);
+      arrow.setGravity(Gravity.CENTER);
+      arrow.setContentDescription(description+", "+title);
+      arrow.setFocusable(false);
+      arrow.setBackgroundResource(android.R.drawable.list_selector_background);
+      addView(arrow,new LayoutParams(FestivalUi.dp(a,38),FestivalUi.dp(a,48)));
+      return arrow;
+    }
+    void arrowsEnabled(boolean enabled) {
+      left.setEnabled(enabled);
+      right.setEnabled(enabled);
+      left.setAlpha(enabled?1f:.4f);
+      right.setAlpha(enabled?1f:.4f);
+    }
+    void adjust(java.util.function.IntConsumer step, Runnable help) {
+      left.setOnClickListener(v -> { requestFocus(); step.accept(-1); });
+      right.setOnClickListener(v -> { requestFocus(); step.accept(1); });
+      setOnKeyListener((v,key,event) -> {
+        if(key==KeyEvent.KEYCODE_BUTTON_Y){
+          if(event.getAction()==KeyEvent.ACTION_UP&&!event.isCanceled())help.run();
+          return true;
+        }
+        return ControllerPrompts.horizontalKey(event,step);
+      });
+      ControllerPrompts.horizontalStick(this,step);
+    }
   }
   static boolean apply(
       Activity a, MobileSettings.Runtime runtime, Map<String, String> values, boolean restart) {
+    return apply(a,runtime,values,restart,true);
+  }
+  private static boolean apply(Activity a, MobileSettings.Runtime runtime, Map<String,String> values,
+      boolean restart, boolean announce) {
     if (values.isEmpty())
       return true;
     Map<String, String> before = MobileConfig.read(a), old = new LinkedHashMap<>();
@@ -397,13 +560,15 @@ final class SettingsHub {
     }
     try {
       MobileConfig.putAll(a, values);
+      boolean log=a instanceof PinyonShiftActivity ? ((PinyonShiftActivity)a).sessionLoggingEnabled()
+          :a.getSharedPreferences("mobile",0).getBoolean("record_session_logs",false);
       for (Map.Entry<String, String> e : values.entrySet()) {
-        MobileConfig.recordChange(a, e.getKey(), e.getValue(), runtime != null && !restart);
+        if(log)MobileConfig.recordChange(a, e.getKey(), e.getValue(), runtime != null && !restart);
         if (runtime != null && !restart)
           runtime.changed(e.getKey(), plain(e.getValue()));
       }
       UNDO.put(a, new Change(old, restart));
-      if (restart)
+      if (restart && announce)
         Toast.makeText(a, "Saved for the next game launch", Toast.LENGTH_SHORT).show();
       return true;
     } catch (IOException e) {
@@ -422,7 +587,55 @@ final class SettingsHub {
       Toast.makeText(a,"Previous values restored",Toast.LENGTH_SHORT).show();
     }else UNDO.put(a,c);
   }
-  private static String screenActive(MobileSettings.Runtime runtime){if(runtime==null)return "";Map<String,String> values=new LinkedHashMap<>();for(String key:GraphicsProfiles.screenMode(0).keySet()){String v=active(runtime,key);if(v==null)return " · running mode unavailable";values.put(key,SettingValues.plain(v));}return "\nRunning: "+GraphicsProfiles.SCREEN_MODES[GraphicsProfiles.screenModeIndex(values)];}
+  private static int msaaIndex(String single,String two) {
+    return "true".equals(SettingValues.plain(single))?0:"true".equals(SettingValues.plain(two))?1:2;
+  }
+  private static String screenActive(MobileSettings.Runtime runtime) {
+    if(runtime==null)return null;
+    Map<String,String> values=new LinkedHashMap<>();
+    for(String key:GraphicsProfiles.screenMode(0).keySet()){
+      String setting=active(runtime,key);
+      if(setting==null)return null;
+      values.put(key,SettingValues.plain(setting));
+    }
+    return new String[]{"Original","Widescreen","Stretch"}[GraphicsProfiles.screenModeIndex(values)];
+  }
+  private static TouchLayout touchLayout(Activity a) {
+    TouchLayout layout=new TouchLayout();
+    layout.load(a);
+    return layout;
+  }
+  private static void choiceRow(Activity a, LinearLayout rows, String key, String title, String icon,
+      String help, String[] choices, java.util.function.IntSupplier selected,
+      java.util.function.IntConsumer save, java.util.function.Supplier<String> live) {
+    SettingRow row=new SettingRow(a,title,icon);
+    row.setTag(key);
+    row.setTag(FestivalUi.FOCUS_KEY,key);
+    row.setTag(FestivalUi.SETTING_TITLE,title);
+    row.setTag(FestivalUi.SETTING_HELP,help);
+    LinearLayout.LayoutParams size=new LinearLayout.LayoutParams(-1,-2);
+    size.bottomMargin=FestivalUi.dp(a,5);
+    rows.addView(row,size);
+    java.util.function.IntConsumer apply=index->{
+      if(index!=selected.getAsInt())save.accept(index);
+      refreshOptions(row);
+    };
+    FestivalUi.onRefresh(row,()->{
+      int index=selected.getAsInt();
+      String value=index<0?(value(a,"present_effect","bilinear").equals("fsr")?"Custom":"Off"):choices[index];
+      row.value.setText(value);
+      String current=live.get();
+      String status=current==null||current.equals(value)?"":"\n\nRunning  "+current+"\nNext launch  "+value;
+      row.setTag(FestivalUi.SETTING_HELP,help+status);
+      row.setContentDescription(title+", "+value+". Left or right to adjust.");
+      if(row.hasFocus() && row.inspection!=null)row.inspection.run();
+    });
+    row.adjust(direction->{
+      int index=selected.getAsInt();
+      apply.accept(index<0 ? direction<0?choices.length-1:0 : Math.max(0,Math.min(choices.length-1,index+direction)));
+    },()->FestivalUi.explain(a,title,(String)row.getTag(FestivalUi.SETTING_HELP)));
+    row.setOnClickListener(v->FestivalUi.choose(a,title,choices,selected.getAsInt(),apply));
+  }
   private static int integer(String value, int fallback) {
     try {
       return Integer.parseInt(value);
@@ -456,69 +669,69 @@ final class SettingsHub {
           }).show());
     }
     if (page.equals("Graphics")) {
-      SettingRow resolution=new SettingRow(a,"Render resolution");resolution.setTag("fh1_render_scale_percent");rows.addView(resolution,new LinearLayout.LayoutParams(-1,FestivalUi.dp(a,44)));
-      Runnable update=()->{resolution.value.setText("‹  "+value(a,"fh1_render_scale_percent","100")+"%  ›");if(resolutionDetails!=null&&resolution.hasFocus())resolutionDetails.run();};FestivalUi.onRefresh(resolution,update);
+      String key="fh1_render_scale_percent";
+      String title="Render resolution";
+      SettingRow resolution=new SettingRow(a,title,null);
+      resolution.setTag(key);
+      resolution.setTag(FestivalUi.FOCUS_KEY,key);
+      LinearLayout.LayoutParams rowSize=new LinearLayout.LayoutParams(-1,-2);
+      rowSize.bottomMargin=FestivalUi.dp(a,5);
+      rows.addView(resolution,rowSize);
+      java.util.function.IntSupplier read=()->Math.max(25,Math.min(100,integer(value(a,key,"100"),100)));
+      Runnable update=()->{
+        String label=read.getAsInt()+"%";
+        resolution.value.setText(label);
+        resolution.setContentDescription(title+", "+label+". Left or right to adjust.");
+        if(resolutionDetails!=null&&resolution.hasFocus())resolutionDetails.run();
+      };
+      FestivalUi.onRefresh(resolution,update);
       resolution.setOnFocusChangeListener((v,on)->{if(on&&resolutionDetails!=null)resolutionDetails.run();});
-      resolution.setOnKeyListener((v,key,event)->{if(key==KeyEvent.KEYCODE_BUTTON_Y){if(event.getAction()==KeyEvent.ACTION_UP)FestivalUi.explain(a,"Render resolution",RESOLUTION_HELP);return true;}if(key!=KeyEvent.KEYCODE_DPAD_LEFT&&key!=KeyEvent.KEYCODE_DPAD_RIGHT)return false;if(event.getAction()==KeyEvent.ACTION_DOWN){int n=Math.max(25,Math.min(100,integer(value(a,"fh1_render_scale_percent","100"),100)+(key==KeyEvent.KEYCODE_DPAD_LEFT?-1:1)));apply(a,runtime,Collections.singletonMap("fh1_render_scale_percent",Integer.toString(n)),true);update.run();}return true;});
-      resolution.setOnClickListener(v->{if(resolutionDetails!=null)resolutionDetails.run();LinearLayout slider=FestivalUi.column(a);FestivalUi.slider(a,slider,"Render resolution","Lower values reduce GPU work. Applies next launch.",25,100,1,integer(value(a,"fh1_render_scale_percent","100"),100),i->i+"%",i->{apply(a,runtime,Collections.singletonMap("fh1_render_scale_percent",Integer.toString(i)),true);update.run();});FestivalUi.present(a,"Render resolution",slider);});
-      Button aa = FestivalUi.action(a, rows, "", () -> {});
-      FestivalUi.onRefresh(aa,
-          ()
-              -> aa.setText("MSAA · next launch: "
-                  + (value(a, "fh1_msaa_single_sample", "true").equals("true") ? "Off"
-                          : value(a, "fh1_msaa_2x", "false").equals("true")    ? "2×"
-                                                                               : "4×")));
-      aa.setOnClickListener(v
-          -> FestivalUi.choose(a, "MSAA", new String[] {"Off", "2×", "4×"},
-              value(a, "fh1_msaa_single_sample", "true").equals("true") ? 0
-                  : value(a, "fh1_msaa_2x", "false").equals("true")     ? 1
-                                                                        : 2,
-              index -> {
-                Map<String, String> values = new LinkedHashMap<>();
-                values.put("fh1_msaa_single_sample", index == 0 ? "true" : "false");
-                values.put("fh1_msaa_2x", index == 1 ? "true" : "false");
-                apply(a, runtime, values, true);
-                refreshOptions(aa);
-              }));
-      if(runtime!=null){TextView aaActive=FestivalUi.text(a,"",12,FestivalUi.MUTED);rows.addView(aaActive);FestivalUi.onRefresh(aaActive,()->aaActive.setText("Running MSAA: "+(active(runtime,"fh1_msaa_single_sample")==null||active(runtime,"fh1_msaa_2x")==null?"unavailable":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_single_sample")))?"Off":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_2x")))?"2×":"4×")));}
+      java.util.function.IntConsumer save = next -> {
+        if (next != read.getAsInt())
+          apply(a,runtime,Collections.singletonMap(key,Integer.toString(next)),true,false);
+        update.run();
+      };
+      resolution.adjust(direction -> save.accept(Math.max(25,Math.min(100,read.getAsInt()+direction))),
+          () -> FestivalUi.explain(a,title,RESOLUTION_HELP));
+      resolution.setOnClickListener(v->{
+        if(resolutionDetails!=null)resolutionDetails.run();
+        LinearLayout slider=FestivalUi.column(a);
+        slider.addView(FestivalUi.text(a,"Use left or right to adjust, or drag the slider. Applies next launch.",13,FestivalUi.MUTED));
+        SeekBar bar=FestivalUi.slider(a,slider,title,RESOLUTION_HELP,25,100,1,read.getAsInt(),i->i+"%",save);
+        slider.setTag(FestivalUi.DEFAULT_FOCUS,bar);
+        FestivalUi.present(a,title,slider);
+        bar.post(bar::requestFocus);
+      });
+      choiceRow(a,rows,"graphics-msaa","MSAA",null,
+          "Smooths geometry edges. Higher values use more graphics memory and GPU time. Applies next launch.",
+          new String[]{"Off","2×","4×"},()->msaaIndex(value(a,"fh1_msaa_single_sample","true"),
+              value(a,"fh1_msaa_2x","false")),i->{
+                Map<String,String> values=new LinkedHashMap<>();
+                values.put("fh1_msaa_single_sample",Boolean.toString(i==0));
+                values.put("fh1_msaa_2x",Boolean.toString(i==1));
+                apply(a,runtime,values,true,false);
+              }, () -> {
+                String single=active(runtime,"fh1_msaa_single_sample"),two=active(runtime,"fh1_msaa_2x");
+                return single==null||two==null?null:new String[]{"Off","2×","4×"}[msaaIndex(single,two)];
+              });
+      choiceRow(a,rows,"graphics-screen","Screen layout",null,
+          "Original proportions keeps the game's aspect ratio. Widescreen extends gameplay and keeps original menus. Stretch fits the entire display. Applies next launch.",
+          new String[]{"Original","Widescreen","Stretch"},()->GraphicsProfiles.screenModeIndex(MobileConfig.read(a)),
+          i->apply(a,runtime,GraphicsProfiles.screenMode(i),true,false),()->screenActive(runtime));
+      String[] scales={"100","77","67","59","50"};
+      String[] fsrLabels={"Native · 100%","Ultra quality · 77%","Quality · 67%","Balanced · 59%","Performance · 50%"};
+      choiceRow(a,rows,"graphics-fsr","FSR 1",null,
+          "A preset changes the internal resolution and uses FSR 1 to scale the image for display. Applies next launch.",
+          fsrLabels,()->value(a,"present_effect","bilinear").equals("fsr")
+              ? Arrays.asList(scales).indexOf(value(a,key,"100")) : -1,i->{
+                Map<String,String> values=new LinkedHashMap<>();
+                values.put("present_effect",MobileConfig.quote("fsr"));
+                values.put(key,scales[i]);
+                values.put("present_fsr_sharpness_reduction",".5");
+                apply(a,runtime,values,true,false);
+              },()->null);
       FestivalUi.action(a, rows, "Graphics presets", () -> presets(a, runtime));
       FestivalUi.action(a, rows, "My graphics profiles", () -> GraphicsProfilePage.show(a,runtime));
-    }
-    if (page.equals("Graphics")) {
-      Button screen = FestivalUi.action(a, rows, "", () -> {});
-      FestivalUi.onRefresh(screen,
-          ()
-              -> screen.setText("Screen · next launch: "+GraphicsProfiles.SCREEN_MODES[GraphicsProfiles.screenModeIndex(MobileConfig.read(a))]+screenActive(runtime)));
-      screen.setOnClickListener(v
-          -> FestivalUi.choose(a, "Screen layout · next launch", GraphicsProfiles.SCREEN_MODES,
-              GraphicsProfiles.screenModeIndex(MobileConfig.read(a)), i -> {
-                apply(a, runtime, GraphicsProfiles.screenMode(i), true);
-                refreshOptions(screen);
-              }));
-      Button fsr = FestivalUi.action(a, rows, "", () -> {});
-      FestivalUi.onRefresh(fsr,
-          ()
-              -> fsr.setText("FSR 1: "
-                  + (value(a, "present_effect", "bilinear").equals("fsr")
-                          ? value(a, "fh1_render_scale_percent", "100") + "% render resolution"
-                          : "Off")));
-      fsr.setOnClickListener(v
-          -> FestivalUi.choose(a, "FSR 1 quality · next launch",
-              new String[] {"Native · 100%", "Ultra quality · 77%", "Quality · 67%",
-                  "Balanced · 59%", "Performance · 50%"},
-              value(a, "present_effect", "bilinear").equals("fsr")
-                  ? Arrays.asList("100", "77", "67", "59", "50")
-                        .indexOf(value(a, "fh1_render_scale_percent", "100"))
-                  : -1,
-              i -> {
-                Map<String, String> values = new LinkedHashMap<>();
-                values.put("present_effect", MobileConfig.quote("fsr"));
-                values.put(
-                    "fh1_render_scale_percent", new String[] {"100", "77", "67", "59", "50"}[i]);
-                values.put("present_fsr_sharpness_reduction", ".5");
-                apply(a, runtime, values, true);
-                refreshOptions(fsr);
-              }));
     }
     if(page.equals("Interface")){
       FestivalUi.slider(a, rows, "Menu size", "Reopen this page to apply size changes.", 70, 105, 1,
@@ -533,35 +746,20 @@ final class SettingsHub {
       pref(a, rows, "Match display refresh", "match_refresh", true);
     }
     if (page.equals("Touch")) {
-      TouchLayout layout = new TouchLayout();
-      layout.load(a);
-      Button style = FestivalUi.action(a, rows, "", () -> {});
-      FestivalUi.onRefresh(style, () -> {
-        TouchLayout current = new TouchLayout();
-        current.load(a);
-        style.setText("Layout: " + (current.drivingLabels ? "Driving action names" : "Controller button codes"));
-      });
-      style.setOnClickListener(v -> {
-        TouchLayout current = new TouchLayout();
-        current.load(a);
-        FestivalUi.choose(a, "Touch layout", new String[] {"Controller button codes", "Driving action names"},
-            current.drivingLabels ? 1 : 0, i -> {
-              try {
-                TouchLayout.selectStyle(a, i == 1);
-                reload(a);
-                refreshOptions(style);
-              } catch (IOException e) {
-                error(a, e);
-              }
-            });
-      });
-      Button steering=FestivalUi.action(a,rows,"",()->{});
-      FestivalUi.onRefresh(steering,()->{TouchLayout current=new TouchLayout();current.load(a);steering.setText("Steering: "+(current.steering.equals("arrows")?"Arrows":"Stick"));});
-      steering.setOnClickListener(v->{TouchLayout current=new TouchLayout();current.load(a);
-        FestivalUi.choose(a,"Mobile steering",new String[]{"Arrows","Stick"},current.steering.equals("arrows")?0:1,i->{
-          try{current.steering=i==0?"arrows":"stick";current.save(a);reload(a);refreshOptions(steering);}
-          catch(IOException error){error(a,error);}
-        });});
+      choiceRow(a,rows,"touch-layout-style","Layout","touch-label-mode",
+          "Display driving action names or controller codes. Each style remembers its own positions.",
+          new String[]{"Button codes","Driving labels"},()->touchLayout(a).drivingLabels?1:0,i->{
+            try{TouchLayout.selectStyle(a,i==1);reload(a);}
+            catch(IOException error){error(a,error);}
+          },()->null);
+      choiceRow(a,rows,"touch-steering-mode","Steering","steering-mode",
+          "Choose steering arrows or a stick. Turn off phone tilt for steering with touch alone.",
+          new String[]{"Arrows","Stick"},()->touchLayout(a).steering.equals("arrows")?0:1,i->{
+            TouchLayout layout=touchLayout(a);
+            layout.steering=i==0?"arrows":"stick";
+            try{layout.save(a);reload(a);}
+            catch(IOException error){error(a,error);}
+          },()->null);
       FestivalUi.toggle(a, rows, "Button names",
           "Optional controller codes above the text action names. "
               + "Action names assume the game's default bindings.",
@@ -588,7 +786,7 @@ final class SettingsHub {
             a.getSharedPreferences("mobile", 0).edit().putInt("phone_rumble_strength", i).apply();
             UiPreferences.save(a);
           });
-      FestivalUi.action(a, rows, "Test phone vibration", () -> ControllerTools.testRumble(a));
+      FestivalUi.controlAction(a, rows, "Test phone vibration", () -> ControllerTools.testRumble(a));
       pref(a, rows, "Phone tilt steering", "phone_tilt", false);
       pref(a, rows, "Invert phone tilt", "tilt_invert", false);
       FestivalUi.slider(a, rows, "Tilt centre deadzone",
@@ -602,7 +800,7 @@ final class SettingsHub {
             a.getSharedPreferences("mobile", 0).edit().putInt("tilt_range", i).apply();
             UiPreferences.save(a);
           });
-      FestivalUi.action(a, rows, "Calibrate tilt centre", () -> {
+      FestivalUi.controlAction(a, rows, "Calibrate tilt centre", () -> {
         if (a instanceof PinyonShiftActivity)
           ((PinyonShiftActivity) a).calibrateTilt();
         else
@@ -611,18 +809,21 @@ final class SettingsHub {
                   + "phone in your driving position.");
       });
     }
-    if (page.equals("Controller") && a instanceof PinyonShiftActivity
-        && a.getSharedPreferences("mobile", 0).getBoolean("advanced_settings", false))
-      FestivalUi.action(a, rows, "Native controller remapping",
-          () -> ((PinyonShiftActivity) a).openNativeSettings());
     if (page.equals("Controller"))
-      FestivalUi.action(
+      FestivalUi.controlAction(a, rows, "Native controller remapping", () -> {
+        if(a instanceof PinyonShiftActivity)((PinyonShiftActivity)a).openNativeSettings();
+        else FestivalUi.explain(a,"Controller remapping","Open this option from the in-game menu to change gamepad mappings.");
+      });
+    if (page.equals("Controller"))
+      FestivalUi.controlAction(
           a, rows, "Test and calibrate controller", () -> ControllerTools.show(a, runtime));
     if (page.equals("Advanced")) {
       FestivalUi.action(a, rows, "Adreno options", () -> AdrenoSettings.show(a, runtime));
       if(runtime!=null){TextView aaActive=FestivalUi.text(a,"",12,FestivalUi.MUTED);rows.addView(aaActive);FestivalUi.onRefresh(aaActive,()->aaActive.setText("Running MSAA: "+(active(runtime,"fh1_msaa_single_sample")==null||active(runtime,"fh1_msaa_2x")==null?"unavailable":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_single_sample")))?"Off":"true".equals(SettingValues.plain(active(runtime,"fh1_msaa_2x")))?"2×":"4×")));}
       pref(a, rows, "Sustained performance mode", "sustained_mode", false);
       pref(a, rows, "Detailed GPU timings · next launch", "detailed_gpu", false);
+      pref(a, rows, "CPU performance hints · experimental", "cpu_hints", false);
+      pref(a, rows, "Record standard session logs · next launch", "record_session_logs", false);
       pref(a, rows, "Extended comparison capture · up to 64 MB · next launch", "extended_capture", false);
       rows.addView(FestivalUi.text(a,
           "Sustained mode lowers the frame target "

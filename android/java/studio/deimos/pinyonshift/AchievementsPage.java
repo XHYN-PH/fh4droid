@@ -12,17 +12,25 @@ import java.util.*;
 import org.json.*;
 
 final class AchievementsPage {
+  private static String cachedData(Activity a) throws IOException {
+    File file=new File(MobileConfig.base(a),"state/cache/android-achievements.json");
+    if(!file.isFile())file=new File(MobileConfig.base(a),"state/logs/android-achievements.json");
+    return file.isFile() && file.length()<=2*1024*1024
+        ? new String(Files.readAllBytes(file.toPath()),StandardCharsets.UTF_8) : "";
+  }
+  static String cachedProgress(Activity a) {
+    try {
+      JSONArray entries=new JSONObject(cachedData(a)).optJSONArray("achievements");
+      if(entries==null||entries.length()>1024)return "";
+      int unlocked=0;
+      for(int i=0;i<entries.length();i++)if(entries.getJSONObject(i).optBoolean("unlocked"))unlocked++;
+      return unlocked+" / "+entries.length()+" achievements unlocked";
+    } catch (IOException | JSONException error) { return ""; }
+  }
   static void show(Activity a, String current) {
     LinearLayout body = FestivalUi.column(a);
     try {
-      File file = new File(MobileConfig.base(a), "state/logs/android-achievements.json");
-      String data = current;
-      if (data == null || data.isEmpty()) {
-        if (file.isFile() && file.length() <= 2 * 1024 * 1024)
-          data = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
-        else
-          data = "";
-      }
+      String data = current==null || current.isEmpty() ? cachedData(a) : current;
       if (data.isEmpty()) {
         body.addView(
             FestivalUi.text(a, "Play the game to load local achievements.", 13, FestivalUi.MUTED));
@@ -42,12 +50,12 @@ final class AchievementsPage {
           earned += e.optInt("score");
         }
       }
-      body.addView(FestivalUi.text(a,
+      body.addView(ProfilePage.header(a,
           unlocked + " / " + entries.length() + " unlocked · " + earned + " / " + total + " G · "
-              + (root.optBoolean("modded") ? "Modded profile" : "Normal profile"),
-          13, FestivalUi.ORANGE));
+              + (root.optBoolean("modded") ? "Modded profile" : "Normal profile")));
       EditText search = new EditText(a);
-      search.setHint("Find an achievement");
+      search.setHint("Search");
+      search.setContentDescription("Find an achievement");
       search.setTextColor(FestivalUi.TEXT);
       search.setHintTextColor(FestivalUi.MUTED);
       search.setSingleLine(true);
@@ -66,6 +74,7 @@ final class AchievementsPage {
         Button filter = FestivalUi.button(a, filterNames[i], false);
         filters[i] = filter;
         filter.setTextSize(12);
+        filter.setMinHeight(FestivalUi.dp(a,44));
         filter.setSelected(i == 0);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-2, -2);
         params.rightMargin = FestivalUi.dp(a, 6);
@@ -76,7 +85,11 @@ final class AchievementsPage {
         setFilter.accept(Math.floorMod(mode[0] + direction, filters.length));
         filters[mode[0]].requestFocus();
       });
-      search.setTextSize(12);toolbar.addView(search,new LinearLayout.LayoutParams(0,-2,1));
+      search.setTextSize(12);
+      if(FestivalUi.contentWidthDp(a)<345 || a.getResources().getConfiguration().fontScale>1.35f)
+        body.addView(search,new LinearLayout.LayoutParams(-1,-2));
+      else toolbar.addView(search,new LinearLayout.LayoutParams(0,-2,1));
+      body.setTag(FestivalUi.DEFAULT_FOCUS,filters[0]);
       LinearLayout paging=new LinearLayout(a);paging.setGravity(android.view.Gravity.RIGHT|android.view.Gravity.CENTER_VERTICAL);body.addView(paging);
       Button previous=FestivalUi.button(a,"Previous",false),next=FestivalUi.button(a,"Next",false);paging.addView(previous);TextView count=FestivalUi.text(a,"",12,FestivalUi.TEXT);paging.addView(count);paging.addView(next);
       previous.setOnClickListener(v->{page[0]=Math.max(0,page[0]-1);update[0].run();});next.setOnClickListener(v->{page[0]++;update[0].run();});
@@ -87,6 +100,7 @@ final class AchievementsPage {
         String query = search.getText().toString().toLowerCase(Locale.ROOT);
         List<JSONObject> matched=new ArrayList<>();for(int i=0;i<entries.length();i++){JSONObject item=entries.optJSONObject(i);if(item==null)continue;boolean done=item.optBoolean("unlocked");if((mode[0]==1&&!done)||(mode[0]==2&&done)||!item.optString("name","").toLowerCase(Locale.ROOT).contains(query))continue;matched.add(item);}
         int pages=Math.max(1,(matched.size()+5)/6);page[0]=Math.min(page[0],pages-1);count.setText("  "+(page[0]+1)+" / "+pages+"  ");previous.setEnabled(page[0]>0);next.setEnabled(page[0]+1<pages);LinearLayout pair=null;
+        if(matched.isEmpty())rows.addView(FestivalUi.text(a,"No matching achievements.",13,FestivalUi.MUTED));
         for (int i = page[0]*6; i < Math.min(matched.size(),page[0]*6+6); i++) {
           JSONObject e = matched.get(i);
           if (e == null)
@@ -96,7 +110,7 @@ final class AchievementsPage {
 
           LinearLayout row = new LinearLayout(a);
           row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-          row.setPadding(FestivalUi.dp(a,10),FestivalUi.dp(a,8),FestivalUi.dp(a,10),FestivalUi.dp(a,8));row.setFocusable(true);row.setClickable(true);FestivalUi.glassBackground(a,row,false,10);
+          row.setPadding(FestivalUi.dp(a,10),FestivalUi.dp(a,8),FestivalUi.dp(a,10),FestivalUi.dp(a,8));row.setFocusableInTouchMode(true);row.setClickable(true);FestivalUi.glassBackground(a,row,false,10);
           int id = e.optInt("id", -1);
           File icon =
               new File(MobileConfig.base(a), "state/cache/achievement-icons/" + id + ".png");

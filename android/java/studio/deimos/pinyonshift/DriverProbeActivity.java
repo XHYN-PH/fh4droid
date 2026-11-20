@@ -4,6 +4,7 @@ import android.content.Intent;
 import android.os.*;
 import android.widget.*;
 import java.io.File;
+import java.util.Map;
 
 /** A fresh process for every test; custom loader hooks never enter the launcher. */
 public final class DriverProbeActivity extends Activity {
@@ -15,7 +16,12 @@ public final class DriverProbeActivity extends Activity {
         handler.postDelayed(()->finishProbe("{\"ok\":false,\"error\":\"Driver test timed out.\"}"),20000);
         final String selected=getIntent().getStringExtra("driver");
         new Thread(()->{String result;try{System.loadLibrary("c++_shared");System.loadLibrary("rexruntime");System.loadLibrary("fh4droid_android");DriverStore.installBundled(this);
-            result=nativeProbe(getApplicationInfo().nativeLibraryDir,DriverStore.root(this).getAbsolutePath(),getFilesDir().getAbsolutePath(),selected==null?"":selected,MobileConfig.get(this,"android_gpu_driver_env",""),!MobileConfig.get(this,"android_gpu_driver_no_preamble","true").equals("false"),!MobileConfig.get(this,"vulkan_require_vertex_pipeline_stores_and_atomics","true").equals("false"));
+            String choice=selected==null?"":selected;
+            Map<String,String> settings=MobileConfig.read(this);
+            String key=DriverStore.probeKey(this,choice,settings);
+            result=nativeProbe(getApplicationInfo().nativeLibraryDir,DriverStore.root(this).getAbsolutePath(),getFilesDir().getAbsolutePath(),choice,settings.getOrDefault("android_gpu_driver_env",""),!settings.getOrDefault("android_gpu_driver_no_preamble","true").equals("false"),!settings.getOrDefault("vulkan_require_vertex_pipeline_stores_and_atomics","true").equals("false"));
+            if (key!=null && key.equals(DriverStore.probeKey(this,choice,MobileConfig.read(this))))
+                result=new org.json.JSONObject(result).put("probe_key",key).toString();
         }catch(Exception|LinkageError e){result="{\"ok\":false,\"error\":\""+e.getClass().getSimpleName()+": driver could not be tested.\"}";}
             final String report=result;handler.post(()->finishProbe(report));},"DriverPreflight").start();
     }

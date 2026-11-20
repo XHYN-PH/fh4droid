@@ -39,6 +39,8 @@ final class MenuIcon extends Drawable {
       canvas.drawCircle(12,8,3,paint);canvas.drawArc(5,12,19,22,180,180,false,paint);canvas.drawCircle(12,12,10,paint);
     } else if(kind.equals("more")) {
       paint.setStyle(Paint.Style.FILL);for(int x:new int[]{6,12,18})canvas.drawCircle(x,12,1.4f,paint);paint.setStyle(Paint.Style.STROKE);
+    } else {
+      OutlineIcon.draw(canvas,paint,12,12,10,kind,paint.getColor());
     }
     canvas.restore();
   }
@@ -47,7 +49,7 @@ final class MenuIcon extends Drawable {
       case "Play": case "Resume": return "play";
       case "Settings": case "Graphics": return "settings";
       case "Game files": return "files";
-      case "Touch controls": case "Controls": case "Controller": return "controls";
+      case "Touch controls": case "Controls": case "Controller": return ControlGlyphs.setting(title);
       case "Drivers": case "Graphics drivers": return "drivers";
       case "Profile": case "View profile": return "profile";
       case "More": return "more";

@@ -86,7 +86,8 @@ def verify(apk,baseline):
             require(alignments and min(alignments)>=16384,"ELF alignment below 16 KiB: "+path.name)
             library_records[path.name]={"sha256":hashlib.sha256(data).hexdigest(),"bytes":len(data),"min_load_alignment":min(alignments)}
         expected=set(android.NATIVE_LIBRARIES+android.ADRENOTOOLS_HOOKS+("libc++_shared.so",))
-        require(set(libraries)==expected,"Unexpected/missing native library set")
+        require(set(libraries) - {android.FIDELITYFX_LIBRARY} == expected,
+                "Unexpected/missing native library set")
         require(metadata["executable_sha256"].lower()==library_records["libmain.so"]["sha256"],"Main hash describes different bytes")
         require(identity[2].encode() in libraries["libmain.so"].read_bytes(),"Native game library contains another build version")
         android.android_module_check.verify(list(libraries.values()),readelf,nm)

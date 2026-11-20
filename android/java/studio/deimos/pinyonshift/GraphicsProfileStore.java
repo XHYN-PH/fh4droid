@@ -6,6 +6,29 @@ import java.util.*;
 
 /** Local graphics transactions; never capture profile, save, trainer or file settings. */
 final class GraphicsProfileStore {
+    static String launchSummary(android.content.Context context, Map<String,String> settings) {
+        int scale = PerformancePolicy.configured(settings.get("fh1_render_scale_percent"),100,25,100);
+        int width = Math.round(1280 * scale / 100f);
+        int height = Math.round(720 * scale / 100f);
+        float fps = PerformancePolicy.presentationTarget(settings.getOrDefault("pinyon_shift_fh1_render_fps_limit","30"),
+            settings.getOrDefault("host_present_fps_limit","0"));
+        String filter = settings.getOrDefault("present_effect","bilinear");
+        for (MobileSettings.Option option : MobileSettings.OPTIONS) {
+            if (option.key.equals("present_effect")) {
+                filter = MobileSettings.label(option,filter);
+                break;
+            }
+        }
+        String request = settings.getOrDefault("android_gpu_driver","auto");
+        String effective = DriverStore.cachedSelection(context,request,settings);
+        String driver = DriverStore.displayName(context,effective == null ? request : effective);
+        int description = driver.indexOf(" · built into");
+        if (description < 0) description = driver.indexOf(" · recommended");
+        if (description > 0) driver = driver.substring(0,description);
+        return scale + "% (" + width + " × " + height + ") · "
+            + (fps<=0 ? "Uncapped" : SettingValues.plain(Float.toString(fps)).replaceFirst("\\.0$","")+" FPS target")
+            + " · " + filter + "\n" + driver;
+    }
     static Map<String,String> defaults(){
         Map<String,String> values=new LinkedHashMap<>(GraphicsProfiles.preset(1));
         for(MobileSettings.Option o:MobileSettings.OPTIONS)if((o.page.equals("Graphics")||o.page.equals("Display")||o.page.equals("Performance"))&&!o.key.startsWith("fh1_hud")&&!o.key.equals("hud_hidden"))values.put(o.key,o.string?MobileConfig.quote(o.initial):o.initial);

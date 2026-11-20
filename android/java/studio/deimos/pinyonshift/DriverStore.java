@@ -12,23 +12,72 @@ import java.util.zip.*;
 
 final class DriverStore {
     static File root(Context c){return new File(MobileConfig.base(c),"state/drivers");}
-    static void installBundled(Context c)throws IOException{
+    static String probeKey(Context c,String selection,Map<String,String> settings) {
+        try {
+            android.content.pm.PackageInfo info=c.getPackageManager().getPackageInfo(c.getPackageName(),0);
+            JSONArray key=new JSONArray();
+            key.put(1).put(info.getLongVersionCode()).put(info.lastUpdateTime).put(android.os.Build.FINGERPRINT);
+            key.put(selection).put(settings.getOrDefault("android_gpu_driver_env",""))
+                .put(settings.getOrDefault("android_gpu_driver_no_preamble","true"))
+                .put(settings.getOrDefault("vulkan_require_vertex_pipeline_stores_and_atomics","true"));
+            String directory=selection.equals("auto")?"turnip-gen8-v37":selection;
+            if (!directory.isEmpty()) {
+                if (!directory.matches("[A-Za-z0-9_-]{1,100}")) return null;
+                File folder=new File(root(c),directory);
+                if (!folder.exists() && selection.equals("auto")) return key.put("no bundle").toString();
+                String dll=library(folder);
+                String identity=FileIdentity.stamp(new File(folder,dll));
+                if (identity==null) return null;
+                key.put(dll).put(identity).put(FileIdentity.stamp(new File(folder,"meta.json")));
+            }
+            return key.toString();
+        } catch (IOException | android.content.pm.PackageManager.NameNotFoundException | SecurityException error) {
+            return null;
+        }
+    }
+    static String cachedSelection(Context c,String selection,Map<String,String> settings) {
+        String key=probeKey(c,selection,settings);
+        if (key==null) return null;
+        try {
+            JSONObject report=new JSONObject(AdrenoSettings.reportDetails(c));
+            if (report.optBoolean("ok") && key.equals(report.optString("probe_key"))
+                && report.has("effective_driver")) return report.getString("effective_driver");
+        } catch (org.json.JSONException ignored) {}
+        return null;
+    }
+    static synchronized void installBundled(Context c)throws IOException{
+        String revision;
+        try {
+            android.content.pm.PackageInfo info=c.getPackageManager().getPackageInfo(c.getPackageName(),0);
+            revision=info.getLongVersionCode()+":"+info.lastUpdateTime;
+        } catch (android.content.pm.PackageManager.NameNotFoundException error) { revision=null; }
+        android.content.SharedPreferences installed=c.getSharedPreferences("bundled-driver-assets",0);
+        android.content.SharedPreferences.Editor stamp=installed.edit();
         String[] names=c.getAssets().list("drivers");if(names==null)return;
         for(String name:names){File dir=new File(root(c),name);dir.mkdirs();String[] entries=c.getAssets().list("drivers/"+name);if(entries==null)continue;
             for(String entry:entries){File to=new File(dir,entry);
+                String key=name+"/"+entry;
+                String identity=FileIdentity.stamp(to);
+                if (revision!=null && identity!=null && (revision+":"+identity).equals(installed.getString(key,""))) continue;
                 // Always finish the complete copy before replacing an older asset.
                 if(to.isFile()){
                     try(InputStream asset=c.getAssets().open("drivers/"+name+"/"+entry)){
-                        if(GameFiles.hash(asset).equals(DiscImage.hash(to)))continue;
+                        if(GameFiles.hash(asset).equals(DiscImage.hash(to))){
+                            if(revision!=null && identity!=null)stamp.putString(key,revision+":"+identity);
+                            continue;
+                        }
                     }
                 }
                 File temp=File.createTempFile("driver-",".install-part",dir);
                 try{
                     try(InputStream in=c.getAssets().open("drivers/"+name+"/"+entry);OutputStream out=new FileOutputStream(temp)){byte[] b=new byte[65536];for(int n;(n=in.read(b))!=-1;)out.write(b,0,n);}
                     Files.move(temp.toPath(),to.toPath(),StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.ATOMIC_MOVE);
+                    identity=FileIdentity.stamp(to);
+                    if(revision!=null && identity!=null)stamp.putString(key,revision+":"+identity);
                 }finally{Files.deleteIfExists(temp.toPath());}
             }
         }
+        stamp.commit();
     }
     static String importZip(Context c,InputStream input)throws IOException{
         root(c).mkdirs();File stage=Files.createTempDirectory(root(c).toPath(),".import-").toFile();boolean installed=false;
