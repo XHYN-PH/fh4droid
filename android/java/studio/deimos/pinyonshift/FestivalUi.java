@@ -574,6 +574,48 @@ final class FestivalUi {
     });
     return d;
   }
+  static Dialog compactDialog(Activity a, String title, View body) {
+    Dialog dialog = new Dialog(a);
+    dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+    dialog.setCanceledOnTouchOutside(true);
+
+    LinearLayout panel = column(a);
+    int padding = dp(a, 14);
+    panel.setPadding(padding, dp(a, 8), padding, padding);
+    LinearLayout header = new LinearLayout(a);
+    header.setGravity(Gravity.CENTER_VERTICAL);
+    TextView heading = text(a, title, 17, TEXT);
+    heading.setTypeface(Typeface.DEFAULT_BOLD);
+    header.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+    Button back = button(a, "Back", false);
+    back.setTextSize(13);
+    back.setOnClickListener(v -> dialog.dismiss());
+    LinearLayout.LayoutParams buttonSize = new LinearLayout.LayoutParams(-2, -2);
+    buttonSize.leftMargin = dp(a, 8);
+    header.addView(back, buttonSize);
+    panel.addView(header);
+    LinearLayout.LayoutParams bodySize = new LinearLayout.LayoutParams(-1, -2);
+    bodySize.topMargin = dp(a, 6);
+    panel.addView(body, bodySize);
+
+    ScrollView scroll = new ScrollView(a);
+    scroll.setFocusable(false);
+    scroll.addView(panel);
+    dialog.setContentView(scroll);
+    Window window = dialog.getWindow();
+    window.setBackgroundDrawable(surface(a, PANEL, 14));
+    window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+    window.setDimAmount(.5f);
+    WindowMetrics metrics = a.getWindowManager().getCurrentWindowMetrics();
+    Insets insets = metrics.getWindowInsets().getInsetsIgnoringVisibility(
+        WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+    int safeWidth = metrics.getBounds().width() - insets.left - insets.right - dp(a, 24);
+    window.setLayout(Math.max(1, Math.min(dp(a, 420), safeWidth)),
+        WindowManager.LayoutParams.WRAP_CONTENT);
+    dialog.setOnKeyListener((d, key, event) -> ControllerPrompts.handle(a, window, key, event, dialog::dismiss));
+    dialog.setOnShowListener(d -> enter(panel));
+    return dialog;
+  }
   static void styleOverlay(Activity a, Window window, float dim) {
     window.setBackgroundDrawable(surface(a,0xf2171d27,16));
     if (android.os.Build.VERSION.SDK_INT>=31) window.setBackgroundBlurRadius(dp(a,18));

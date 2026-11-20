@@ -13,6 +13,8 @@ import org.junit.runner.RunWith;
 import org.robolectric.*;
 import org.robolectric.annotation.*;
 import org.robolectric.shadows.ShadowLooper;
+import org.robolectric.util.ReflectionHelpers;
+import org.robolectric.util.ReflectionHelpers.ClassParameter;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(manifest=Config.NONE,sdk=33,qualifiers="w960dp-h432dp-land-400dpi")
@@ -292,7 +294,7 @@ public class UiPolishTest {
   @Test public void uiPreferencesSurviveProcessHandoff(){
     Activity a=activity();
     android.content.SharedPreferences prefs=a.getSharedPreferences("mobile",0);
-    String[] switches={"animations","show_fps","show_frame_time","show_memory_heat","match_refresh","cpu_hints","record_session_logs",
+    String[] switches={"animations","show_fps","show_frame_time","show_memory_heat","match_refresh","cpu_hints",
         "phone_rumble","phone_tilt","tilt_invert","sustained_mode","advanced_settings","detailed_gpu",
         "extended_capture","save_folder_sync","audio_compatibility"};
     for(boolean enabled:new boolean[]{false,true}){
@@ -337,21 +339,28 @@ public class UiPolishTest {
     assertTrue(Arrays.asList(game.getArguments()).contains("--pinyon_shift_sync_folder=" + sync.getAbsolutePath()));
     assertTrue(sync.isDirectory());
   }
-  @Test public void launcherOffersQuietAndDiagnosticPlay() throws Exception {
+  @Test public void playEnablesDetailedLoggingAndReportsOffersQuietPlay() throws Exception {
     LauncherActivity a=Robolectric.buildActivity(LauncherActivity.class).setup().visible().get();
-    a.getSharedPreferences("mobile",0).edit().remove("record_session_logs").commit();
-    Method defaultMode=LauncherActivity.class.getDeclaredMethod("defaultSessionMode");
-    defaultMode.setAccessible(true);
-    assertEquals("WITHOUT_LOGS",defaultMode.invoke(a).toString());
+    a.getSharedPreferences("mobile",0).edit().putBoolean("record_session_logs",false).commit();
+    File executable = new File(GameFiles.root(a), "default.xex");
+    assertTrue(executable.getParentFile().mkdirs() || executable.getParentFile().isDirectory());
+    assertTrue(executable.createNewFile());
+    android.app.ActivityManager manager = a.getSystemService(android.app.ActivityManager.class);
+    android.app.ActivityManager.RunningAppProcessInfo process = new android.app.ActivityManager.RunningAppProcessInfo();
+    process.processName = a.getPackageName() + ":game";
+    Shadows.shadowOf(manager).setProcesses(Collections.singletonList(process));
+    ReflectionHelpers.callInstanceMethod(a, "launcherAction", ClassParameter.from(String.class, "play"));
+    android.content.Intent launch = Shadows.shadowOf(a).getNextStartedActivity();
+    assertNotNull(launch);
+    assertTrue(launch.getBooleanExtra("debug_report",false));
+    assertFalse(launch.getBooleanExtra(PinyonShiftActivity.NO_SESSION_LOGS,false));
     Method reports=LauncherActivity.class.getDeclaredMethod("reports");
     reports.setAccessible(true);
     reports.invoke(a);
     View root=a.findViewById(android.R.id.content);
     render(root,2400,1080,"refinements-problem-reports");
     assertNotNull(find(root,"Play without logs"));
-    assertNotNull(find(root,"Play with diagnostics"));
-    a.getSharedPreferences("mobile",0).edit().putBoolean("record_session_logs",true).commit();
-    assertEquals("STANDARD",defaultMode.invoke(a).toString());
+    assertNull(find(root,"Play with diagnostics"));
   }
 
   @Test public void aboutShowsRequirementsCreditsAndUpstreamLink() {
@@ -403,6 +412,60 @@ public class UiPolishTest {
   @Test public void profileAndAchievementsUseCompactPages()throws Exception{
     Activity a=activity();org.json.JSONArray achievements=new org.json.JSONArray();for(int i=0;i<13;i++)achievements.put(new org.json.JSONObject().put("id",i).put("name",String.format("Achievement %02d",i)).put("score",10).put("unlocked",i%2==0));AchievementsPage.show(a,new org.json.JSONObject().put("achievements",achievements).toString());android.app.Dialog dialog=org.robolectric.shadows.ShadowDialog.getLatestDialog();assertNotNull(dialog);View root=dialog.getWindow().getDecorView();arrange(root,2400,1080);assertTrue(text(root).contains("Achievement 00"));assertFalse(text(root).contains("Achievement 06"));TextView next=find(root,"Next");assertNotNull(next);next.performClick();assertTrue(text(root).contains("Achievement 06"));assertFalse(text(root).contains("Achievement 00"));find(root,"Unlocked").performClick();assertTrue(text(root).contains("Achievement 00"));assertFalse(text(root).contains("Achievement 01"));dialog.dismiss();
     ProfilePage.show(a,()->{},()->{});dialog=org.robolectric.shadows.ShadowDialog.getLatestDialog();assertNotNull(dialog);assertTrue(text(dialog.getWindow().getDecorView()).contains("Edit gamertag"));dialog.dismiss();
+  }
+  @Test public void achievementDetailsWrapAndSearchStaysCompact() throws Exception {
+    Activity a = activity();
+    String data = "{\"achievements\":[{\"id\":8,\"name\":\"Finish Line\",\"score\":20,"
+        + "\"unlocked\":true,\"description\":\"Finish the opening race.\"}]}";
+    AchievementsPage.show(a, data);
+    android.app.Dialog list = org.robolectric.shadows.ShadowDialog.getLatestDialog();
+    View root = list.getWindow().getDecorView();
+    arrange(root, 2000, 950);
+    TextView caption = find(root, "Finish Line");
+    assertNotNull(caption);
+    View achievement = (View) caption.getParent().getParent();
+    ArrayList<View> matches = new ArrayList<>();
+    root.findViewsWithText(matches, "Find an achievement", View.FIND_VIEWS_WITH_CONTENT_DESCRIPTION);
+    assertEquals(1, matches.size());
+    View search = matches.get(0);
+    assertTrue(search.getWidth() <= FestivalUi.dp(a, 146));
+    assertTrue(achievement.performClick());
+    android.app.Dialog details = org.robolectric.shadows.ShadowDialog.getLatestDialog();
+    assertNotSame(list, details);
+    assertEquals(WindowManager.LayoutParams.WRAP_CONTENT, details.getWindow().getAttributes().height);
+    assertTrue(details.getWindow().getAttributes().width <= FestivalUi.dp(a, 420));
+    assertTrue(text(details.getWindow().getDecorView()).contains("Finish the opening race."));
+    details.dismiss();
+    list.dismiss();
+  }
+
+  @Test public void backupActionsUseContentSizedDialog() {
+    LauncherActivity launcher = Robolectric.buildActivity(LauncherActivity.class).setup().visible().get();
+    SaveArchive.Backup backup = new SaveArchive.Backup(
+        new File(launcher.getCacheDir(), "backup-fixture"), "Normal profile", true);
+    ReflectionHelpers.callInstanceMethod(launcher, "showBackup", ClassParameter.from(SaveArchive.Backup.class, backup),
+        ClassParameter.from(String.class, "November 20"));
+    android.app.Dialog dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog();
+    assertEquals(WindowManager.LayoutParams.WRAP_CONTENT, dialog.getWindow().getAttributes().height);
+    View root = dialog.getWindow().getDecorView();
+    assertNotNull(find(root, "Export backup"));
+    assertNotNull(find(root, "Restore backup"));
+    assertNotNull(find(root, "Delete backup"));
+    dialog.dismiss();
+  }
+
+  @Test public void driverPageIdentifiesSelectedAndActuallyTestedDrivers() throws Exception {
+    LauncherActivity launcher = Robolectric.buildActivity(LauncherActivity.class).setup().visible().get();
+    AdrenoSettings.record(launcher, "", "{\"ok\":true,\"effective_driver\":\"\","
+        + "\"gpu\":\"Test GPU\",\"checks\":[{\"ok\":true,\"name\":\"Render and readback\","
+        + "\"detail\":\"Colour readback passed\"}]}");
+    ReflectionHelpers.callInstanceMethod(launcher, "drivers");
+    View root = launcher.findViewById(android.R.id.content);
+    render(root, 2400, 1080, "driver-status");
+    assertNotNull(find(root, "Test driver"));
+    assertNotNull(find(root, "Startup checks passed"));
+    assertNotNull(find(root, "Render and readback · Passed"));
+    assertNotNull(find(root, "Colour readback passed"));
   }
   @Test public void editorKeepsFullCanvasWithDockedInspectorAndOptionalGrid()throws Exception{
     org.robolectric.android.controller.ActivityController<TouchEditorActivity> controller=Robolectric.buildActivity(TouchEditorActivity.class);TouchEditorActivity a=controller.get();a.getPreferences(0).edit().clear().commit();File assets=new File("editor-fixture.zip");try(java.util.zip.ZipOutputStream zip=new java.util.zip.ZipOutputStream(new FileOutputStream(assets))){for(String name:new String[]{"menu-background.png","touch-controls.png"}){zip.putNextEntry(new java.util.zip.ZipEntry("assets/"+name));java.nio.file.Files.copy(new File(System.getProperty("launcher.source.root"),"android/art/"+name).toPath(),zip);zip.closeEntry();}}org.robolectric.util.ReflectionHelpers.callInstanceMethod(a.getAssets(),"addAssetPath",org.robolectric.util.ReflectionHelpers.ClassParameter.from(String.class,assets.getCanonicalPath()));controller.setup().visible();FrameLayout root=(FrameLayout)((ViewGroup)a.findViewById(android.R.id.content)).getChildAt(0);arrange(root,2400,1080);View canvas=root.getChildAt(1);assertEquals(root.getWidth(),canvas.getWidth());assertEquals(root.getHeight(),canvas.getHeight());assertTrue(a.getPreferences(0).getBoolean("grid",true));render(root,2400,1080,"test5-touch-editor-grid");

@@ -3,6 +3,8 @@ package studio.deimos.pinyonshift;
 import android.app.*;
 import android.graphics.*;
 import android.text.*;
+import android.view.Gravity;
+import android.view.View;
 import android.widget.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -50,15 +52,21 @@ final class AchievementsPage {
           earned += e.optInt("score");
         }
       }
+      LinearLayout.LayoutParams headerSize = new LinearLayout.LayoutParams(-1, -2);
+      headerSize.bottomMargin = FestivalUi.dp(a, 10);
       body.addView(ProfilePage.header(a,
           unlocked + " / " + entries.length() + " unlocked · " + earned + " / " + total + " G · "
-              + (root.optBoolean("modded") ? "Modded profile" : "Normal profile")));
+              + (root.optBoolean("modded") ? "Modded profile" : "Normal profile")), headerSize);
       EditText search = new EditText(a);
       search.setHint("Search");
       search.setContentDescription("Find an achievement");
       search.setTextColor(FestivalUi.TEXT);
       search.setHintTextColor(FestivalUi.MUTED);
       search.setSingleLine(true);
+      search.setTextSize(13);
+      search.setMinHeight(FestivalUi.dp(a, 44));
+      search.setPadding(FestivalUi.dp(a, 10), 0, FestivalUi.dp(a, 10), 0);
+      search.setBackground(FestivalUi.surface(a, FestivalUi.PANEL, 8));
       LinearLayout toolbar=new LinearLayout(a);toolbar.setGravity(android.view.Gravity.CENTER_VERTICAL);body.addView(toolbar);
       int[] mode={0},page={0};Runnable[] update={null};
       Button[] filters = new Button[3];
@@ -85,13 +93,21 @@ final class AchievementsPage {
         setFilter.accept(Math.floorMod(mode[0] + direction, filters.length));
         filters[mode[0]].requestFocus();
       });
-      search.setTextSize(12);
-      if(FestivalUi.contentWidthDp(a)<345 || a.getResources().getConfiguration().fontScale>1.35f)
-        body.addView(search,new LinearLayout.LayoutParams(-1,-2));
-      else toolbar.addView(search,new LinearLayout.LayoutParams(0,-2,1));
+      LinearLayout.LayoutParams searchSize = new LinearLayout.LayoutParams(
+          FestivalUi.dp(a, Math.min(146, Math.max(1, FestivalUi.contentWidthDp(a)))), -2);
+      if (FestivalUi.contentWidthDp(a) < 400 || a.getResources().getConfiguration().fontScale > 1.35f) {
+        searchSize.topMargin = FestivalUi.dp(a, 6);
+        searchSize.gravity = Gravity.END;
+        body.addView(search, searchSize);
+      } else {
+        toolbar.addView(new Space(a), new LinearLayout.LayoutParams(0, 0, 1));
+        toolbar.addView(search, searchSize);
+      }
       body.setTag(FestivalUi.DEFAULT_FOCUS,filters[0]);
       LinearLayout paging=new LinearLayout(a);paging.setGravity(android.view.Gravity.RIGHT|android.view.Gravity.CENTER_VERTICAL);body.addView(paging);
       Button previous=FestivalUi.button(a,"Previous",false),next=FestivalUi.button(a,"Next",false);paging.addView(previous);TextView count=FestivalUi.text(a,"",12,FestivalUi.TEXT);paging.addView(count);paging.addView(next);
+      previous.setTextSize(13);
+      next.setTextSize(13);
       previous.setOnClickListener(v->{page[0]=Math.max(0,page[0]-1);update[0].run();});next.setOnClickListener(v->{page[0]++;update[0].run();});
       LinearLayout rows=FestivalUi.column(a);body.addView(rows);
       Map<Integer, Bitmap> icons = new HashMap<>();
@@ -110,8 +126,9 @@ final class AchievementsPage {
 
           LinearLayout row = new LinearLayout(a);
           row.setGravity(android.view.Gravity.CENTER_VERTICAL);
-          row.setPadding(FestivalUi.dp(a,10),FestivalUi.dp(a,8),FestivalUi.dp(a,10),FestivalUi.dp(a,8));row.setFocusableInTouchMode(true);row.setClickable(true);FestivalUi.glassBackground(a,row,false,10);
+          row.setPadding(FestivalUi.dp(a,10),FestivalUi.dp(a,7),FestivalUi.dp(a,10),FestivalUi.dp(a,7));row.setFocusableInTouchMode(true);row.setClickable(true);FestivalUi.glassBackground(a,row,false,10);
           int id = e.optInt("id", -1);
+          row.setTag(FestivalUi.FOCUS_KEY, "achievement-" + id);
           File icon =
               new File(MobileConfig.base(a), "state/cache/achievement-icons/" + id + ".png");
           Bitmap bitmap = icons.get(id);
@@ -141,21 +158,29 @@ final class AchievementsPage {
               image.setAlpha(.45f);
             }
             row.addView(
-                image, new LinearLayout.LayoutParams(FestivalUi.dp(a, 48), FestivalUi.dp(a, 48)));
+                image, new LinearLayout.LayoutParams(FestivalUi.dp(a, 36), FestivalUi.dp(a, 36)));
           } else
             row.addView(new OutlineIcon(a, "trophy", done ? FestivalUi.ORANGE : FestivalUi.MUTED),
-                new LinearLayout.LayoutParams(FestivalUi.dp(a, 48), FestivalUi.dp(a, 48)));
+                new LinearLayout.LayoutParams(FestivalUi.dp(a, 36), FestivalUi.dp(a, 36)));
           LinearLayout text = FestivalUi.column(a);
+          text.setPadding(FestivalUi.dp(a, 8), 0, 0, 0);
           row.addView(text, new LinearLayout.LayoutParams(0, -2, 1));
           text.addView(FestivalUi.text(a, name, 14, done ? FestivalUi.TEXT : FestivalUi.MUTED));
           long time = e.optLong("unlocked_ms");
           String date = time > 0 ? DateFormat.getDateInstance().format(new Date(time)) : "";
-          text.addView(FestivalUi.text(a,
-              e.optInt("score") + " G · "
-                  + (done ? "Unlocked" + (date.isEmpty() ? "" : " · " + date) : "Locked"),
-              12, FestivalUi.MUTED));
-          row.setOnClickListener(v -> FestivalUi.explain(a, name, e.optString("description", "")));
-          if(i%2==0){pair=new LinearLayout(a);LinearLayout.LayoutParams pp=new LinearLayout.LayoutParams(-1,-2);pp.topMargin=FestivalUi.dp(a,6);rows.addView(pair,pp);}LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(0,-1,1);if(i%2==1)rp.leftMargin=FestivalUi.dp(a,8);pair.addView(row,rp);
+          String status = e.optInt("score") + " G · "
+              + (done ? "Unlocked" + (date.isEmpty() ? "" : " · " + date) : "Locked");
+          text.addView(FestivalUi.text(a, status, 12, FestivalUi.MUTED));
+          row.setOnClickListener(v -> showDetails(a, row, name, status, e.optString("description", "")));
+          if (i % 2 == 0) {
+            pair = new LinearLayout(a);
+            LinearLayout.LayoutParams pairSize = new LinearLayout.LayoutParams(-1, -2);
+            pairSize.topMargin = FestivalUi.dp(a, 7);
+            rows.addView(pair, pairSize);
+          }
+          LinearLayout.LayoutParams rowSize = new LinearLayout.LayoutParams(0, -1, 1);
+          if (i % 2 == 1) rowSize.leftMargin = FestivalUi.dp(a, 8);
+          pair.addView(row, rowSize);
         }
       };
       update[0]=refresh;
@@ -173,6 +198,18 @@ final class AchievementsPage {
           a, "Achievements could not be loaded: " + e.getMessage(), 13, FestivalUi.MUTED));
     }
     FestivalUi.present(a, "Achievements", body);
+  }
+  private static void showDetails(Activity a, View anchor, String name, String status, String description) {
+    LinearLayout body = FestivalUi.column(a);
+    body.addView(FestivalUi.text(a, status, 13, FestivalUi.MUTED));
+    if (!description.isEmpty()) {
+      TextView details = FestivalUi.text(a, description, 14, FestivalUi.TEXT);
+      details.setPadding(0, FestivalUi.dp(a, 8), 0, 0);
+      body.addView(details);
+    }
+    Dialog dialog = FestivalUi.compactDialog(a, name, body);
+    dialog.setOnDismissListener(d -> { if (anchor.isShown()) anchor.requestFocus(); });
+    dialog.show();
   }
   private AchievementsPage() {}
 }

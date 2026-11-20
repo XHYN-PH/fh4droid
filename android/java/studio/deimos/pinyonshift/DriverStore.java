@@ -147,34 +147,53 @@ final class DriverStore {
     static String apiName(int i) {
         return ((i >>> 22) & 127) + "." + ((i >>> 12) & 1023) + "." + (i & 4095);
     }
-    static void addReport(Activity activity, LinearLayout linearLayout, String str) {
+    static void addReport(Activity activity, LinearLayout parent, String data) {
+        JSONObject report;
         try {
-            JSONObject jSONObject = new JSONObject(str);
-            boolean zOptBoolean = jSONObject.optBoolean("ok", false);
-            LinearLayout linearLayoutCard = FestivalUi.card(activity, linearLayout, zOptBoolean ? "✓  Startup checks passed" : "Driver needs attention", zOptBoolean ? "The driver passed the startup checks. This is not a gameplay or performance guarantee." : jSONObject.optString("error", "The test did not finish."));
-            linearLayoutCard.addView(FestivalUi.text(activity, jSONObject.optString("gpu", "GPU not reported"), 17, -2577));
-            if (jSONObject.has("api")) {
-                linearLayoutCard.addView(FestivalUi.text(activity, "Vulkan " + apiName(jSONObject.optInt("api")), 14, -3819341));
-            }
-            JSONArray jSONArrayOptJSONArray = jSONObject.optJSONArray("checks");
-            if (jSONArrayOptJSONArray != null) {
-                for (int i = 0; i < jSONArrayOptJSONArray.length(); i++) {
-                    JSONObject jSONObjectOptJSONObject = jSONArrayOptJSONArray.optJSONObject(i);
-                    if (jSONObjectOptJSONObject != null) {
-                        StringBuilder sb = new StringBuilder();
-                        sb.append(jSONObjectOptJSONObject.optBoolean("ok") ? "✓  " : "!  ");
-                        sb.append(jSONObjectOptJSONObject.optString("name"));
-                        sb.append(" · ");
-                        sb.append(jSONObjectOptJSONObject.optString("detail"));
-                        linearLayoutCard.addView(FestivalUi.text(activity, sb.toString(), 13, -3819341));
-                    }
-                }
-            }
-            if (jSONObject.has("effective_driver")) {
-                linearLayoutCard.addView(FestivalUi.text(activity, displayName(activity, jSONObject.optString("effective_driver")), 14, -3819341));
-            }
-        } catch (Exception unused) {
-            linearLayout.addView(FestivalUi.text(activity, "No completed driver test is available yet.", 14, -3819341));
+            report = new JSONObject(data);
+        } catch (org.json.JSONException error) {
+            FestivalUi.card(activity, parent, "Last startup test", "Run Test driver to check the selected driver.");
+            return;
+        }
+        boolean passed = report.optBoolean("ok");
+        int color = passed ? 0xff8fdcb6 : 0xffffb978;
+        int tint = passed ? 0x208fdcb6 : 0x20ffb978;
+        LinearLayout card = FestivalUi.card(activity, parent, "Last startup test", null);
+        android.widget.TextView status = FestivalUi.text(activity,
+            passed ? "Startup checks passed" : "Driver needs attention", 15, color);
+        int padding = FestivalUi.dp(activity, 8);
+        status.setPadding(padding, padding, padding, padding);
+        status.setBackground(FestivalUi.surface(activity, tint, 8));
+        LinearLayout.LayoutParams statusSize = new LinearLayout.LayoutParams(-1, -2);
+        statusSize.topMargin = padding;
+        statusSize.bottomMargin = padding;
+        card.addView(status, statusSize);
+        if (report.has("effective_driver"))
+            card.addView(FestivalUi.text(activity,
+                displayName(activity, report.optString("effective_driver")), 15, FestivalUi.TEXT));
+        String gpu = report.optString("gpu");
+        String api = report.has("api") ? "Vulkan " + apiName(report.optInt("api")) : "";
+        String device = gpu.isEmpty() ? api : api.isEmpty() ? gpu : gpu + " · " + api;
+        if (!device.isEmpty()) card.addView(FestivalUi.text(activity, device, 13, FestivalUi.MUTED));
+        if (!passed)
+            card.addView(FestivalUi.text(activity, report.optString("error", "The test did not finish."),
+                13, FestivalUi.MUTED));
+        JSONArray checks = report.optJSONArray("checks");
+        if (checks == null) return;
+        for (int i = 0; i < checks.length(); i++) {
+            JSONObject check = checks.optJSONObject(i);
+            if (check == null) continue;
+            boolean ok = check.optBoolean("ok");
+            LinearLayout row = FestivalUi.column(activity);
+            row.setPadding(padding, padding, padding, padding);
+            row.setBackground(FestivalUi.surface(activity, 0x28000000, 8));
+            row.addView(FestivalUi.text(activity, check.optString("name") + (ok ? " · Passed" : " · Failed"),
+                13, ok ? 0xff8fdcb6 : 0xffffb978));
+            String detail = check.optString("detail");
+            if (!detail.isEmpty()) row.addView(FestivalUi.text(activity, detail, 12, FestivalUi.MUTED));
+            LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, -2);
+            size.topMargin = FestivalUi.dp(activity, 5);
+            card.addView(row, size);
         }
     }
     static void removeImported(Context c,String name)throws IOException{

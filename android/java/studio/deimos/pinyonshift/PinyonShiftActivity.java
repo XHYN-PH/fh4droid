@@ -1,6 +1,7 @@
 package studio.deimos.pinyonshift;
 
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
@@ -183,7 +184,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     }
     private boolean bridgeLoaded;
     private boolean touchHaptics;
-    private android.app.AlertDialog gameMenu;
+    private Dialog gameMenu;
     private android.os.ParcelFileDescriptor gameIso;
     private String launchError;
     private File comparisonState;
@@ -546,18 +547,11 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     private void showGameMenu(){
         if(closing||comparisonState!=null||isFinishing()||isDestroyed()||gameMenu!=null)return;
         if(!nativeReady){toast("The game is still starting.");return;}
-        if(sessionLoggingEnabled())ActionBreadcrumbs.record(this,"Game menu","opened");
+        if(sessionLoggingEnabled())ActionBreadcrumbs.record(this,"Game menu","opening");
         drawerPages.clear();
         drawer=new android.widget.FrameLayout(this);
-        android.app.AlertDialog dialog=new android.app.AlertDialog.Builder(this).setView(drawer).create();
+        Dialog dialog=new Dialog(this);
         gameMenu=dialog;
-        dialog.setCanceledOnTouchOutside(true);
-        android.view.Window window=dialog.getWindow();
-        if(window!=null){
-            FestivalUi.styleOverlay(this,window,.35f);
-            window.setGravity(android.view.Gravity.RIGHT|android.view.Gravity.CENTER_VERTICAL);
-            MenuMotion.drawerWindow(window);
-        }
         dialog.setOnKeyListener((d,key,event)->{
             if(ControllerPrompts.handle(this,dialog.getWindow(),key,event,this::backPanel))return true;
             if(key!=android.view.KeyEvent.KEYCODE_BACK)return false;
@@ -565,7 +559,6 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             return true;
         });
         dialog.setOnDismissListener(d->gameMenuDismissed(dialog));
-        dialog.setOnShowListener(d->refreshCpuHintTarget());
         MobileSettings.Runtime runtime=settingsRuntime();
         Runnable editor=()->{resumeDriving();startActivity(new Intent(this,TouchEditorActivity.class).putExtra("return_to_game",true));};
         GameMenuView body=new GameMenuView(this,label->{switch(label){
@@ -581,7 +574,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
                   android.widget.LinearLayout details=FestivalUi.column(this);
                   if(sessionLoggingEnabled())FestivalUi.action(this,details,"Capture a problem",this::markDiagnosticIssue);
                   else details.addView(FestivalUi.text(this,
-                      "Session logging is off. Use Play with diagnostics from the launcher to record a new session.",
+                      "Session logging is off. Use Play from the launcher to record a new session.",
                       14,FestivalUi.MUTED));
                   ProblemReports.action(this,details,sessionLoggingEnabled()?"Report a problem":"Share existing reports");
                   showPanel("Diagnostics",details);
@@ -592,13 +585,33 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
           }
           case "Quit to launcher":new android.app.AlertDialog.Builder(this).setTitle("Quit the game?").setMessage("Wait for the game's save indicator to finish before quitting.").setNegativeButton("Keep playing",null).setPositiveButton("Quit",(d,w)->requestQuit()).show();break;
         }});
-        showPanel("Game menu",body);
+        try {
+            dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+            dialog.setCanceledOnTouchOutside(true);
+            dialog.setContentView(drawer);
+            android.view.Window window=dialog.getWindow();
+            window.setBackgroundDrawable(FestivalUi.surface(this,FestivalUi.PANEL,16));
+            window.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            window.setDimAmount(.35f);
+            window.setGravity(android.view.Gravity.RIGHT|android.view.Gravity.CENTER_VERTICAL);
+            MenuMotion.drawerWindow(window);
+            showPanel("Game menu",body);
+            dialog.show();
+        } catch (RuntimeException error) {
+            Log.e(TAG,"Could not open the in-game menu",error);
+            if (dialog.isShowing()) dialog.dismiss();
+            gameMenuDismissed(dialog);
+            if (sessionLoggingEnabled())
+                ActionBreadcrumbs.record(this,"Game menu","window failed: "+error.getClass().getSimpleName());
+            if (!isFinishing()&&!isDestroyed()) toast("The game menu could not open.");
+            return;
+        }
+        if (sessionLoggingEnabled()) ActionBreadcrumbs.record(this,"Game menu","window shown");
         nativeHostMenu(true);
         stopPhoneRumble();
-        try{dialog.show();}
-        catch(android.view.WindowManager.BadTokenException error){gameMenuDismissed(dialog);}
+        refreshCpuHintTarget();
     }
-    private void gameMenuDismissed(android.app.AlertDialog dialog){
+    private void gameMenuDismissed(Dialog dialog){
         if(gameMenu!=dialog)return;
         gameMenu=null;
         drawerPages.clear();
@@ -628,7 +641,17 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         FestivalUi.refreshTree(panel);
         if(gameMenu!=null&&gameMenu.isShowing())MenuMotion.page(panel,back);
     }
-    private void resizeGameMenu(){if(gameMenu==null||gameMenu.getWindow()==null||drawerPages.isEmpty())return;boolean home=drawerPages.peek().body instanceof GameMenuView;boolean settings=Boolean.TRUE.equals(drawerPages.peek().body.getTag(FestivalUi.FULL_PAGE));int screen=getResources().getDisplayMetrics().widthPixels;gameMenu.getWindow().setLayout(settings?(int)(screen*.96f):Math.min(FestivalUi.dp(this,500),screen-FestivalUi.dp(this,24)),home?-2:-1);}
+    private void resizeGameMenu(){
+        if(gameMenu==null||drawerPages.isEmpty())return;
+        View page=drawerPages.peek().body;
+        View decor=getWindow().peekDecorView();
+        int pixels=decor!=null&&decor.getWidth()>0?decor.getWidth():getResources().getDisplayMetrics().widthPixels;
+        int available=Math.max(1,pixels-FestivalUi.dp(this,24));
+        int width=Boolean.TRUE.equals(page.getTag(FestivalUi.FULL_PAGE))
+            ?available:Math.min(FestivalUi.dp(this,500),available);
+        gameMenu.getWindow().setLayout(width,page instanceof GameMenuView
+            ?WindowManager.LayoutParams.WRAP_CONTENT:WindowManager.LayoutParams.MATCH_PARENT);
+    }
     @Override public void backPanel(){if(drawerPages.size()>1){drawerPages.pop();renderDrawer(true);}else resumeDriving();}
     @Override public void onBackPressed(){if(gameMenu!=null&&gameMenu.isShowing())backPanel();else showGameMenu();}
     public void gameRumble(int left,int right){uiHandler.post(()->{

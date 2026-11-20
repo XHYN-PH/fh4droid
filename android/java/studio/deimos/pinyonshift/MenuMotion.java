@@ -53,8 +53,6 @@ final class MenuMotion {
 
   static void drawerWindow(Window window) {
     Context context = window.getContext();
-    // Let the dialog resolve its theme before applying the app's motion setting.
-    window.getDecorView();
     window.setWindowAnimations(enabled(context) ? context.getResources().getIdentifier(
         "FH4DroidPauseDrawerMotion", "style", context.getPackageName()) : 0);
   }

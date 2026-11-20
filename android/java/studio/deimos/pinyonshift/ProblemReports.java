@@ -35,7 +35,13 @@ final class ProblemReports {
             info.append("\nDriver test\n").append(AdrenoSettings.reportDetails(c));
             TouchLayout touch=new TouchLayout();touch.load(c);info.append("\nTouch controls\n").append(touch.serialize());
             info.append("\nPhone preferences\n").append(UiPreferences.sanitized(c.getSharedPreferences("mobile",0).getAll()));
-            List<File> files=new ArrayList<>();File state=new File(MobileConfig.base(c),"state");collect(new File(state,"logs"),files,0);collect(new File(state,"crashes"),files,0);files.sort((a,b)->Long.compare(b.lastModified(),a.lastModified()));
+            List<File> files=new ArrayList<>();File state=new File(MobileConfig.base(c),"state");collect(new File(state,"logs"),files,0);collect(new File(state,"crashes"),files,0);
+            File marker=GameSession.marker(c);
+            if (java.nio.file.Files.isRegularFile(marker.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                files.remove(new File(state,"logs/android-session.txt"));
+                files.add(marker);
+            }
+            files.sort((a,b)->Long.compare(b.lastModified(),a.lastModified()));
             String latest="";Map<String,org.json.JSONObject> builds=new HashMap<>();
             for(File file:files){String session=ReportFiles.sessionName(file.getName());if(session!=null&&file.getName().endsWith(".jsonl")){if(session.compareTo(latest)>0)latest=session;builds.put(session,sessionBuild(file));}}
             info.append("\nLatest native session: ").append(latest.isEmpty()?"No native session recorded":latest).append("\nThe history folder contains earlier sessions. Shared logs can contain several builds. See report-index.json for provenance and truncation.\n");

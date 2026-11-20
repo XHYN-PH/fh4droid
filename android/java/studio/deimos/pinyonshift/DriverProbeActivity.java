@@ -1,7 +1,9 @@
 package studio.deimos.pinyonshift;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.os.*;
+import android.view.Gravity;
 import android.widget.*;
 import java.io.File;
 import java.util.Map;
@@ -11,10 +13,24 @@ public final class DriverProbeActivity extends Activity {
     static native String nativeProbe(String nativeDir,String driversRoot,String internalRoot,String selection,String environment,boolean noPreamble,boolean requireVertexStores);
     private final Handler handler=new Handler(Looper.getMainLooper());private boolean done;
     @Override public void onCreate(Bundle state){
-        super.onCreate(state);LinearLayout body=FestivalUi.column(this);body.setPadding(40,40,40,40);body.setBackgroundColor(FestivalUi.BG);
-        body.addView(FestivalUi.text(this,"Testing graphics driver…",24,FestivalUi.TEXT));body.addView(new ProgressBar(this));setContentView(body);
-        handler.postDelayed(()->finishProbe("{\"ok\":false,\"error\":\"Driver test timed out.\"}"),20000);
+        super.onCreate(state);
         final String selected=getIntent().getStringExtra("driver");
+        FrameLayout root = new FrameLayout(this);
+        root.setPadding(FestivalUi.dp(this, 16), FestivalUi.dp(this, 16), FestivalUi.dp(this, 16), FestivalUi.dp(this, 16));
+        root.setBackgroundColor(FestivalUi.BG);
+        LinearLayout body = FestivalUi.column(this);
+        int width = Math.max(1, Math.min(FestivalUi.dp(this, 420),
+            getResources().getDisplayMetrics().widthPixels - FestivalUi.dp(this, 32)));
+        root.addView(body, new FrameLayout.LayoutParams(width, -2, Gravity.CENTER));
+        LinearLayout status = FestivalUi.card(this, body, "Testing graphics driver",
+            DriverStore.displayName(this, selected == null ? "" : selected));
+        status.addView(FestivalUi.text(this, "Checking Vulkan features, formats and rendering…", 13, FestivalUi.TEXT));
+        ProgressBar progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progress.setIndeterminate(true);
+        progress.setIndeterminateTintList(ColorStateList.valueOf(FestivalUi.RED));
+        status.addView(progress, new LinearLayout.LayoutParams(-1, -2));
+        setContentView(root);
+        handler.postDelayed(()->finishProbe("{\"ok\":false,\"error\":\"Driver test timed out.\"}"),20000);
         new Thread(()->{String result;try{System.loadLibrary("c++_shared");System.loadLibrary("rexruntime");System.loadLibrary("fh4droid_android");DriverStore.installBundled(this);
             String choice=selected==null?"":selected;
             Map<String,String> settings=MobileConfig.read(this);

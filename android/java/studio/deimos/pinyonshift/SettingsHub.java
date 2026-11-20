@@ -243,7 +243,6 @@ final class SettingsHub {
       {"Show latest frame time","Display the latest frame time alongside FPS to help spot inconsistent delivery."},
       {"Show RAM","Display memory use and Android thermal severity while playing."},
       {"CPU performance hints","Optional Android scheduling hints for the game thread. Compare a repeatable route before enabling them for regular play."},
-      {"Record standard session logs","Save startup and runtime logs during normal Play. Use Play with diagnostics for per-frame captures."},
       {"Adreno options","Advanced Turnip settings. Change one at a time and compare the same route; a faster driver on another GPU may be slower on yours."},
       {"Graphics cache","Manage recognized graphics caches while the game is closed. Caches may need preparation again after removal."},
       {"Record a performance","Record a diagnostic run for a problem report. Capture adds overhead."}
@@ -560,8 +559,7 @@ final class SettingsHub {
     }
     try {
       MobileConfig.putAll(a, values);
-      boolean log=a instanceof PinyonShiftActivity ? ((PinyonShiftActivity)a).sessionLoggingEnabled()
-          :a.getSharedPreferences("mobile",0).getBoolean("record_session_logs",false);
+      boolean log=!(a instanceof PinyonShiftActivity) || ((PinyonShiftActivity)a).sessionLoggingEnabled();
       for (Map.Entry<String, String> e : values.entrySet()) {
         if(log)MobileConfig.recordChange(a, e.getKey(), e.getValue(), runtime != null && !restart);
         if (runtime != null && !restart)
@@ -823,7 +821,6 @@ final class SettingsHub {
       pref(a, rows, "Sustained performance mode", "sustained_mode", false);
       pref(a, rows, "Detailed GPU timings · next launch", "detailed_gpu", false);
       pref(a, rows, "CPU performance hints · experimental", "cpu_hints", false);
-      pref(a, rows, "Record standard session logs · next launch", "record_session_logs", false);
       pref(a, rows, "Extended comparison capture · up to 64 MB · next launch", "extended_capture", false);
       rows.addView(FestivalUi.text(a,
           "Sustained mode lowers the frame target "

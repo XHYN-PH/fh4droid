@@ -6,9 +6,9 @@ import java.nio.file.*;
 
 /** A marker survives native crashes and OS kills; normal game exits clear it. */
 final class GameSession {
-    private static File file(Context c){return new File(MobileConfig.base(c),"state/config/android-session.txt");}
+    static File marker(Context c){return new File(MobileConfig.base(c),"state/config/android-session.txt");}
     static void record(Context c,boolean running,boolean logsEnabled){
-        recordFile(file(c),running,logsEnabled);
+        recordFile(marker(c),running,logsEnabled);
     }
     static void recordFile(File f,boolean running){
         recordFile(f,running,true);
@@ -22,11 +22,11 @@ final class GameSession {
     }
     static long interrupted(Context c){
         if(GameFiles.running(c))return 0;
-        File marker=file(c);
+        File marker=marker(c);
         return interruptedFile(marker.exists()?marker:new File(MobileConfig.base(c),"state/logs/android-session.txt"));
     }
     static boolean lastSessionQuiet(Context c){
-        File marker=file(c);
+        File marker=marker(c);
         try{
             return marker.isFile() && marker.length()<=256
                 && new String(Files.readAllBytes(marker.toPath()),StandardCharsets.UTF_8).endsWith("\nquiet\n");

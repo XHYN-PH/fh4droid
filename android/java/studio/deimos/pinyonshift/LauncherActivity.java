@@ -13,7 +13,7 @@ import java.util.*;
 import org.json.JSONObject;
 
 public final class LauncherActivity extends Activity implements FestivalUi.PanelHost {
-    private enum SessionMode { WITHOUT_LOGS, STANDARD, DIAGNOSTICS }
+    private enum SessionMode { WITHOUT_LOGS, DIAGNOSTICS }
     private final ArrayDeque<PanelPage> panels=new ArrayDeque<>();
     private RacingLauncherView launcher;private RacingLauncherView.Model launcherModel;private float builtScale;
     private String restoredPage="home",restoredFocus="play",restoredHomeFocus="play";
@@ -30,12 +30,12 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     private Button cancelInstallation;
     private String installationResult;
     private String pendingDriver,pendingSaveScope=SaveArchive.BOTH;private boolean playAfterProbe,oneOffProbe;private AlertDialog progress;private FileOperation operation;
-    private SessionMode pendingSessionMode=SessionMode.WITHOUT_LOGS;
+    private SessionMode pendingSessionMode=SessionMode.DIAGNOSTICS;
     @Override public void onCreate(Bundle state){
         super.onCreate(state);UiPreferences.load(this);
         if (state != null) pendingBackupPath = state.getString("backup_path");
         if (state != null) {
-            int mode=state.getInt("session_mode",0);
+            int mode=state.getInt("session_mode",pendingSessionMode.ordinal());
             if(mode>=0&&mode<SessionMode.values().length)pendingSessionMode=SessionMode.values()[mode];
         }
         if(state!=null){pendingDriver=state.getString("driver");playAfterProbe=state.getBoolean("play_after_probe");oneOffProbe=state.getBoolean("one_off_probe");pendingSaveScope=state.getString("save_scope",SaveArchive.BOTH);restoredPage=state.getString("launcher_page","home");restoredFocus=state.getString("launcher_focus","play");restoredHomeFocus=state.getString("launcher_home_focus","play");}
@@ -79,7 +79,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     }
     private void launcherAction(String action){
         switch(action){
-            case "play":case "resume":play(defaultSessionMode());break;
+            case "play":case "resume":play(SessionMode.DIAGNOSTICS);break;
             case "choose-game":case "choose-game-files":files();break;
             case "verify":files();verifyInstallation();break;
             case "storage":openPage("Storage",this::storagePage);break;
@@ -182,14 +182,9 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         }catch(Exception error){body.addView(FestivalUi.text(this,"Lucide icons are used under the ISC license, with applicable Feather icons under the MIT license.",13,FestivalUi.MUTED));}
         FestivalUi.present(this,"Control artwork",body);
     }
-    void startDiagnosticRun(){startNewSession(SessionMode.DIAGNOSTICS);}
-    private void startNewSession(SessionMode mode) {
+    private void playWithoutLogs() {
         if(GameFiles.running(this))toast("Quit the current game before starting with different logging options.");
-        else play(mode);
-    }
-    private SessionMode defaultSessionMode() {
-        return getSharedPreferences("mobile",0).getBoolean("record_session_logs",false)
-            ? SessionMode.STANDARD : SessionMode.WITHOUT_LOGS;
+        else play(SessionMode.WITHOUT_LOGS);
     }
     private void refresh(){
         if(launcherModel==null)return;
@@ -204,7 +199,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         long interrupted=GameSession.interrupted(this);
         if(interrupted==0||busy||getSharedPreferences("mobile",0).getLong("recovery_seen",0)==interrupted)return;
         getSharedPreferences("mobile",0).edit().putLong("recovery_seen",interrupted).apply();
-        pendingSessionMode=defaultSessionMode();
+        pendingSessionMode=SessionMode.DIAGNOSTICS;
         showRecovery("The last game stopped unexpectedly", GameSession.recoveryMessage(this,interrupted), true);
     }
     private void showRecovery(String title, String message, boolean launch) {
@@ -395,18 +390,24 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     }
     private void controls(){startActivity(new Intent(this,TouchEditorActivity.class));}
     private View storagePage(){
-        LinearLayout body=FestivalUi.column(this);
-        long free=MobileConfig.base(this).getUsableSpace();
-        FestivalUi.card(this,body,"Game storage",free>0?android.text.format.Formatter.formatFileSize(this,free)+" available on this storage volume.":"Storage availability is reported in Android settings.");
-        TextView usage = FestivalUi.text(this, "Measuring installed data…", 14, FestivalUi.TEXT);
-        body.addView(usage);
+        LinearLayout body = FestivalUi.column(this);
+        File base = MobileConfig.base(this);
+        String iso = GameFiles.iso(this);
+        String source = !iso.isEmpty() ? "Disc image · stored outside the app"
+            : GameFiles.linked(this) ? "Linked folder · stored outside the app"
+            : GameFiles.ready(this) ? "Copied game files" : "Game source needed";
+        LinearLayout summary = FestivalUi.card(this, body, "Game source", source);
+        storageStat(summary, "Available on this volume", formatSize(base.getUsableSpace()));
+        LinearLayout installed = FestivalUi.card(this, body, "Installed data", null);
+        TextView usage = FestivalUi.text(this, "Measuring installed data…", 13, FestivalUi.MUTED);
+        installed.addView(usage);
         new Thread(() -> {
             try {
-                File base = MobileConfig.base(this);
                 File state = new File(base, "state");
-                long game = GraphicsCache.size(new File(base, "game/base"));
-                File isoCache = GameFiles.iso(this).isEmpty() ? null : GameFiles.isoCache(this);
-                long support = isoCache == null || isoCache.equals(new File(base,"game/base")) ? 0 : GraphicsCache.size(isoCache);
+                File copied = new File(base, "game/base");
+                File isoCache = iso.isEmpty() ? null : GameFiles.isoCache(this);
+                long game = copied.equals(isoCache) ? 0 : GraphicsCache.size(copied);
+                long support = isoCache == null ? 0 : GraphicsCache.size(isoCache);
                 File title = new File(state, "user/" + DlcStore.TITLE);
                 long dlc = GraphicsCache.size(new File(title, "00000002"))
                     + GraphicsCache.size(new File(title, "Disabled/00000002"))
@@ -417,25 +418,55 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
                 File cache = GraphicsCache.root(this);
                 File[] directories = cache.listFiles(file -> GraphicsCache.graphicsDirectory(cache, file));
                 if (directories != null) for (File directory : directories) graphics += GraphicsCache.size(directory);
-                String text = storageLine("Copied game files", game)
-                    + (support==0?"":"\n"+storageLine("Local ISO support files",support))
-                    + (GameFiles.linked(this)?"\nLinked folder uses storage outside the app.":"")
-                    + (!GameFiles.iso(this).isEmpty()?"\nDisc image uses storage outside the app.":"")
-                    + "\n" + storageLine("DLC", dlc)
-                    + "\n" + storageLine("Mods", GraphicsCache.size(new File(state, "mods")))
-                    + "\n" + storageLine("Graphics caches", graphics) + "\n" + storageLine("Saves", saves)
-                    + "\n" + storageLine("Backups", GraphicsCache.size(new File(state, "backups")));
-                runOnUiThread(() -> { if (!isDestroyed()) usage.setText(text); });
+                long[] bytes = {game, dlc, GraphicsCache.size(new File(state, "mods")), graphics, saves,
+                    GraphicsCache.size(new File(state, "backups"))};
+                runOnUiThread(() -> {
+                    if (isDestroyed()) return;
+                    installed.removeView(usage);
+                    if (isoCache != null) storageStat(installed, "Local ISO support files", formatSize(support));
+                    String[] labels = {"Copied game files", "DLC", "Mods", "Graphics caches", "Saves", "Backups"};
+                    if (FestivalUi.contentWidthDp(this) >= 520 && getResources().getConfiguration().fontScale <= 1.35f) {
+                        LinearLayout columns = new LinearLayout(this);
+                        for (int start = 0; start < labels.length; start += 3) {
+                            LinearLayout column = FestivalUi.column(this);
+                            LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(0, -2, 1);
+                            if (start > 0) size.leftMargin = FestivalUi.dp(this, 12);
+                            columns.addView(column, size);
+                            for (int i = start; i < start + 3; i++) storageStat(column, labels[i], formatSize(bytes[i]));
+                        }
+                        installed.addView(columns);
+                    } else {
+                        for (int i = 0; i < labels.length; i++) storageStat(installed, labels[i], formatSize(bytes[i]));
+                    }
+                });
             } catch (IOException | SecurityException error) {
                 runOnUiThread(() -> { if (!isDestroyed()) usage.setText("Could not measure installed data."); });
             }
         }, "StorageUsage").start();
-        FestivalUi.listRow(this,body,"chip","Graphics cache","Review or clear cached graphics data.",()->GraphicsCache.show(this));
-        FestivalUi.action(this,body,"Open Android storage settings",()->{try{startActivity(new Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS));}catch(ActivityNotFoundException error){toast("Storage settings are not available on this device.");}});
+        FestivalUi.tileRow(this, body,
+            FestivalUi.tile(this, "chip", "Graphics cache", "Review cached graphics data", () -> GraphicsCache.show(this)),
+            FestivalUi.tile(this, "settings", "Android storage", "Manage device storage", () -> {
+                try { startActivity(new Intent(android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS)); }
+                catch (ActivityNotFoundException error) { toast("Storage settings are not available on this device."); }
+            }));
         return body;
     }
-    private String storageLine(String label, long bytes) {
-        return label + " · " + android.text.format.Formatter.formatFileSize(this, bytes);
+    private void storageStat(LinearLayout parent, String label, String value) {
+        LinearLayout row = new LinearLayout(this);
+        int padding = FestivalUi.dp(this, 8);
+        row.setPadding(padding, padding, padding, padding);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackground(FestivalUi.surface(this, 0x20000000, 8));
+        row.addView(FestivalUi.text(this, label, 13, FestivalUi.MUTED), new LinearLayout.LayoutParams(0, -2, 1));
+        TextView amount = FestivalUi.text(this, value, 14, FestivalUi.TEXT);
+        amount.setPadding(padding, 0, 0, 0);
+        row.addView(amount);
+        LinearLayout.LayoutParams size = new LinearLayout.LayoutParams(-1, -2);
+        size.topMargin = FestivalUi.dp(this, 5);
+        parent.addView(row, size);
+    }
+    private String formatSize(long bytes) {
+        return android.text.format.Formatter.formatFileSize(this, bytes);
     }
     private void saves(){openPage("Saves",this::savesPage);}
     private View savesPage(){
@@ -506,23 +537,25 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
                 runOnUiThread(() -> { if (!isDestroyed()) description.setText(info + " · " + android.text.format.Formatter.formatFileSize(this, bytes)); });
             } catch (IOException ignored) {}
         }, "SaveBackupSize").start();
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(backup.label).setView(actions)
-            .setNegativeButton("Back", null).create();
-        FestivalUi.action(this, actions, "Export backup", () -> {
-            dialog.dismiss();
-            pendingBackupPath = backup.folder.getPath();
-            pick(BACKUP_OUT, "application/zip", true);
-        });
-        FestivalUi.action(this, actions, "Restore backup", () -> {
-            dialog.dismiss(); new AlertDialog.Builder(this).setTitle("Restore this backup?")
-                .setMessage("Current saves will be backed up first. Installed DLC stays in place.")
-                .setNegativeButton("Cancel", null).setPositiveButton("Restore", (ignored, which) -> {
-                    if (canManage()) work("Restoring backup…", () -> ContentFiles.locked(this, () -> {
-                        SaveArchive.restoreBackup(saveState(), backup); return null;
-                    }), () -> toast("Backup restored."));
-                }).show();
-        });
-        FestivalUi.action(this, actions, "Delete backup", () -> {
+        Dialog dialog = FestivalUi.compactDialog(this, backup.label, actions);
+        FestivalUi.tileRow(this, actions,
+            FestivalUi.tile(this, "download", "Export backup", "Save as a ZIP", () -> {
+                if (!canManage()) return;
+                dialog.dismiss();
+                pendingBackupPath = backup.folder.getPath();
+                pick(BACKUP_OUT, "application/zip", true);
+            }),
+            FestivalUi.tile(this, "save", "Restore backup", "Recover this checkpoint", () -> {
+                dialog.dismiss();
+                new AlertDialog.Builder(this).setTitle("Restore this backup?")
+                    .setMessage("Current saves will be backed up first. Installed DLC stays in place.")
+                    .setNegativeButton("Cancel", null).setPositiveButton("Restore", (ignored, which) -> {
+                        if (canManage()) work("Restoring backup…", () -> ContentFiles.locked(this, () -> {
+                            SaveArchive.restoreBackup(saveState(), backup); return null;
+                        }), () -> toast("Backup restored."));
+                    }).show();
+            }));
+        FestivalUi.listRow(this, actions, "trash", "Delete backup", "Remove this checkpoint", () -> {
             dialog.dismiss(); new AlertDialog.Builder(this).setTitle("Delete this backup?")
                 .setMessage("Your current saves stay in place.").setNegativeButton("Cancel", null)
                 .setPositiveButton("Delete", (ignored, which) -> {
@@ -549,21 +582,34 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     void openDrivers(){drivers();}
     private void drivers(){openPage("Graphics drivers",this::driverPage);}
     private View driverPage(){
-        LinearLayout body=FestivalUi.column(this);
-        TextView intro=FestivalUi.text(this,"Mali and Xclipse: start with your system driver. Turnip is for compatible Adreno GPUs. Test a driver before selecting it. Quit the game before importing or removing drivers.",13,FestivalUi.MUTED);
-        intro.setPadding(FestivalUi.dp(this,4),0,FestivalUi.dp(this,4),FestivalUi.dp(this,2));body.addView(intro);
-        String current=MobileConfig.get(this,"android_gpu_driver","auto");
+        LinearLayout body = FestivalUi.column(this);
+        LinearLayout choices = FestivalUi.column(this);
+        LinearLayout report = FestivalUi.column(this);
+        String current = MobileConfig.get(this,"android_gpu_driver","auto");
+        body.addView(FestivalUi.text(this, "Selected · " + DriverStore.displayName(this, current), 13, FestivalUi.MUTED));
         for(String choice:DriverStore.choices(this)){
             boolean system=choice.isEmpty(),auto=choice.equals("auto"),imported=choice.startsWith("imported-");
             String name=system?"System Vulkan driver":DriverStore.displayName(this,choice);
             String detail=system?"Use the device's built-in Vulkan driver.":auto?"Let the app pick the best driver for your GPU.":imported?"Use a custom driver file (e.g. Turnip, Mesa).":"Driver bundled with the app, for compatible Adreno GPUs.";
-            FestivalUi.radioRow(this,body,system||auto?"chip":"file",name,detail,current.equals(choice),()->{if(canManage())probe(choice,false);});
+            FestivalUi.radioRow(this,choices,system||auto?"chip":"file",name,detail,current.equals(choice),()->{if(canManage())probe(choice,false);});
         }
         FestivalUi.tileRow(this,body,
-            FestivalUi.tile(this,"download","Import driver","Select a driver file",()->{if(canManage())pick(DRIVER_ZIP,"application/zip",false);}),
-            FestivalUi.tile(this,"flask","Test driver","Check compatibility",()->{if(canManage())probe(current,false);}),
-            FestivalUi.tile(this,"trash","Remove driver","Clear imported driver",()->{if(canManage())removeDriver();}));
-        DriverStore.addReport(this,body,AdrenoSettings.reportDetails(this));return body;
+            FestivalUi.tile(this,"download","Import driver","Choose a ZIP",()->{if(canManage())pick(DRIVER_ZIP,"application/zip",false);}),
+            FestivalUi.tile(this,"flask","Test driver","Run startup checks",()->{if(canManage())probe(current,false);}),
+            FestivalUi.tile(this,"trash","Remove driver","Remove an import",()->{if(canManage())removeDriver();}));
+        DriverStore.addReport(this,report,AdrenoSettings.reportDetails(this));
+        if (FestivalUi.contentWidthDp(this) >= 650 && getResources().getConfiguration().fontScale <= 1.35f) {
+            LinearLayout columns = new LinearLayout(this);
+            columns.addView(choices, new LinearLayout.LayoutParams(0, -2, 1));
+            LinearLayout.LayoutParams statusSize = new LinearLayout.LayoutParams(0, -2, 1);
+            statusSize.leftMargin = FestivalUi.dp(this, 10);
+            columns.addView(report, statusSize);
+            body.addView(columns);
+        } else {
+            body.addView(report);
+            body.addView(choices);
+        }
+        return body;
     }
     private void removeDriver(){
         List<String> imported=new ArrayList<>();for(String choice:DriverStore.choices(this))if(choice.startsWith("imported-"))imported.add(choice);
@@ -580,8 +626,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     private void reports(){
         LinearLayout body=FestivalUi.column(this);
         FestivalUi.listRow(this,body,"play","Play without logs","Start without app session logs or diagnostic capture.",
-            ()->startNewSession(SessionMode.WITHOUT_LOGS));
-        FestivalUi.listRow(this,body,"pulse","Play with diagnostics","Record detailed logs for this session.",this::startDiagnosticRun);
+            this::playWithoutLogs);
         FestivalUi.listRow(this,body,"audio","Check collision sound files","Verify impact and glass assets from the selected game source.",()->{
             if(canManage()&&GameFiles.ready(this))
                 work("Checking collision and glass audio…",()->GameFiles.verifyCollisionAudio(this),()->toast("Collision and glass audio files verified."));
