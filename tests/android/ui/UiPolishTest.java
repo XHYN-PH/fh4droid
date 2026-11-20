@@ -230,6 +230,28 @@ public class UiPolishTest {
     assertNotNull(find(search,"Use my music player"));
   }
 
+  @Test public void inheritedBilinearUpgradesOnceAndExplicitFiltersAreKept() throws Exception {
+    Activity a = activity();
+    Map<String,String> initial = new HashMap<>();
+    initial.put("present_effect", MobileConfig.quote("bilinear"));
+    initial.put("fh1_render_scale_percent", "90");
+    initial.put("swap_post_effect", MobileConfig.quote("fxaa"));
+    MobileConfig.putAll(a, initial);
+    GraphicsProfileStore.upgradeUpscalingDefault(a);
+    assertEquals("auto", MobileConfig.get(a, "present_effect", ""));
+    assertEquals("90", MobileConfig.get(a, "fh1_render_scale_percent", ""));
+    assertEquals("fxaa", MobileConfig.get(a, "swap_post_effect", ""));
+    assertTrue(text(settings(a, "Graphics")).contains("Automatic (sharp)"));
+
+    MobileConfig.put(a, "present_effect", MobileConfig.quote("bilinear"));
+    GraphicsProfileStore.upgradeUpscalingDefault(a);
+    assertEquals("bilinear", MobileConfig.get(a, "present_effect", ""));
+    a.getSharedPreferences("mobile",0).edit().remove("sharp_upscaling_default").commit();
+    MobileConfig.put(a, "present_effect", MobileConfig.quote("nearest"));
+    GraphicsProfileStore.upgradeUpscalingDefault(a);
+    assertEquals("nearest", MobileConfig.get(a, "present_effect", ""));
+  }
+
   @Test public void graphicsPresetsRefreshTheMountedRowsImmediately()throws Exception{
     Activity a=activity();
     LinearLayout page=settings(a,"Graphics");

@@ -6,13 +6,20 @@ import java.util.*;
 
 /** Local graphics transactions; never capture profile, save, trainer or file settings. */
 final class GraphicsProfileStore {
+    static void upgradeUpscalingDefault(android.content.Context context) throws IOException {
+        android.content.SharedPreferences prefs = context.getSharedPreferences("mobile", 0);
+        if (prefs.getBoolean("sharp_upscaling_default", false) || GameFiles.running(context)) return;
+        if ("bilinear".equals(MobileConfig.read(context).get("present_effect")))
+            MobileConfig.putAll(context, Collections.singletonMap("present_effect", MobileConfig.quote("auto")));
+        prefs.edit().putBoolean("sharp_upscaling_default", true).apply();
+    }
     static String launchSummary(android.content.Context context, Map<String,String> settings) {
         int scale = PerformancePolicy.configured(settings.get("fh1_render_scale_percent"),100,25,100);
         int width = Math.round(1280 * scale / 100f);
         int height = Math.round(720 * scale / 100f);
         float fps = PerformancePolicy.presentationTarget(settings.getOrDefault("pinyon_shift_fh1_render_fps_limit","30"),
             settings.getOrDefault("host_present_fps_limit","0"));
-        String filter = settings.getOrDefault("present_effect","bilinear");
+        String filter = settings.getOrDefault("present_effect","auto");
         for (MobileSettings.Option option : MobileSettings.OPTIONS) {
             if (option.key.equals("present_effect")) {
                 filter = MobileSettings.label(option,filter);

@@ -33,6 +33,8 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     private SessionMode pendingSessionMode=SessionMode.DIAGNOSTICS;
     @Override public void onCreate(Bundle state){
         super.onCreate(state);UiPreferences.load(this);
+        try { GraphicsProfileStore.upgradeUpscalingDefault(this); }
+        catch (IOException error) { android.util.Log.w("FH4Droid", "Could not update the upscaling default", error); }
         if (state != null) pendingBackupPath = state.getString("backup_path");
         if (state != null) {
             int mode=state.getInt("session_mode",pendingSessionMode.ordinal());

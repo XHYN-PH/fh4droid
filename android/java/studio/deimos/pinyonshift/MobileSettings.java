@@ -79,13 +79,12 @@ final class MobileSettings {
           "Synchronizes presentation to the display; changing it recreates the "
               + "presentation surface.",
           "false", "true"),
-      s("Display", "present_effect", "Upscaling filter", "bilinear", false,
-          "Off uses nearest-neighbour display scaling with no smoothing. At reduced render "
-              + "resolutions, edges can look blocky. Bilinear smooths pixels. CAS and FSR 1 "
-              + "add sharpening and GPU work. Post-process anti-aliasing is a separate setting.",
-          "nearest", "bilinear", "cas", "fsr"),
+      s("Display", "present_effect", "Upscaling filter", "auto", false,
+          "Automatic sharpens reduced resolutions with CAS and uses bilinear at 100%. "
+              + "Off keeps pixels unsmoothed. Bilinear softens edges. FSR 1 uses an edge-aware upscaler.",
+          "nearest", "bilinear", "cas", "fsr", "auto"),
       o("Display", "present_cas_additional_sharpness", "CAS sharpness", "0", false,
-          "Additional sharpening when CAS is selected.", "0", "0.25", "0.5", "0.75", "1"),
+          "Additional sharpening with CAS or Automatic below 100%.", "0", "0.25", "0.5", "0.75", "1"),
       o("Display", "present_fsr_sharpness_reduction", "FSR softness", "0.2", false,
           "Higher values reduce sharpening halos when FSR is selected.", "0", "0.2", "0.5", "1", "1.5",
           "2"),
@@ -219,6 +218,8 @@ final class MobileSettings {
       }
     }
     if (option.key.equals("present_effect")) {
+      if (str.equals("auto"))
+        return "Automatic (sharp)";
       if (str.equals("nearest"))
         return "Off (nearest)";
       if (str.equals("fsr"))

@@ -243,7 +243,11 @@ std::string DefaultConfigText() {
             "pinyon_shift_fh1_render_fps_limit = 60\n"
             "pinyon_shift_fh1_source_presentation = true\n"
             "anisotropic_override = -1\n"
+#if defined(__ANDROID__)
+            "present_effect = \"auto\"\n"
+#else
             "present_effect = \"bilinear\"\n"
+#endif
             "swap_post_effect = \"none\"\n"
             "disable_bloom = true\n"
             "disable_motion_blur = true\n"

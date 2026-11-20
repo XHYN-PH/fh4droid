@@ -28,7 +28,7 @@ final class GraphicsProfiles {
         values.put("pinyon_shift_fh1_render_fps_limit", new String[]{"30", "30", "60", "30", "40", "30"}[index]);
         values.put("fh1_msaa_single_sample", quality ? "false" : "true");
         values.put("fh1_msaa_2x", quality ? "true" : "false");
-        values.put("present_effect", "\"bilinear\"");
+        values.put("present_effect", "\"auto\"");
         values.put("swap_post_effect", "\"none\"");
         values.put("swap_post_effect_scene_only", "true");
         values.put("anisotropic_override", quality ? "3" : "0");
