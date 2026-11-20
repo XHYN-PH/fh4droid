@@ -315,7 +315,7 @@ cells = ["n/a", "n/a", "n/a", "partly: supported base game from a seekable ISO o
 [[platform]]
 feature = "Phone save import/export and reports"
 link = "android.md#saves"
-cells = ["n/a", "n/a", "n/a", "partly: scoped normal/modded archives and original-XUID base-game Xenia imports up to 4 GiB of save data, backup export/restore/delete with interrupted-swap recovery; current-session reports, recent frame timings, optional incident image and a background-aware stall watchdog; device testing pending"]
+cells = ["n/a", "n/a", "n/a", "partly: scoped normal/modded archives, base-game Xbox 360 ForzaProfile and Xenia imports up to 4 GiB of save data, clear with rollback and backup export/restore/delete; current-session reports, recent frame timings, optional incident image and a background-aware stall watchdog; device testing pending"]
 
 [[platform]]
 feature = "Android mod and pipeline management"

@@ -1,5 +1,13 @@
 # Changelog
 
+## FH4Droid 0.9.6 - 2026-11-20
+
+- Fix FSR presets and camera controls that could make the game start with default settings. Repair affected settings on launch and save a recovery copy.
+- Import compatible Xbox 360 `ForzaProfile` packages into Normal or Modded saves. Modded imports use the package's player ID during modded play. Imports check save version compatibility before changing live data.
+- Add **Clear saves** to the Saves page. It moves the selected progress to a recovery backup and keeps installed DLC in place.
+
+[Full FH4Droid 0.9.6 release notes](docs/releases/fh4droid-0.9.6.md)
+
 ## FH4Droid 0.9.5 - 2026-11-20
 
 - Open the pause drawer before taking game input. Recover if Android refuses the window and keep the slide-and-fade transition.
