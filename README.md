@@ -14,7 +14,7 @@
 
 **FH4Droid focuses on Android only.** It brings the original Xbox 360 **Forza Horizon (2012)** to compatible phones and handhelds.
 
-**Current release is FH4Droid 0.9.4.** Based on [Pinyon Shift 0.9.1](docs/releases/0.9.1.md). See the [Android release notes](docs/releases/fh4droid-0.9.4.md) for changes and validation.
+**Current release is FH4Droid 0.9.5.** It uses Pinyon Shift 0.9.1. [Android release notes](docs/releases/fh4droid-0.9.5.md)
 
 **You must provide your own legally obtained game files.** Use the supported USA Xbox 360 base-game ISO or complete extracted folder. Game files and game-download links are not provided here.
 
@@ -58,7 +58,7 @@ Keep the ISO accessible while playing. ISO mode caches only the menu and audio c
 
 While playing, tap **☰** or press Android Back for the in-game menu. Choose **Advanced game settings** for the full game settings and controller mapping. **Controls** on the launcher opens the touch editor.
 
-Use **Saves** to export or restore the standard base-game profile while the game is closed. The trainer uses a separate modded profile; normal save exports do not include it. Use **More → Problem reports → Play with diagnostics** when reproducing a problem, then use **Share problem report**. Normal play leaves detailed profiling off.
+Use **More → Save backups** to export or restore a base-game profile while the game is closed. Imports select the original player profile when the backup identifies it. The trainer uses a separate modded save tree. Regular **Play** records detailed session logs. Open **More → Problem reports** to share a report or choose **Play without logs** for one session.
 
 The launcher uses the transparent FH4Droid logo, one primary Play action and text footer links. Settings are grouped into Graphics, Controls, Audio, Interface, Gameplay and Advanced. The full-window touch editor has a separate full-window Properties view, a Test mode and explicit Save/Cancel. Driving controls use the same text labels in the editor and native overlay; backing and symbol opacity are independent. Existing custom positions are retained. Choose Modern racing or Full controller explicitly under layout presets.
 

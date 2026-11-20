@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "version": "0.9.4",
-  "android_version_code": 914,
+  "version": "0.9.5",
+  "android_version_code": 915,
   "channel": "stable",
   "repository": "https://github.com/XHYN-PH/fh4droid"
 }

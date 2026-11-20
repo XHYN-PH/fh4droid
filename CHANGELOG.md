@@ -1,5 +1,16 @@
 # Changelog
 
+## FH4Droid 0.9.5 - 2026-11-20
+
+- Open the pause drawer before taking game input. Recover if Android refuses the window and keep the slide-and-fade transition.
+- Add space below the achievement profile header, narrow the search field and fit the achievement and backup dialogs to their content.
+- Rework driver testing and results, and show installed storage sizes in spaced rows with direct cache and device storage actions.
+- Record detailed logs from regular Play. Problem reports keeps sharing, the collision asset check and Play without logs.
+- Restore a transferred save under its original profile. Check save versions before applying a backup and preserve the previous profile selection for rollback.
+- Use CAS in the Automatic upscaling mode below 100% resolution. Keep Bilinear, FSR 1 and Off as selectable filters.
+
+[Full FH4Droid 0.9.5 release notes](docs/releases/fh4droid-0.9.5.md)
+
 ## FH4Droid 0.9.4 - 2026-11-20
 
 - Fit Home to shorter displays with adaptive cards and a dedicated Home footer. Show resolution, frame target, filter and driver under Ready to drive.

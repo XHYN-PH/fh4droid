@@ -52,7 +52,7 @@ Use Game files with your own supported USA base-game dump. **Choose game ISO** k
 
 Choose **Use extracted folder in place** for a local folder Android lets the runtime read directly. The app checks the supported files and keeps permission across restarts. If the provider only grants access through its file picker, choose **Copy extracted folder**. The app copies the catalogued files and resumes completed copies after an interruption.
 
-The installation card shows the active source and reports byte progress while copying or checking files. **Change source**, **Check installation** and **Storage** are next to the card. Storage lists copied game files, local ISO support files, DLC, mods, graphics caches, saves and backups. Open **More → Problem reports → Check collision sound files** to verify the collision and glass banks.
+The installation card shows the active source and reports byte progress while copying or checking files. **Change source**, **Check installation** and **Storage** are next to the card. Storage shows the source and available volume space above the installed-data breakdown. Copied game files, ISO support files, DLC, mods, graphics caches, saves and backups have their own sizes. Graphics cache and Android storage open from that page. Open **More → Problem reports → Check collision sound files** to verify the collision and glass banks.
 
 The previously selected source stays active while the new one is verified. An interrupted folder copy can reuse files it has already verified. A new ISO stages its own local support files before it replaces the source selection. Automatic ISO launch verification can reuse a prior pass when the local ISO and support files have the same filesystem identity. Changed files or providers without a usable identity go through verification again. **Check installation** always checks the full catalog. Clustered small native disc reads share a bounded 64 KiB read window while the descriptor's file identity is unchanged. Keep the image accessible and unchanged while playing.
 
@@ -76,7 +76,7 @@ Content discovery runs on a worker and preserves the open detail page, scroll an
 
 The Shaders tab imports a compatible `.xpso` pipeline list prepared from the player's files. The startup panel shows when it reads caches, translates shaders, builds pipelines and saves the driver cache before gameplay. **Advanced → Shader workers** controls preparation concurrency. A cache write failure points to storage and cache recovery. A pipeline build failure points to driver selection and problem reports. New scenes can still introduce pipelines outside the installed lists and cache. The Graphics cache page can rebuild a single driver blob while retaining the imported pipeline list and other driver caches.
 
-**Game menu → More → Achievements** shows the current game's achievement data in the same paged view the launcher uses. The local profile header shows the gamertag, gamer picture and achievement progress. Live chase-camera controls and the 80–200% global FOV setting are in Settings. Quit to launcher requests the upstream shutdown path.
+**Game menu → More → Achievements** shows the current game's achievement data in the same paged view the launcher uses. The local profile header shows the gamertag, gamer picture and achievement progress. Search sits beside the filters when space permits. Selecting an achievement opens a compact dialog with its score, unlock status and description. Live chase-camera controls and the 80–200% global FOV setting are in Settings. Quit to launcher requests the upstream shutdown path.
 
 ## Rendering resolution
 
@@ -84,7 +84,7 @@ Graphics offers raster resolution from 25% to 100% in one-percent steps, custom 
 
 Use the arrows on the resolution row, D-pad left and right, or the left stick to adjust a focused value. Selecting the resolution opens a slider that accepts touch drag and controller input. The **Display**, **Quality** and **Renderer** groups keep related options together. The right-hand panel explains the focused setting and shows pending changes. The launcher's **Ready to drive** line shows the configured resolution, frame target, filter and driver.
 
-Under **Settings → Graphics → Upscaling filter**, **Off (nearest)** fits the image to the display with nearest-neighbour sampling. It avoids smoothing and can make edges look blockier at reduced render resolutions. Bilinear is the default. CAS and FSR 1 add spatial sharpening when selected. **Post-process anti-aliasing** stays independent. The filter can change live. Render resolution applies on the next launch.
+Under **Settings → Graphics → Upscaling filter**, **Automatic (sharp)** uses CAS sharpening at reduced render resolutions and Bilinear at 100%. Upgrading moves the previous Bilinear setting to Automatic once. Choose **Bilinear** to keep smoothing or **Off (nearest)** for nearest-neighbour scaling. FSR 1 is also available. **Post-process anti-aliasing** stays independent. The filter can change live. Render resolution applies on the next launch.
 
 Native attachment dimensions, viewport/scissor, depth/colour transfers and source reads scale together. Guest resolve destinations retain their original layout. Fractional resolutions use separate raster-v3 shader/pipeline caches; the precompiled SPIR-V pack is used only at 100%. Shader preparation is scheduled with bounded concurrency, and detailed GPU timestamp profiling is opt-in.
 
@@ -120,17 +120,17 @@ Phone tilt is independent of the Arrows / Stick layout choice. If tilt is enable
 
 Achievements shows current progress with cached artwork. The trainer operates on a separate modded profile; enabling it requires a restart. Opt-in sustained mode requests supported Android performance mode and temporarily caps a severe thermal state at 30 FPS, or keeps a lower selected limit. It restores the saved target after a minute at light-or-lower severity without rewriting the preset. Adreno experiments are gated to matching hardware and provide a reset; they can reduce stability.
 
-The top-right icon or Android Back opens the pause drawer. Resume is the primary action. Settings, Touch controls and Controller are quick actions. More groups the profile, achievements, diagnostics and trainer. Quit to launcher is at the bottom. Settings use six categories, with `LB` and `RB` switching related pages and `B` returning to the previous focus. Native controller remapping is reachable from the in-game Controller page.
+The top-right icon or Android Back opens the pause drawer. The drawer takes game input once its Android window opens. Resume is the primary action. Settings, Touch controls and Controller are quick actions. More groups the profile, achievements, diagnostics and trainer. Quit to launcher is at the bottom. Settings use six categories, with `LB` and `RB` switching related pages and `B` returning to the previous focus. Native controller remapping is reachable from the in-game Controller page.
 
 ## Android resource policy
 
 Automatic texture reserve is 64 MiB on low-RAM/up-to-4-GiB devices, 128 MiB up to 6 GiB, and 256 MiB otherwise. Explicit choices are retained. It is an initial reserve, not a hard memory limit or a smaller guest address space. The optional Budget preview selects 512-pixel textures; 256 remains an explicit choice. Balanced preserves original textures. These alternatives need phone quality/performance comparisons.
 
-Advanced → Extended comparison capture raises the diagnostic CSV bound from 16 to 64 MiB for long tests. Report exports keep a bounded tail and identify truncation; ordinary launches keep detailed CSV/GPU profiling off.
+**Advanced → Extended comparison capture** raises the diagnostic CSV bound from 16 to 64 MiB for long tests. Report exports keep a bounded tail and identify truncation. Detailed GPU timestamps are opt-in.
 
 Surface refresh hints follow the lower active game or presentation cap. When possible, **Match display refresh** favours seamless refresh rates that are an integer multiple of the game target, such as 120 Hz at 40 FPS. Memory and frame-timing samples run on a worker. **Advanced → CPU performance hints** is an off-by-default Android scheduling experiment. It reports budget and CPU work for the game frame thread. The older Android command/recording-thread experiment showed no clear benefit, so this experiment needs a fresh same-device comparison before any performance claim.
 
-An unchanged, successful driver probe can be reused across Play launches. An Android or app update, changed driver files, changed probe settings, or an interrupted game triggers a fresh check. The selected-driver probe reports BC and fragment-shading-rate availability. Coarse shading and prepared immersive-camera controls explain unavailable dependencies. Quit shows backup and closing progress until native shutdown completes.
+An unchanged, successful driver probe can be reused across Play launches. An Android or app update, changed driver files, changed probe settings, or an interrupted game triggers a fresh check. **Graphics drivers** shows the current selection alongside the driver and Vulkan version used in the last startup test. Each result identifies the check that passed or failed. The probe also reports BC and fragment-shading-rate availability. Coarse shading and prepared immersive-camera controls explain unavailable dependencies. Quit shows backup and closing progress until native shutdown completes.
 
 ## Saves
 
@@ -140,17 +140,17 @@ Use **Manage backups → Create named checkpoint** to copy the selected save typ
 
 FH4Droid and Xenia ZIP imports support up to 4 GiB of expanded save data. Imports check free space while staging and show progress as each file is read. Older archives can contain installed DLC, disabled packages or licence headers. The importer reads past those entries without staging them or counting them toward the save-data limit. It can scan up to 8 GiB of skipped content, and any DLC already installed is preserved. FH4Droid save exports also support up to 4 GiB of save data and exclude DLC.
 
-Legacy normal-only save archives remain readable. Quit the game before save management. The page shows backup status and configured profile selection. Base-game and TU4 saves are incompatible. Guided Xenia import refuses detected TU4 data for this APK.
+To transfer a base-game backup to another phone, choose **More → Save backups → Restore saves** on FH4Droid 0.9.5 or newer and select the ZIP. The importer selects the archived player ID, or identifies a single owner from the save folders in an older export. The previous profile selection is saved with the rollback backup. FH4Droid and Xenia imports check version flags before replacing saves. Title-update saves require a matching game build.
 
 ## Reports and recovery
 
 **Settings → Audio → 0.5.1-style audio** uses the guest XAudio2 output, original FMOD mixer and EQ, inline XMA decoding, and per-frame audio updates on the next launch. The current decoder and Android output driver still provide their fixes. The switch lets the same phone compare current audio with the major game-side audio settings from Pinyon Shift 0.5.1.
 
-**In-game menu → More → Diagnostics → Capture a problem** saves recent frame times, audio counters, page recoveries and active settings. Capturing a white car or blank tile also tries to save the visible game frame. Export a problem report to include these captures. Diagnostic launches record opens of the collision, glass and festival audio banks.
+**In-game menu → More → Diagnostics → Capture a problem** saves recent frame times, audio counters, page recoveries and active settings. Capturing a white car or blank tile also tries to save the visible game frame. Export a problem report to include these captures. Regular Play records opens of the collision, glass and festival audio banks.
 
-Regular **Play** starts without app session logging by default. **More → Problem reports → Play without logs** selects that mode for one launch, even if standard logging is enabled. This mode suppresses the native runtime logger, diagnostic events, frame history, crash reports written by the app and Android settings or performance recordings. Saves, achievement data, graphics caches and the recovery status still work. Android and its libraries can emit their own system messages.
+Regular **Play** records runtime logs, settings snapshots and bounded frame timing data. Reproduce the issue using Play and open **More → Problem reports → Share problem report**. Reports distinguish a session recorded without logs from earlier captures.
 
-Enable **Settings → Advanced → Record standard session logs** to keep startup and runtime logs during normal Play. **More → Problem reports → Play with diagnostics** enables bounded per-frame recordings for one session. Drive the same route for each configuration, then use Share problem report. Reports distinguish an unrecorded last session from earlier captures.
+**More → Problem reports → Play without logs** selects quiet mode for one launch. It suppresses app session logs, frame history and diagnostics during that session. Saves, achievement data and graphics caches are still written. Android manages its own system logs.
 
 Exports retain CSV headers and whole rows. The report index identifies file size/truncation, originating session and source commit, and separates the latest session from older history and shared logs. A session from an older APK is not labelled current after an update. Thermal values are named severity levels, not temperatures, and normal self-exits are distinguished from crashes and low-memory kills. Saved, launch and live settings have separate snapshots; phone FPS/thermal samples carry session/build provenance.
 
