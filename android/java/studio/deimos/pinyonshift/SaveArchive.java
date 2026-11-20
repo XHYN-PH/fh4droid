@@ -14,7 +14,12 @@ final class SaveArchive {
     static final String IMPORT_LIMIT = "Save data expands beyond the 4 GiB import limit.";
     static final String SKIPPED_LIMIT_MESSAGE = "Archive content outside the saves expands beyond the 8 GiB scan limit.";
     private static final int FILES=8192, DEPTH=64;
-    private static final String V1="FH4Droid base-game saves v1\n", V2="FH4Droid base-game saves v2\n";
+    private static final String V1="FH4Droid base-game saves v1\n", V2="FH4Droid base-game saves v2\n",
+        V3="FH4Droid base-game saves v3\n";
+    private static final String DEFAULT_PROFILE="B13EBABEBABEBABE";
+    private static final String PROFILE_MARKER="profile-id.txt";
+    private static final String CONFIG_FILE="config/pinyon_shift.toml";
+    private static final String PROFILE_DIRECTORY=XeniaSaveImport.TITLE+"/00000001/ForzaProfile";
     // Installed Marketplace payloads are content, never save progress.
     private static final String[] CONTENT = {
         "0000000000000000/4D5309C9/00000002", "0000000000000000/4D5309C9/Disabled/00000002",
@@ -37,12 +42,80 @@ final class SaveArchive {
         }
     }
     static void exportState(File state,String scope,OutputStream stream)throws IOException{
-        List<String> roots=scopes(scope);
+        writeArchive(state,scopes(scope),configuredOwner(state),stream);
+    }
+    private static void writeArchive(File root,List<String> roots,String preferred,OutputStream stream)throws IOException{
+        Set<String> owners = profileOwners(root, roots, false);
+        String owner = chooseOwner(owners, preferred);
+        String marker = owner == null || DEFAULT_PROFILE.equals(owner) && owners.size() == 1
+            ? V2 : V3 + owner + "\n";
         try(ZipOutputStream zip=new ZipOutputStream(stream)){
-            entry(zip,"fh4droid-save.txt",V2);long[] budget={0,0,0};
-            for(String name:roots){File root=new File(state,name);if(Files.exists(root.toPath(),LinkOption.NOFOLLOW_LINKS))write(root,root,name,zip,budget,0);}
+            entry(zip,"fh4droid-save.txt",marker);long[] budget={0,0,0};
+            for(String name:roots){File folder=new File(root,name);if(Files.exists(folder.toPath(),LinkOption.NOFOLLOW_LINKS))write(folder,folder,name,zip,budget,0);}
             if(budget[2]==0)throw new IOException("No saves found in the selected profiles.");
         }
+    }
+    private static String configuredOwner(File state) {
+        String value = MobileConfig.readFile(new File(state, CONFIG_FILE)).getOrDefault("user_xuid", DEFAULT_PROFILE);
+        if (value.startsWith("0x") || value.startsWith("0X")) value = value.substring(2);
+        return XeniaSaveImport.usableXuid(value) ? value.toUpperCase(Locale.ROOT) : DEFAULT_PROFILE;
+    }
+    private static Set<String> profileOwners(File payload, List<String> roots, boolean verifyVersions) throws IOException {
+        Set<String> owners = new HashSet<>();
+        for (String scope : roots) {
+            File folder = new File(payload, scope);
+            if (!directory(folder)) continue;
+            if (verifyVersions) verifyBaseVersion(new File(folder, PROFILE_DIRECTORY + "/VersionFlags"));
+            File[] profiles = folder.listFiles(file -> directory(file) && XeniaSaveImport.usableXuid(file.getName()));
+            if (profiles == null) throw new IOException("Could not read the save profiles.");
+            for (File profile : profiles) {
+                File slot = new File(profile, PROFILE_DIRECTORY);
+                if (verifyVersions) verifyBaseVersion(new File(slot, "VersionFlags"));
+                File save = new File(slot, "ForzaProfile");
+                if (Files.isRegularFile(save.toPath(), LinkOption.NOFOLLOW_LINKS) && save.length() > 0)
+                    owners.add(profile.getName().toUpperCase(Locale.ROOT));
+            }
+        }
+        return owners;
+    }
+    private static String chooseOwner(Set<String> owners, String preferred) {
+        if (owners.contains(preferred)) return preferred;
+        return owners.size() == 1 ? owners.iterator().next() : null;
+    }
+    private static String importedOwner(File state, File stage, List<String> roots, String archived) throws IOException {
+        Set<String> owners = profileOwners(stage, roots, true);
+        if (archived != null) {
+            if (!owners.contains(archived)) throw new IOException("The backup's player profile is missing.");
+            return archived;
+        }
+        String owner = chooseOwner(owners, configuredOwner(state));
+        if (owner == null && !owners.isEmpty())
+            throw new IOException("This older backup has several player profiles. Export it again from the source phone with the intended profile selected.");
+        return owner;
+    }
+    static void verifyBaseVersion(File flags) throws IOException {
+        if (!Files.exists(flags.toPath(), LinkOption.NOFOLLOW_LINKS)) return;
+        byte[] header = new byte[12];
+        if (!Files.isRegularFile(flags.toPath(), LinkOption.NOFOLLOW_LINKS) || flags.length() < header.length)
+            throw new IOException("Invalid save version information.");
+        try (DataInputStream in = new DataInputStream(new FileInputStream(flags))) {
+            in.readFully(header);
+        }
+        if (!new String(header, 0, 4, StandardCharsets.US_ASCII).equals("cmss"))
+            throw new IOException("Invalid save version information.");
+        for (int i = 4; i < header.length; i++) {
+            if (header[i] != 0)
+                throw new IOException("This save was made with a title update. Import a base-game save for this APK. Existing saves were kept.");
+        }
+    }
+    private static String backupOwner(File backup) throws IOException {
+        File marker = new File(backup, PROFILE_MARKER);
+        if (!Files.exists(marker.toPath(), LinkOption.NOFOLLOW_LINKS)) return null;
+        if (!Files.isRegularFile(marker.toPath(), LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Invalid backup profile information.");
+        String owner = ContentFiles.text(marker, 64).trim();
+        if (!XeniaSaveImport.usableXuid(owner)) throw new IOException("Invalid backup profile information.");
+        return owner.toUpperCase(Locale.ROOT);
     }
     private static void entry(ZipOutputStream zip,String name,String value)throws IOException{
         zip.putNextEntry(new ZipEntry(name));zip.write(value.getBytes(StandardCharsets.UTF_8));zip.closeEntry();
@@ -121,7 +194,8 @@ final class SaveArchive {
                         ByteArrayOutputStream tag=new ByteArrayOutputStream();
                         for(int n;(n=zip.read(buffer))!=-1;){if(tag.size()+n>1024)throw new IOException("Invalid save information.");tag.write(buffer,0,n);}
                         marker=new String(tag.toByteArray(),StandardCharsets.UTF_8);
-                        if(!V1.equals(marker)&&!V2.equals(marker))throw new IOException("This backup is not for the base-game build.");
+                        if(!V1.equals(marker)&&!V2.equals(marker)&&!marker.matches(V3+"[0-9A-F]{16}\n"))
+                            throw new IOException("This backup is not for the base-game build.");
                         continue;
                     }
                     String clean=validateName(name);
@@ -145,7 +219,10 @@ final class SaveArchive {
             }
             if(marker==null||bytes==0||roots.isEmpty())throw new IOException("The archive contains no compatible saves.");
             if(V1.equals(marker)&&!roots.equals(Collections.singleton(NORMAL)))throw new IOException("A legacy archive can contain only the normal profile.");
-            FileOperation.check();switchRoots(state,stage,new ArrayList<>(roots));
+            List<String> selected = new ArrayList<>(roots);
+            String archived = marker.startsWith(V3) ? marker.substring(V3.length()).trim() : null;
+            FileOperation.check();
+            switchRoots(state,stage,selected,importedOwner(state,stage,selected,archived));
         }finally{if(!ContentTransaction.pending(state))delete(stage);}
     }
     private static File newBackup(File state)throws IOException{
@@ -157,7 +234,7 @@ final class SaveArchive {
         }
         return Files.createTempDirectory(parent.toPath(),"android-import-"+stamp+"-").toFile();
     }
-    private static void switchRoots(File state,File stage,List<String> roots)throws IOException{
+    private static void switchRoots(File state,File stage,List<String> roots,String owner)throws IOException{
         if(Files.isSymbolicLink(state.toPath())||Files.isSymbolicLink(stage.toPath()))throw new IOException("Linked save roots are not supported.");
         for(String root:roots)if(!rootName(root)||Files.isSymbolicLink(new File(state,root).toPath())||Files.isSymbolicLink(new File(stage,root).toPath()))throw new IOException("Invalid or linked profile folder.");
         for(String root:roots)for(File folder:new File[]{new File(state,root),new File(stage,root)})if(folder.exists()&&!folder.isDirectory())throw new IOException("A profile path is not a folder.");
@@ -167,11 +244,16 @@ final class SaveArchive {
         for(String root:roots)for(String path:CONTENT){File live=new File(state,root+"/"+path);if(Files.exists(live.toPath(),LinkOption.NOFOLLOW_LINKS)){if(Files.isSymbolicLink(live.toPath())||!live.isDirectory())throw new IOException("Invalid installed content folder.");for(File f=live;f!=null&&f.toPath().startsWith(state.toPath());f=f.getParentFile())if(Files.isSymbolicLink(f.toPath()))throw new IOException("Linked installed content is not supported.");File parent=new File(stage,root+"/"+path).getParentFile();for(File f=parent;f!=null&&f.toPath().startsWith(stage.toPath());f=f.getParentFile())if(Files.exists(f.toPath(),LinkOption.NOFOLLOW_LINKS)&&(Files.isSymbolicLink(f.toPath())||!f.isDirectory()))throw new IOException("Invalid save content parent.");retained.add(root+"/"+path);}}
         File backup=newBackup(state),payload=new File(backup,"payload");
         File marker=new File(backup,"roots.txt");
+        File ownerMarker = new File(backup, PROFILE_MARKER);
+        File config = new File(state, CONFIG_FILE);
+        String previousOwner = configuredOwner(state);
         try{
             ContentTransaction.run(state,()->{
                 ContentTransaction transaction=ContentTransaction.current();
                 transaction.watch(marker);
                 ContentFiles.atomic(marker,String.join("\n",roots).getBytes(StandardCharsets.UTF_8));
+                transaction.watch(ownerMarker);
+                ContentFiles.atomic(ownerMarker, (previousOwner+"\n").getBytes(StandardCharsets.UTF_8));
                 // Move DLC out of the old roots before publishing either side of the swap.
                 for(String path:retained)transaction.move(new File(state,path),new File(stage,path));
                 for(String root:roots){
@@ -181,6 +263,10 @@ final class SaveArchive {
                 for(String root:roots){
                     File incoming=new File(stage,root);
                     if(incoming.exists())transaction.move(incoming,new File(state,root));
+                }
+                if (owner != null && !owner.equals(previousOwner)) {
+                    transaction.watchSetting(config, "user_xuid");
+                    MobileConfig.putFile(config, Collections.singletonMap("user_xuid", MobileConfig.quote(owner)));
                 }
                 return null;
             });
@@ -286,6 +372,9 @@ final class SaveArchive {
             if(copied.isEmpty())throw new IOException("No saves found in the selected profiles.");
             Files.write(stage.resolve("checkpoint.txt"),name.getBytes(StandardCharsets.UTF_8));
             Files.write(stage.resolve("roots.txt"),copied,StandardCharsets.UTF_8);
+            String owner = chooseOwner(profileOwners(stage.resolve("payload").toFile(), copied, false), configuredOwner(state));
+            if (owner != null)
+                Files.write(stage.resolve(PROFILE_MARKER), (owner+"\n").getBytes(StandardCharsets.UTF_8));
             FileOperation.check();
             Files.move(stage,backups.toPath().resolve("checkpoint-"+System.currentTimeMillis()+"-"+UUID.randomUUID()),
                 StandardCopyOption.ATOMIC_MOVE);
@@ -298,10 +387,10 @@ final class SaveArchive {
     static void exportBackup(File state, Backup selected, OutputStream output) throws IOException {
         Backup backup = checkedBackup(state, selected);
         if (backup.nativeSlot) {
-            export(new File(backup.folder, NORMAL), output);
+            writeArchive(backup.folder, Collections.singletonList(NORMAL), backupOwner(backup.folder), output);
         } else {
             File payload = new File(backup.folder, "payload");
-            if (directory(payload)) exportState(payload, BOTH, output);
+            if (directory(payload)) writeArchive(payload, scopes(BOTH), backupOwner(backup.folder), output);
             else if (!new File(backup.folder, "roots.txt").exists()) export(backup.folder, output);
             else throw new IOException("The backup has no save data.");
         }
@@ -350,7 +439,10 @@ final class SaveArchive {
             }
             if(!scoped&&budget[1]==0)throw new IOException("The backup has no save data.");
             FileOperation.check();
-            switchRoots(state,stage,roots);
+            String owner = backupOwner(backup.folder);
+            if (owner == null) owner = importedOwner(state,stage,roots,null);
+            else profileOwners(stage,roots,true);
+            switchRoots(state,stage,roots,owner);
         }finally{
             if(!ContentTransaction.pending(state))delete(stage);
         }
@@ -371,7 +463,7 @@ final class SaveArchive {
         File stage = Files.createTempDirectory(state.toPath(), "save-reset-").toFile();
         try {
             FileOperation.check();
-            switchRoots(state, stage, roots);
+            switchRoots(state, stage, roots, null);
         } finally {
             if(!ContentTransaction.pending(state))delete(stage);
         }

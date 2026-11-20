@@ -21,6 +21,56 @@ public final class ProfileArchiveTest {
             for(String name:names){z.putNextEntry(new ZipEntry(name));z.write("imported".getBytes(StandardCharsets.UTF_8));z.closeEntry();}
         }return bytes.toByteArray();
     }
+    private static Path ownedSave(File state, String owner, String contents) throws IOException {
+        Path profile = new File(state, "user/"+owner+"/4D5309C9/00000001/ForzaProfile").toPath();
+        Files.createDirectories(profile);
+        Path save = profile.resolve("ForzaProfile");
+        Files.write(save, contents.getBytes(StandardCharsets.UTF_8));
+        Files.write(profile.resolve("VersionFlags"), new byte[]{'c','m','s','s',0,0,0,0,0,0,0,0});
+        return save;
+    }
+    private static void crossPhoneRestore(Path temp) throws Exception {
+        String sender = "E030000012345678", receiver = "E030000087654321";
+        File source = temp.resolve("source-phone").toFile();
+        File target = temp.resolve("receiving-phone").toFile();
+        Path sourceSave = ownedSave(source, sender, "source-progress");
+        Path targetSave = ownedSave(target, receiver, "previous-progress");
+        File sourceSettings = new File(source, "config/pinyon_shift.toml");
+        File targetSettings = new File(target, "config/pinyon_shift.toml");
+        MobileConfig.putFile(sourceSettings, Collections.singletonMap("user_xuid", MobileConfig.quote(sender)));
+        Map<String,String> settings = new HashMap<>();
+        settings.put("user_xuid", MobileConfig.quote(receiver));
+        settings.put("pinyon_shift_master_volume", "72");
+        MobileConfig.putFile(targetSettings, settings);
+
+        byte[] transfer = export(source, SaveArchive.NORMAL);
+        SaveArchive.importInto(target, new ByteArrayInputStream(transfer));
+        check(MobileConfig.readFile(targetSettings).get("user_xuid").equals(sender),
+            "cross-phone import selects the source profile");
+        Path imported = target.toPath().resolve(source.toPath().relativize(sourceSave));
+        check(Arrays.equals(Files.readAllBytes(imported), Files.readAllBytes(sourceSave))
+            && MobileConfig.readFile(targetSettings).get("pinyon_shift_master_volume").equals("72"),
+            "profile transfer retains save bytes and the receiving phone's settings");
+        SaveArchive.restore(target);
+        check(MobileConfig.readFile(targetSettings).get("user_xuid").equals(receiver)
+            && new String(Files.readAllBytes(targetSave), StandardCharsets.UTF_8).equals("previous-progress"),
+            "restoring the pre-import checkpoint returns its original profile selection");
+
+        ByteArrayOutputStream legacy = new ByteArrayOutputStream();
+        SaveArchive.export(new File(source, SaveArchive.NORMAL), legacy);
+        File fresh = temp.resolve("fresh-phone").toFile();
+        SaveArchive.importInto(fresh, new ByteArrayInputStream(legacy.toByteArray()));
+        check(MobileConfig.readFile(new File(fresh, "config/pinyon_shift.toml")).get("user_xuid").equals(sender),
+            "older save ZIPs with one known owner restore into a fresh phone");
+
+        Files.write(sourceSave.resolveSibling("VersionFlags"), new byte[]{'c','m','s','s',0,0,0,4,0,0,0,2});
+        boolean rejected = false;
+        try { SaveArchive.importInto(target, new ByteArrayInputStream(export(source, SaveArchive.NORMAL))); }
+        catch (IOException expected) { rejected = expected.getMessage().contains("title update"); }
+        check(rejected && Files.exists(targetSave) && !Files.exists(imported)
+            && MobileConfig.readFile(targetSettings).get("user_xuid").equals(receiver),
+            "a title-update save is blocked before it can replace live progress");
+    }
     public static void main(String[] args)throws Exception{
         Path temp=Files.createTempDirectory("fh4droid-scoped-saves-");File state=temp.resolve("state").toFile();
         try{
@@ -123,6 +173,7 @@ public final class ProfileArchiveTest {
             SaveArchive.restoreBackup(absentState,absent);
             check(!new File(absentState,SaveArchive.NORMAL).exists() && absent.folder.isDirectory(),
                 "selected snapshot can restore a missing profile and retains its backup");
+            crossPhoneRestore(temp);
             System.out.println("PASS: "+checks+" profile identity and scoped save archive checks");
         }finally{SaveArchive.delete(temp.toFile());}
     }

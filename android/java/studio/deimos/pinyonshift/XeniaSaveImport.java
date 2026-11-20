@@ -49,8 +49,7 @@ final class XeniaSaveImport {
             File title=new File(stage,TITLE),profile=findIgnoreCase(title,"00000001","ForzaProfile","ForzaProfile");
             if(id==null||profile==null||!profile.isFile()||profile.length()==0)throw new IOException("No Forza Horizon profile. ZIP content/<XUID>/4D5309C9 with its folders intact.");
             File flags=findIgnoreCase(title,"00000001","ForzaProfile","VersionFlags");
-            if(flags!=null){byte[] header=new byte[12];try(InputStream in=new FileInputStream(flags)){int read=0;while(read<header.length){int n=in.read(header,read,header.length-read);if(n<0)break;read+=n;}if(read<12||!new String(header,0,4,StandardCharsets.US_ASCII).equals("cmss"))throw new IOException("Invalid save version information.");}
-                for(int i=4;i<12;i++)if(header[i]!=0)throw new IOException("This profile was saved by title update v4. This APK uses the base game; use a base-game save. Nothing was imported.");}
+            if(flags!=null)SaveArchive.verifyBaseVersion(flags);
             success=true;return new Prepared(stage,title,id);
         }finally{if(!success)SaveArchive.delete(stage);}
     }
