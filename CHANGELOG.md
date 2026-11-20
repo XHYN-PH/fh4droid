@@ -1,5 +1,32 @@
 # Changelog
 
+## FH4Droid 0.9.4 - 2026-11-20
+
+- Fit Home to shorter displays with adaptive cards and a dedicated Home footer. Show resolution, frame target, filter and driver under Ready to drive.
+- Add staggered Home animations and a right-side slide-and-fade pause drawer. Expand About with build details, requirements, credits and links.
+- Reorganize settings and Controls. Add controller adjustment for render resolution, inline graphics choices, raw and calibrated input previews, and Driving, Game menus and Photo mode previews in the touch editor.
+- Show installation progress alongside the active source. Preserve the working source during imports, create named save checkpoints and put installed content first.
+- Reuse eligible ISO verification and driver tests. Show startup shader and cache stages, match compatible display refresh rates and offer optional CPU performance hints.
+- Turn off app session logs by default. Add explicit one-session logging choices and recovery advice based on Android's exit reasons.
+
+[Full FH4Droid 0.9.4 release notes](docs/releases/fh4droid-0.9.4.md)
+
+## FH4Droid 0.9.3 - 2026-11-19
+
+- Launch directly from supported ISO images through the file Android already opened.
+- Add live **Off (nearest)** upscaling and refresh displayed values for FSR, screen mode, MSAA and touch settings as soon as they save.
+- Include advanced settings and audio actions in search and expose **Shader workers** for pre-play preparation.
+
+[Full FH4Droid 0.9.3 release notes](docs/releases/fh4droid-0.9.3.md)
+
+## FH4Droid 0.9.2 - 2026-11-19
+
+- Simplify the settings and Controls menus. Add movable tools, hidden-button selection and per-button opacity to the fullscreen touch editor.
+- Support up to 4 GiB of expanded save data and recover interrupted save changes while preserving installed DLC.
+- Improve graphics preparation and diagnostics. Check the disc image and local support files from Installation, and group drivers and cache management on their own launcher pages.
+
+[Full FH4Droid 0.9.2 release notes](docs/releases/fh4droid-0.9.2.md)
+
 ## FH4Droid 0.9.1 - 2026-11-19
 
 - Prepare known shaders and pipelines before gameplay and save the Vulkan cache.
