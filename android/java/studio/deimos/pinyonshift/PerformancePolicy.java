@@ -28,7 +28,7 @@ final class PerformancePolicy {
         for (float refresh : alternatives) if (evenCadence(fps,refresh)) match=Math.min(match,refresh);
         return Float.isFinite(match)?match:0;
     }
-    private static boolean evenCadence(float fps,float refresh) {
+    static boolean evenCadence(float fps,float refresh) {
         if (!Float.isFinite(refresh) || refresh<=0) return false;
         float multiple = refresh / fps;
         int repeat = Math.round(multiple);

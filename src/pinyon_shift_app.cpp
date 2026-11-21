@@ -430,6 +430,41 @@ bool EnsureSupportedConfig(const std::filesystem::path& path, bool& created,
       return false;
     }
   }
+#if defined(__ANDROID__)
+  const auto readable = [](const std::string& text) {
+    try {
+      (void)toml::parse(text);
+      return true;
+    } catch (const toml::parse_error&) {
+      return false;
+    }
+  };
+  if (!readable(config_text)) {
+    auto lock = path;
+    lock += ".lock";
+    if (!pinyon_shift::platform::WithFileLock(lock, [&] {
+      const auto current = pinyon_shift::config::ReadFile(path);
+      if (!current) return false;
+      if (readable(*current)) {
+        config_text = *current;
+        return true;
+      }
+      auto last_good_path = path;
+      last_good_path += ".last-good";
+      const auto last_good = pinyon_shift::config::ReadFile(last_good_path);
+      if (!last_good || !readable(*last_good)) return false;
+      auto invalid = path;
+      invalid += ".invalid.bak";
+      std::error_code error;
+      std::filesystem::copy_file(path, invalid, std::filesystem::copy_options::overwrite_existing, error);
+      if (error || !pinyon_shift::config::WriteAtomically(path, *last_good)) return false;
+      config_text = *last_good;
+      migrated = true;
+      pinyon_shift::diagnostics::RecordEvent("config.recovered", {{"source", "last-good"}});
+      return true;
+    })) return false;
+  }
+#endif
   const std::regex schema_pattern(
       R"((?:^|\n)\s*pinyon_shift_config_schema\s*=\s*([0-9]+)\s*(?:#.*)?(?:\r?\n|$))");
   std::smatch match;
@@ -826,6 +861,21 @@ void PinyonShiftApp::OnConfigurePaths(rex::PathConfig& paths) {
 #endif
   paths.cache_root = state_root / "cache";
   paths.config_path = state_root / "config" / "pinyon_shift.toml";
+  bool config_created = false;
+  bool config_migrated = false;
+  if (!EnsureSupportedConfig(paths.config_path, config_created,
+                             config_migrated)) {
+    diagnostics::RecordEvent("config.unsupported",
+                             {{"path", rex::path_to_utf8(paths.config_path)},
+                              {"required_schema", std::to_string(kConfigSchema)}});
+    pinyon_shift::platform::ShowFatalError(
+        "Unsupported configuration",
+        "Pinyon Shift could not create the host configuration, or its schema is "
+        "unsupported. Remove or migrate pinyon_shift.toml before retrying.");
+    // ERROR_REVISION_MISMATCH, the code this exit has always had.
+    pinyon_shift::platform::ExitImmediately(1306);
+  }
+
   host_config_ = std::make_unique<pinyon_shift::config::HostConfig>(paths.config_path);
   // A restore the player scheduled in the settings screen, before the title
   // can open the files.
@@ -883,6 +933,13 @@ void PinyonShiftApp::OnConfigurePaths(rex::PathConfig& paths) {
       pinyon_shift::cheats::CarRecoveryRequested();
   if (host_config_->Load()) {
     enabled_mods_ = host_config_->Get("enabled_mods").value_or("");
+#if REX_PLATFORM_ANDROID
+    if (const char* skip = std::getenv("FH4DROID_ANDROID_SKIP_MODS");
+        skip && std::string_view(skip) == "1") {
+      enabled_mods_.clear();
+      pinyon_shift::diagnostics::RecordEvent("mod.session.disabled");
+    }
+#endif
     isolated_profile = isolated_profile ||
         host_config_->Get("pinyon_shift_cheats").value_or("false") == "true" ||
         host_config_->Get("cheat_set_profile_fields").value_or("") ==
@@ -917,21 +974,6 @@ void PinyonShiftApp::OnConfigurePaths(rex::PathConfig& paths) {
     paths.user_data_root = modded;
     pinyon_shift::mod::SetModdedProfile(modded);
     pinyon_shift::cheats::SetProfileIsolated();
-  }
-
-  bool config_created = false;
-  bool config_migrated = false;
-  if (!EnsureSupportedConfig(paths.config_path, config_created,
-                             config_migrated)) {
-    diagnostics::RecordEvent("config.unsupported",
-                             {{"path", rex::path_to_utf8(paths.config_path)},
-                              {"required_schema", std::to_string(kConfigSchema)}});
-    pinyon_shift::platform::ShowFatalError(
-        "Unsupported configuration",
-        "Pinyon Shift could not create the host configuration, or its schema is "
-        "unsupported. Remove or migrate pinyon_shift.toml before retrying.");
-    // ERROR_REVISION_MISMATCH, the code this exit has always had.
-    pinyon_shift::platform::ExitImmediately(1306);
   }
 
   config_created_ = config_created;

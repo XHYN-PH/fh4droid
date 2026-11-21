@@ -154,6 +154,7 @@ Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeApplySetting(
       "vulkan_texture_max_size",
       "pinyon_shift_fh1_env_map_rate",
       "present_effect",
+      "android_vblank_display_lock",
       "disable_motion_blur",
       "disable_bloom",
       "anisotropic_override",

@@ -214,9 +214,9 @@ final class SettingsHub {
   }
   private static String settingState(MobileSettings.Runtime runtime, boolean restart, String live,
       String saved, boolean changed) {
-    if (live == null) return (restart && runtime == null ? "Next launch   " : "Saved   ") + saved;
+    if (live == null) return (restart ? "Next launch   " : "Saved   ") + saved;
     if (changed) return "Running   " + live + "\n" + (restart ? "Next launch   " : "Saved   ") + saved;
-    return "Running   " + live;
+    return "Running and saved   " + live;
   }
   private static String toolHelp(String title){
     String[][] descriptions={
@@ -561,16 +561,22 @@ final class SettingsHub {
       MobileConfig.putAll(a, values);
       boolean log=!(a instanceof PinyonShiftActivity) || ((PinyonShiftActivity)a).sessionLoggingEnabled();
       for (Map.Entry<String, String> e : values.entrySet()) {
-        if(log)MobileConfig.recordChange(a, e.getKey(), e.getValue(), runtime != null && !restart);
-        if (runtime != null && !restart)
+        String status = "next launch";
+        if (runtime != null && !restart) {
           runtime.changed(e.getKey(), plain(e.getValue()));
+          String applied = active(runtime, e.getKey());
+          status = applied != null && SettingValues.same(applied, e.getValue())
+              ? "applied" : "saved; running value differs";
+        }
+        if(log)MobileConfig.recordChange(a, e.getKey(), e.getValue(), status);
       }
       UNDO.put(a, new Change(old, restart));
       if (restart && announce)
         Toast.makeText(a, "Saved for the next game launch", Toast.LENGTH_SHORT).show();
       return true;
     } catch (IOException e) {
-      Toast.makeText(a, "Could not save: " + e.getMessage(), Toast.LENGTH_LONG).show();
+      Toast.makeText(a, "Could not save " + String.join(", ", values.keySet()) + ". " + e.getMessage(),
+          Toast.LENGTH_LONG).show();
       return false;
     }
   }
@@ -596,6 +602,9 @@ final class SettingsHub {
       if(setting==null)return null;
       values.put(key,SettingValues.plain(setting));
     }
+    if (values.getOrDefault("pinyon_shift_hor_plus","false").equals("true")
+        && values.getOrDefault("present_letterbox","false").equals("true"))
+      return "Widescreen · original proportions in this view";
     return new String[]{"Original","Widescreen","Stretch"}[GraphicsProfiles.screenModeIndex(values)];
   }
   private static TouchLayout touchLayout(Activity a) {

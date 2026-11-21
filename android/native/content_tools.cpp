@@ -43,6 +43,20 @@ class ContentWorker {
   jmethodID interrupted_ = nullptr;
 };
 }
+extern "C" JNIEXPORT void JNICALL
+Java_studio_deimos_pinyonshift_ContentNative_nativeValidateConfig(JNIEnv* env, jclass, jbyteArray input) {
+  try {
+    std::string text(size_t(env->GetArrayLength(input)), '\0');
+    env->GetByteArrayRegion(input, 0, jsize(text.size()), reinterpret_cast<jbyte*>(text.data()));
+    if (!env->ExceptionCheck()) (void)toml::parse(text);
+  } catch (const toml::parse_error& error) {
+    const auto location = error.source().begin;
+    Error(env, std::runtime_error("Settings syntax at line " + std::to_string(location.line) +
+                                  ", column " + std::to_string(location.column)));
+  } catch (const std::exception& error) {
+    Error(env, error);
+  }
+}
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_studio_deimos_pinyonshift_ContentNative_nativeManifest(JNIEnv* env, jclass,
                                                           jstring path) {

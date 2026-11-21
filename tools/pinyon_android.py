@@ -957,6 +957,9 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
                          strict_timestamps=False) as apk:
         apk.write(dex, "classes.dex")
         apk.write(staging / "pinyon_shift_build.json", "assets/pinyon_shift_build.json")
+        if PACKAGE == "ph.xhyn.fh4droid":
+            apk.write(rexsdk_dir() / "thirdparty" / "snapdragon-gsr" / "LICENSE",
+                      "assets/licenses/snapdragon-gsr.txt")
         if validation is not None:
             for name in ("LICENSE.txt", "NOTICE.txt"):
                 apk.write(ROOT / "android" / "validation" / name, "assets/validation/" + name)

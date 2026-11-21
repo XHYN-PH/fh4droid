@@ -143,6 +143,8 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             }
         };
     private long lastReportCapture;private boolean lastReportedMenu;
+    private boolean driverGameplayRecorded;
+    private boolean framePacingEnabled;
     private long lastPerformanceRecord;
     private long overlayGeneration;
     private int cpuHintTarget;
@@ -159,6 +161,10 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         boolean overlay = fpsLabel != null && preferences.getBoolean("show_fps", false);
         boolean diagnostic = sessionLoggingEnabled() && getIntent().getBooleanExtra("debug_report", false);
         long now = android.os.SystemClock.elapsedRealtime(), frames = nativeFrameCount();
+        if (!driverGameplayRecorded && frames >= 300 && !nativeMenuContext() && comparisonState == null) {
+            driverGameplayRecorded = true;
+            telemetry.execute(() -> DriverRecovery.recordGameplay(PinyonShiftActivity.this));
+        }
         if (fpsTime != 0 && now > fpsTime) {
             float fps = Math.max(0, frames - fpsFrames) * 1000f / (now - fpsTime);
             samplePerformance(fps, overlay, diagnostic);
@@ -288,6 +294,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             }
         }
         setEnvironment("PINYON_SHIFT_ANDROID_NO_SESSION_LOGS",sessionLoggingEnabled()?"0":"1");
+        setEnvironment("FH4DROID_ANDROID_SKIP_MODS",getIntent().getBooleanExtra("skip_mods",false)?"1":"0");
         recordDisplayEnvironment();
         if (trial==null) {
             if(!TouchLayout.file(this).isFile())try{TouchLayout initial=new TouchLayout();initial.modernDefaults(this);initial.save(this);}catch(IOException error){Log.w(TAG,"Could not save the initial touch layout",error);}
@@ -451,6 +458,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             arguments.add("--android_audio_bank_diagnostics=true");
         }else{arguments.add("--pinyon_shift_capture_performance=false");arguments.add("--fh1_native_gpu_profile=false");}
         java.util.Map<String,String> settings=launchSettings();
+        arguments.add("--android_vblank_display_lock="+getSharedPreferences("mobile",0).getBoolean("match_refresh",true));
         arguments.add("--android_gpu_turbo="+settings.getOrDefault("android_gpu_turbo","false"));
         arguments.add("--android_gpu_driver_no_preamble="+settings.getOrDefault("android_gpu_driver_no_preamble","true"));
         arguments.add("--android_gpu_driver_env="+settings.getOrDefault("android_gpu_driver_env",""));
@@ -482,7 +490,8 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         return getIntent()==null || !getIntent().getBooleanExtra(NO_SESSION_LOGS,false);
     }
     private java.util.Map<String,String> launchSettings(){
-        return comparisonState==null?MobileConfig.read(this)
+        return comparisonState==null?DriverStore.sessionSettings(MobileConfig.read(this),
+                getIntent().getStringExtra("driver_flag_trial"))
             :MobileConfig.readFile(new File(comparisonState,"config/pinyon_shift.toml"));
     }
     private File reportFile(String name) {
@@ -673,7 +682,12 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         refreshCpuHintTarget();
         android.view.Surface surface = mSurface.getHolder().getSurface();
         if (!surface.isValid()) return;
-        float target = getSharedPreferences("mobile", 0).getBoolean("match_refresh", true)
+        boolean match = getSharedPreferences("mobile", 0).getBoolean("match_refresh", true);
+        if (match != framePacingEnabled) {
+            framePacingEnabled = match;
+            nativeApplySetting("android_vblank_display_lock", Boolean.toString(match));
+        }
+        float target = match
             ? PerformancePolicy.presentationTarget(nativeSettingValue("pinyon_shift_fh1_render_fps_limit"),
                 nativeSettingValue("host_present_fps_limit")) : 0;
         Display display = mSurface.getDisplay();
@@ -682,12 +696,25 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         long now = android.os.SystemClock.elapsedRealtime();
         if (surface == hintedSurface && target == lastFrameRateHint && now < nextFrameRateRequest) return;
         nextFrameRateRequest = now + 1000;
-        if (PlatformCompat.frameRate(surface, target)) {
-            float cadence=display==null?0:PerformancePolicy.seamlessCadence(target,refresh,
-                display.getMode().getAlternativeRefreshRates());
+        Display.Mode preferred = null;
+        if (target > 0 && display != null) {
+            Display.Mode current = display.getMode();
+            for (Display.Mode candidate : display.getSupportedModes()) {
+                if (candidate.getPhysicalWidth() == current.getPhysicalWidth()
+                        && candidate.getPhysicalHeight() == current.getPhysicalHeight()
+                        && PerformancePolicy.evenCadence(target, candidate.getRefreshRate())
+                        && (preferred == null || candidate.getRefreshRate() > preferred.getRefreshRate())) {
+                    preferred = candidate;
+                }
+            }
+        }
+        float cadence = preferred == null ? target : preferred.getRefreshRate();
+        if (PlatformCompat.frameRate(surface, cadence)) {
             WindowManager.LayoutParams attrs=getWindow().getAttributes();
-            if (attrs.preferredRefreshRate!=cadence) {
-                attrs.preferredRefreshRate=cadence;
+            int modeId = preferred == null ? 0 : preferred.getModeId();
+            if (attrs.preferredDisplayModeId != modeId || attrs.preferredRefreshRate != 0) {
+                attrs.preferredDisplayModeId = modeId;
+                attrs.preferredRefreshRate = 0;
                 getWindow().setAttributes(attrs);
             }
             hintedSurface = surface;
@@ -695,7 +722,10 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             lastDisplayRefresh = refresh;
         }
     }
-    private void recordLaunchSettings(List<String> args){try{org.json.JSONObject data=new org.json.JSONObject();data.put("captured_ms",System.currentTimeMillis());data.put("source_commit",buildCommit);data.put("settings",new org.json.JSONObject(launchSettings()));data.put("arguments",new org.json.JSONArray(args));
+    private void recordLaunchSettings(List<String> args){try{org.json.JSONObject data=new org.json.JSONObject();data.put("captured_ms",System.currentTimeMillis());data.put("source_commit",buildCommit);data.put("settings",new org.json.JSONObject(MobileConfig.reportSettings(launchSettings())));data.put("arguments",new org.json.JSONArray(args));
+        data.put("resolved_driver",getIntent().getStringExtra("verified_driver"));
+        data.put("driver_flag_trial",getIntent().getStringExtra("driver_flag_trial"));
+        data.put("mods_skipped",getIntent().getBooleanExtra("skip_mods",false));
         android.content.SharedPreferences preferences = getSharedPreferences("mobile", 0);
         data.put("game_source", !preferences.getString("iso_uri", "").isEmpty() ? "iso" : GameFiles.linked(this) ? "linked-folder" : "copied-folder");
         data.put("cpu_hints_requested",comparisonState!=null?getIntent().getBooleanExtra("comparison_cpu_hints",false):preferences.getBoolean("cpu_hints",false));
@@ -739,11 +769,11 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         boolean nativeAudio = nativeAudioOutputActive();
         boolean menu = nativeMenuContext();
         String session = currentSession();
-        String[] issues = {"Silent impact", "Muffled engine", "White car", "Blank car tile", "Stutter", "Other"};
+        String[] issues = {"Silent impact", "Muffled engine", "Car paint or glass corruption", "Blank car tile", "Stutter", "Other"};
         new AlertDialog.Builder(this).setTitle("Capture a problem")
             .setItems(issues, (dialog, index) -> {
                 android.widget.EditText note = new android.widget.EditText(this);
-                note.setHint("Optional details");
+                note.setHint(index == 2 ? "Car, paint or livery, location and view" : "Optional details");
                 note.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(300)});
                 new AlertDialog.Builder(this).setTitle(issues[index]).setView(note)
                     .setNegativeButton("Cancel", null)
@@ -752,7 +782,8 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
                         org.json.JSONObject settings = new org.json.JSONObject();
                         try {
                             for (String key : new String[]{"fh1_render_scale_percent", "disable_bloom", "present_effect",
-                                    "android_gpu_driver", "vulkan_fh1_native_executor", "vulkan_dynamic_rendering",
+                                    "android_gpu_driver", "android_gpu_driver_env", "android_gpu_driver_no_preamble",
+                                    "vulkan_fh1_native_executor", "vulkan_dynamic_rendering", "vulkan_bc_transcode",
                                     "pinyon_shift_native_audio_output", "pinyon_shift_fmod_stereo",
                                     "pinyon_shift_audio_update_interval", "xma_decode_kicks_inline"}) {
                                 settings.put(key, nativeSettingValue(key));
@@ -770,6 +801,9 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
                                 capture.put("kind", issues[index]);
                                 capture.put("note", description);
                                 capture.put("in_game_menu_context", menu);
+                                capture.put("mods_skipped", getIntent().getBooleanExtra("skip_mods",false));
+                                capture.put("resolved_driver", getIntent().getStringExtra("verified_driver"));
+                                capture.put("driver_flag_trial", getIntent().getStringExtra("driver_flag_trial"));
                                 capture.put("audio_mode", nativeAudio ? "native" : "guest");
                                 capture.put("live_settings", settings);
                                 capture.put("frame_fields", new org.json.JSONArray(FRAME_HISTORY_FIELDS));

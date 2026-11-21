@@ -31,7 +31,7 @@ final class ProblemReports {
             if(manager!=null){ActivityManager.MemoryInfo memory=new ActivityManager.MemoryInfo();manager.getMemoryInfo(memory);info.append("\nRAM total ").append(memory.totalMem).append(", available ").append(memory.availMem).append(", pressure ").append(memory.lowMemory);
                 PlatformCompat.exitHistory(manager,c.getPackageName(),info);}
             PowerManager power=(PowerManager)c.getSystemService(Context.POWER_SERVICE);if(power!=null){int status=power.getCurrentThermalStatus();info.append("\nThermal status ").append(ReportFiles.thermalLabel(status)).append(" (severity ").append(status).append(", not degrees)");}
-            info.append("\nSaved settings (may include next-launch changes)\n").append(MobileConfig.read(c));
+            info.append("\nSaved settings (may include next-launch changes)\n").append(MobileConfig.reportSettings(MobileConfig.read(c)));
             info.append("\nDriver test\n").append(AdrenoSettings.reportDetails(c));
             TouchLayout touch=new TouchLayout();touch.load(c);info.append("\nTouch controls\n").append(touch.serialize());
             info.append("\nPhone preferences\n").append(UiPreferences.sanitized(c.getSharedPreferences("mobile",0).getAll()));
@@ -48,7 +48,28 @@ final class ProblemReports {
             boolean quiet=GameSession.lastSessionQuiet(c);
             if(quiet)info.append("The last game was played without logs. This report contains only earlier session captures.\n");
             File runtimeLog=new File(state,"logs/runtime.log");
-            if(runtimeLog.isFile()){byte[] retained=ReportFiles.tail(runtimeLog,2*1024*1024);entry(zip,quiet?"previous-warning-summary.txt":"current-warning-summary.txt",RuntimeWarnings.summarize(new String(retained,StandardCharsets.UTF_8),latest,retained.length<runtimeLog.length()).getBytes(StandardCharsets.UTF_8));}
+            if (!quiet && !latest.isEmpty()) {
+                File events = new File(runtimeLog.getParentFile(), latest + ".jsonl");
+                byte[] milestones = startupEvents(events);
+                if (milestones.length > 0) entry(zip, "latest-startup.jsonl", milestones);
+            }
+            if(runtimeLog.isFile()){
+                File[] retained = runtimeLog.getParentFile().listFiles(f -> f.isFile()
+                    && f.getName().matches("runtime(?:\\.[1-9][0-9]?)?\\.log")
+                    && !java.nio.file.Files.isSymbolicLink(f.toPath()));
+                if (retained != null) {
+                    Arrays.sort(retained, Comparator.comparingInt(ProblemReports::runtimeRotation).reversed());
+                    StringBuilder history = new StringBuilder();
+                    boolean truncated = retained.length > 4;
+                    for (int i = Math.max(0, retained.length - 4); i < retained.length; i++) {
+                        byte[] tail = ReportFiles.tail(retained[i], 2 * 1024 * 1024);
+                        truncated |= tail.length < retained[i].length();
+                        history.append(new String(tail, StandardCharsets.UTF_8)).append('\n');
+                    }
+                    entry(zip,quiet?"previous-warning-summary.txt":"current-warning-summary.txt",
+                        RuntimeWarnings.summarize(history.toString(),latest,truncated).getBytes(StandardCharsets.UTF_8));
+                }
+            }
             entry(zip,"device-and-settings.txt",info.toString().getBytes(StandardCharsets.UTF_8));
             if(manifest!=null)entry(zip,"build-manifest.json",manifest);
             org.json.JSONObject index=new org.json.JSONObject();org.json.JSONArray exported=new org.json.JSONArray();
@@ -72,7 +93,35 @@ final class ProblemReports {
             entry(zip,"report-index.json",index.toString().getBytes(StandardCharsets.UTF_8));
         }
     }
-    private static int reportPriority(File file,String latest){String session=ReportFiles.sessionName(file.getName());if(latest.equals(session))return file.getName().endsWith(".csv")?1:0;if(file.getName().startsWith("android-")||file.getName().equals("runtime.log"))return 2;return 3;}
+    private static int runtimeRotation(File file) {
+        String name = file.getName();
+        return name.equals("runtime.log") ? 0 : Integer.parseInt(name.substring(8, name.length()-4));
+    }
+    private static byte[] startupEvents(File file) throws IOException {
+        if (!file.isFile() || java.nio.file.Files.isSymbolicLink(file.toPath())) return new byte[0];
+        StringBuilder events = new StringBuilder();
+        try (RandomAccessFile in = new RandomAccessFile(file, "r")) {
+            byte[] prefix = new byte[(int)Math.min(in.length(), 256 * 1024)];
+            in.readFully(prefix);
+            for (String line : new String(prefix, StandardCharsets.UTF_8).split("\n")) {
+                try {
+                    org.json.JSONObject event = new org.json.JSONObject(line);
+                    String name = event.optString("event");
+                    if (name.matches("process.start|logging.ready|config\\..*|paths.configured|runtime.setup\\..*"
+                            + "|guest.launch.begin|mod.rejected|mod.session.disabled")) events.append(line).append('\n');
+                } catch (org.json.JSONException ignored) {}
+            }
+        }
+        return events.toString().getBytes(StandardCharsets.UTF_8);
+    }
+    private static int reportPriority(File file,String latest){
+        String name=file.getName(),session=ReportFiles.sessionName(name);
+        if (latest.equals(session) && !name.endsWith(".csv")) return 0;
+        if (name.startsWith("android-incident") || name.equals("android-launch-settings.json")
+                || name.equals("android-live-settings.json") || name.equals("runtime.log")) return 1;
+        if (latest.equals(session) || name.startsWith("android-") || name.matches("runtime\\.[1-9][0-9]?\\.log")) return 2;
+        return 3;
+    }
     private static void collect(File dir,List<File> out,int depth){
         if(depth>3||out.size()>300||java.nio.file.Files.isSymbolicLink(dir.toPath()))return;File[] files=dir.listFiles();if(files==null)return;
         for(File f:files){if(java.nio.file.Files.isSymbolicLink(f.toPath()))continue;if(f.isDirectory())collect(f,out,depth+1);

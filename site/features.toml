@@ -134,7 +134,7 @@ cells = [
   "yes: Vulkan",
   "yes: Vulkan (RADV or NVIDIA)",
   "yes: Vulkan on Metal through MoltenVK",
-  "yes: Vulkan; the bundled Turnip driver on Adreno 7xx",
+  "yes: system Vulkan and custom Turnip drivers on compatible Adreno GPUs",
 ]
 
 [[platform]]

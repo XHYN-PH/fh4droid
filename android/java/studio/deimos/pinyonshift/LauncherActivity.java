@@ -13,7 +13,12 @@ import java.util.*;
 import org.json.JSONObject;
 
 public final class LauncherActivity extends Activity implements FestivalUi.PanelHost {
-    private enum SessionMode { WITHOUT_LOGS, DIAGNOSTICS }
+    private enum SessionMode {
+        WITHOUT_LOGS(null), DIAGNOSTICS(null), WITHOUT_MODS(null),
+        DRIVER_DEFAULTS("defaults"), DRIVER_SYSMEM("sysmem"), DRIVER_NOPREAMBLE("nopreamble");
+        final String driverTrial;
+        SessionMode(String driverTrial) { this.driverTrial = driverTrial; }
+    }
     private final ArrayDeque<PanelPage> panels=new ArrayDeque<>();
     private RacingLauncherView launcher;private RacingLauncherView.Model launcherModel;private float builtScale;
     private String restoredPage="home",restoredFocus="play",restoredHomeFocus="play";
@@ -32,11 +37,15 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     private String installationResult;
     private String pendingDriver,pendingSaveScope=SaveArchive.BOTH;private boolean playAfterProbe,oneOffProbe;private AlertDialog progress;private FileOperation operation;
     private SessionMode pendingSessionMode=SessionMode.DIAGNOSTICS;
+    private boolean recoveryProbe;
     @Override public void onCreate(Bundle state){
         super.onCreate(state);UiPreferences.load(this);
         try { GraphicsProfileStore.upgradeUpscalingDefault(this); }
         catch (IOException error) { android.util.Log.w("FH4Droid", "Could not update the upscaling default", error); }
-        if (state != null) pendingBackupPath = state.getString("backup_path");
+        if (state != null) {
+            pendingBackupPath = state.getString("backup_path");
+            recoveryProbe = state.getBoolean("recovery_probe");
+        }
         if (state != null) {
             int mode=state.getInt("session_mode",pendingSessionMode.ordinal());
             if(mode>=0&&mode<SessionMode.values().length)pendingSessionMode=SessionMode.values()[mode];
@@ -45,7 +54,7 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         immersiveLauncher();build();
         new Thread(()->{try{DriverStore.installBundled(this);}catch(IOException ignored){}},"BundledDrivers").start();
     }
-    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("backup_path",pendingBackupPath);state.putString("driver",pendingDriver);state.putBoolean("play_after_probe",playAfterProbe);state.putBoolean("one_off_probe",oneOffProbe);state.putInt("session_mode",pendingSessionMode.ordinal());state.putString("save_scope",pendingSaveScope);if(launcher!=null){state.putString("launcher_page",launcher.page());state.putString("launcher_focus",launcher.navigationFocus());state.putString("launcher_home_focus",launcher.homeFocus());}}
+    @Override protected void onSaveInstanceState(Bundle state){super.onSaveInstanceState(state);state.putString("backup_path",pendingBackupPath);state.putString("driver",pendingDriver);state.putBoolean("play_after_probe",playAfterProbe);state.putBoolean("one_off_probe",oneOffProbe);state.putBoolean("recovery_probe",recoveryProbe);state.putInt("session_mode",pendingSessionMode.ordinal());state.putString("save_scope",pendingSaveScope);if(launcher!=null){state.putString("launcher_page",launcher.page());state.putString("launcher_focus",launcher.navigationFocus());state.putString("launcher_home_focus",launcher.homeFocus());}}
     @Override protected void onResume(){super.onResume();UiPreferences.load(this);if(Math.abs(builtScale-FestivalUi.scale(this))>.001f)build();refresh();rebuildTop();recovery();}
     @Override public void onConfigurationChanged(android.content.res.Configuration config){super.onConfigurationChanged(config);build();refresh();immersiveLauncher();}
     @Override public void onWindowFocusChanged(boolean focus){super.onWindowFocusChanged(focus);if(focus){UiPreferences.load(this);if(Math.abs(builtScale-FestivalUi.scale(this))>.001f)build();immersiveLauncher();refresh();if(launcher!=null)FestivalUi.refreshTree(launcher);}}
@@ -306,16 +315,37 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         },()->{
             Map<String,String> settings=MobileConfig.read(this);
             String selection=settings.getOrDefault("android_gpu_driver","auto");
+            if (mode.driverTrial != null) {
+                probe(selection, true, true);
+                return;
+            }
+            String retry = selection.equals("auto") ? DriverRecovery.fallback(this) : null;
+            if (retry != null) {
+                recoveryProbe = true;
+                DriverRecovery.consumeRetry(this);
+                toast("Trying the last playable driver once");
+                probe(retry, true, true);
+                return;
+            }
             String cached=GameSession.interrupted(this)==0?DriverStore.cachedSelection(this,selection,settings):null;
             if(cached!=null)startGame(mode,cached);
             else probe(selection,true);
         });
     }
     private void startGame(SessionMode mode,String effective){
+        startGame(mode, effective, false);
+    }
+    private void startGame(SessionMode mode,String effective,boolean retry){
         Intent i=new Intent(this,PinyonShiftActivity.class);
-        i.putExtra("debug_report",mode==SessionMode.DIAGNOSTICS);
+        i.putExtra("debug_report",mode!=SessionMode.WITHOUT_LOGS);
         i.putExtra(PinyonShiftActivity.NO_SESSION_LOGS,mode==SessionMode.WITHOUT_LOGS);
-        if(effective!=null)i.putExtra("verified_driver",effective);
+        i.putExtra("skip_mods",mode==SessionMode.WITHOUT_MODS);
+        i.putExtra("driver_flag_trial",mode.driverTrial);
+        if(effective!=null){
+            i.putExtra("verified_driver",effective);
+            DriverRecovery.launched(this,effective,
+                mode.driverTrial==null && MobileConfig.get(this,"android_gpu_driver","auto").equals("auto"),retry);
+        }
         i.putExtra("env.PINYON_SHIFT_ANDROID_LAUNCHER","1");startActivity(i);
     }
     private void files(){openPage("Game files",this::filesPage);}
@@ -641,6 +671,21 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         LinearLayout body=FestivalUi.column(this);
         FestivalUi.listRow(this,body,"play","Play without logs","Start without app session logs or diagnostic capture.",
             this::playWithoutLogs);
+        FestivalUi.listRow(this,body,"layers","Play once without mods",
+            "Compare the same car or scene with optional mods skipped for this launch.",
+            () -> { if (canManage()) play(SessionMode.WITHOUT_MODS); });
+        FestivalUi.listRow(this,body,"chip","Compare Turnip flags","Launch with one driver flag at a time.",() -> {
+            if (!canManage()) return;
+            String selected = MobileConfig.get(this,"android_gpu_driver","auto");
+            if (selected.isEmpty() || selected.equals("auto")) {
+                toast("Select a custom Turnip driver first.");
+                return;
+            }
+            SessionMode[] modes = {SessionMode.DRIVER_DEFAULTS, SessionMode.DRIVER_SYSMEM, SessionMode.DRIVER_NOPREAMBLE};
+            FestivalUi.choose(this,"One-session driver flags",
+                new String[]{"Driver defaults","System memory only","No preamble only"},-1,
+                index -> play(modes[index]));
+        });
         FestivalUi.listRow(this,body,"audio","Check collision sound files","Verify impact and glass assets from the selected game source.",()->{
             if(canManage()&&GameFiles.ready(this))
                 work("Checking collision and glass audio…",()->GameFiles.verifyCollisionAudio(this),()->toast("Collision and glass audio files verified."));
@@ -654,7 +699,8 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     }
     private void probe(String choice,boolean launch,boolean oneOff){
         pendingDriver=choice;playAfterProbe=launch;oneOffProbe=oneOff;
-        startActivityForResult(new Intent(this,DriverProbeActivity.class).putExtra("driver",choice),PROBE);
+        startActivityForResult(new Intent(this,DriverProbeActivity.class).putExtra("driver",choice)
+            .putExtra("driver_flag_trial",launch?pendingSessionMode.driverTrial:null),PROBE);
     }
     private void pick(int request,String mime,boolean create){
         Intent i=new Intent(create?Intent.ACTION_CREATE_DOCUMENT:Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime);
@@ -700,11 +746,12 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     }
     private void probeResult(int result,Intent data){
         boolean launch=playAfterProbe,oneOff=oneOffProbe;playAfterProbe=false;oneOffProbe=false;
+        boolean retry=recoveryProbe;recoveryProbe=false;
         String report=result==RESULT_OK&&data!=null?data.getStringExtra("report"):null;
         try{if(!oneOff)AdrenoSettings.record(this,pendingDriver,report==null?"{}":report);JSONObject json=new JSONObject(report==null?"{}":report);
             if(!json.optBoolean("ok",false))throw new IOException(json.optString("error","The graphics driver test stopped unexpectedly."));
             if(!oneOff&&!launch)MobileConfig.put(this,"android_gpu_driver",MobileConfig.quote(pendingDriver==null?"":pendingDriver));
-            if(launch)startGame(pendingSessionMode,json.getString("effective_driver"));
+            if(launch)startGame(pendingSessionMode,json.getString("effective_driver"),retry);
             else toast(oneOff?"System driver passed the startup check.":"Driver passed and selected for the next launch.");
         }catch(Exception e){
             showRecovery("Graphics driver could not start", e.getMessage(), launch);

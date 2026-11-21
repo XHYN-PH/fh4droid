@@ -51,17 +51,24 @@ final class MobileConfig {
         return null;
     }
     static String get(Context c,String key,String fallback){return read(c).getOrDefault(key,fallback);}
+    static Map<String,String> reportSettings(Map<String,String> settings) {
+        Map<String,String> report = new LinkedHashMap<>(settings);
+        report.remove("user_xuid");
+        report.remove("user_name");
+        report.remove("pinyon_shift_device_name");
+        return report;
+    }
     static synchronized void put(Context c,String key,String literal)throws IOException{
         putAll(c,Collections.singletonMap(key,literal));
     }
     static synchronized void putAll(Context c,Map<String,String> updates)throws IOException{putFile(file(c),updates);}
-    static synchronized void recordChange(Context c,String key,String literal,boolean live){
+    static synchronized void recordChange(Context c,String key,String literal,String application){
         try{
             File log=new File(base(c),"state/logs/android-settings-changes.jsonl");
             Files.createDirectories(log.getParentFile().toPath());
             if(log.length()>262144)Files.move(log.toPath(),new File(log.getPath()+".old").toPath(),StandardCopyOption.REPLACE_EXISTING);
             org.json.JSONObject event=new org.json.JSONObject();event.put("time_ms",System.currentTimeMillis());
-            event.put("setting",key);event.put("value",literal);event.put("application",live?"live requested":"next launch");
+            event.put("setting",key);event.put("value",literal);event.put("application",application);
             try(FileOutputStream out=new FileOutputStream(log,true)){out.write((event.toString()+"\n").getBytes(StandardCharsets.UTF_8));}
         }catch(Exception error){android.util.Log.w("FH4Droid","Could not record settings change",error);}
     }
@@ -88,6 +95,17 @@ final class MobileConfig {
         writeText(f,text);
     }
     private static void writeText(File f,String text)throws IOException{
+        // Use the runtime's TOML parser on Android. The file editor is also
+        // used by host tools, where the Android JNI library cannot be loaded.
+        boolean onAndroid = "Dalvik".equals(System.getProperty("java.vm.name"));
+        if (onAndroid) ContentNative.validateConfig(text);
+        replaceText(f, text);
+        if (onAndroid) {
+            try { replaceText(new File(f.getPath()+".last-good"), text); }
+            catch (IOException error) { android.util.Log.w("FH4Droid", "Could not save the settings recovery copy", error); }
+        }
+    }
+    private static void replaceText(File f,String text)throws IOException{
         Path temp=Files.createTempFile(f.getParentFile().toPath(),"settings-",".android-part");
         try{
             try(FileOutputStream out=new FileOutputStream(temp.toFile())){out.write(text.getBytes(StandardCharsets.UTF_8));out.getFD().sync();}

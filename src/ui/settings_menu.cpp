@@ -997,10 +997,12 @@ std::unique_ptr<MenuScreen> SettingsPages::Graphics() {
   }
   rows.push_back(std::move(resolution));
 #if defined(__ANDROID__)
-  rows.push_back(Setting("RASTER RESOLUTION",
-      {{"50% (640 X 360)", {{"fh1_render_scale_percent", "50"}}},
-       {"75% (960 X 540)", {{"fh1_render_scale_percent", "75"}}},
-       {"100% (1280 X 720)", {{"fh1_render_scale_percent", "100"}}}}));
+  std::vector<Choice> raster_scales;
+  for (int percent = 25; percent <= 100; ++percent) {
+    raster_scales.push_back({std::to_string(percent) + "%",
+                             {{"fh1_render_scale_percent", std::to_string(percent)}}});
+  }
+  rows.push_back(Setting("RASTER RESOLUTION", std::move(raster_scales)));
 #else
   // The game's own scene at 960x540 instead of 1280x720 (its tiling bands
   // scaled, the decoder rewriting the static world's window registers); the

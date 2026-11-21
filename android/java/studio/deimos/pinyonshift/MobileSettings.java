@@ -34,6 +34,9 @@ final class MobileSettings {
           "Smaller textures use less graphics memory. Original preserves the "
               + "game's detail.",
           "256", "512", "1024", "0"),
+      o("Advanced", "vulkan_bc_transcode", "Mali texture compression", "false", true,
+          "Experimental. On GPUs with ASTC but without BC, transcodes some textures "
+              + "to ASTC to reduce memory. Transparent textures can look different.", "false", "true"),
       o("Graphics", "anisotropic_override", "Texture filtering", "-1", false,
           "Higher filtering keeps roads clearer at an angle and adds GPU work.", "-1", "0", "3",
           "4", "5"),
@@ -81,8 +84,8 @@ final class MobileSettings {
           "false", "true"),
       s("Display", "present_effect", "Upscaling filter", "auto", false,
           "Automatic sharpens reduced resolutions with CAS and uses bilinear at 100%. "
-              + "Off keeps pixels unsmoothed. Bilinear softens edges. FSR 1 uses an edge-aware upscaler.",
-          "nearest", "bilinear", "cas", "fsr", "auto"),
+              + "Off keeps pixels unsmoothed. FSR 1 and Snapdragon GSR 1 upscale along edges.",
+          "nearest", "bilinear", "cas", "fsr", "gsr", "auto"),
       o("Display", "present_cas_additional_sharpness", "CAS sharpness", "0", false,
           "Additional sharpening with CAS or Automatic below 100%.", "0", "0.25", "0.5", "0.75", "1"),
       o("Display", "present_fsr_sharpness_reduction", "FSR softness", "0.2", false,
@@ -224,6 +227,8 @@ final class MobileSettings {
         return "Off (nearest)";
       if (str.equals("fsr"))
         return "FSR 1";
+      if (str.equals("gsr"))
+        return "Snapdragon GSR 1";
       if (str.equals("cas"))
         return "CAS";
       return str.equals("bilinear") ? "Bilinear" : str;

@@ -1,5 +1,11 @@
 #include <dlfcn.h>
 #include <jni.h>
+#if defined(__ANDROID__)
+#ifndef VK_USE_PLATFORM_ANDROID_KHR
+#define VK_USE_PLATFORM_ANDROID_KHR
+#endif
+#include <android/native_window_jni.h>
+#endif
 #include <vulkan/vulkan.h>
 #ifndef FH4DROID_DRIVER_PROBE_TEST
 #include <rex/cvar.h>
@@ -13,6 +19,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <regex>
 #include <string>
 #include <vector>
@@ -267,9 +274,194 @@ std::string RenderTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
   return matches ? "" : "The rendered pixels did not match the test image.";
 }
 
+#if defined(__ANDROID__)
+// The probe process is reclaimed on errors, including a driver that blocks
+// during its first window presentation. Headless readback uses RenderTest.
+std::string PresentTest(PFN_vkGetInstanceProcAddr get, VkInstance instance,
+                        VkPhysicalDevice physical, VkDevice device, uint32_t family,
+                        VkSurfaceKHR surface, ANativeWindow* window) {
+  auto caps_fn = Load<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>(
+      get, instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+  auto formats_fn = Load<PFN_vkGetPhysicalDeviceSurfaceFormatsKHR>(
+      get, instance, "vkGetPhysicalDeviceSurfaceFormatsKHR");
+  auto gd = Load<PFN_vkGetDeviceProcAddr>(get, instance, "vkGetDeviceProcAddr");
+  if (!caps_fn || !formats_fn || !gd) return "Missing Android presentation entry points.";
+#define FN(name) \
+  auto name = reinterpret_cast<PFN_##name>(gd(device, #name)); \
+  if (!name) return "Missing " #name "."
+  FN(vkCreateSwapchainKHR);
+  FN(vkDestroySwapchainKHR);
+  FN(vkGetSwapchainImagesKHR);
+  FN(vkAcquireNextImageKHR);
+  FN(vkCreateSemaphore);
+  FN(vkDestroySemaphore);
+  FN(vkCreateImageView);
+  FN(vkDestroyImageView);
+  FN(vkCreateRenderPass);
+  FN(vkDestroyRenderPass);
+  FN(vkCreateFramebuffer);
+  FN(vkDestroyFramebuffer);
+  FN(vkCreateCommandPool);
+  FN(vkDestroyCommandPool);
+  FN(vkAllocateCommandBuffers);
+  FN(vkBeginCommandBuffer);
+  FN(vkCmdBeginRenderPass);
+  FN(vkCmdEndRenderPass);
+  FN(vkEndCommandBuffer);
+  FN(vkGetDeviceQueue);
+  FN(vkQueueSubmit);
+  FN(vkQueuePresentKHR);
+  FN(vkQueueWaitIdle);
+#undef FN
+#define TRY(expr) \
+  if (const VkResult result = (expr); result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) \
+    return "First display frame failed at " #expr " (" + std::to_string(result) + ")."
+  VkSurfaceCapabilitiesKHR caps{};
+  TRY(caps_fn(physical, surface, &caps));
+  if (!(caps.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT))
+    return "The Android surface cannot be rendered to.";
+  uint32_t count = 0;
+  TRY(formats_fn(physical, surface, &count, nullptr));
+  if (count == 0 || count > 256) return "No usable Android surface format.";
+  std::vector<VkSurfaceFormatKHR> formats(count);
+  TRY(formats_fn(physical, surface, &count, formats.data()));
+  VkSurfaceFormatKHR format = formats.front();
+  if (format.format == VK_FORMAT_UNDEFINED) format.format = VK_FORMAT_R8G8B8A8_UNORM;
+  VkExtent2D extent = caps.currentExtent;
+  if (extent.width == UINT32_MAX) {
+    extent.width = std::clamp(uint32_t(std::max(0, ANativeWindow_getWidth(window))),
+                              caps.minImageExtent.width, caps.maxImageExtent.width);
+    extent.height = std::clamp(uint32_t(std::max(0, ANativeWindow_getHeight(window))),
+                               caps.minImageExtent.height, caps.maxImageExtent.height);
+  }
+  if (extent.width == 0 || extent.height == 0 || caps.supportedCompositeAlpha == 0)
+    return "The Android surface is not ready.";
+  VkSwapchainCreateInfoKHR swap_info{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+  swap_info.surface = surface;
+  swap_info.minImageCount = caps.minImageCount;
+  swap_info.imageFormat = format.format;
+  swap_info.imageColorSpace = format.colorSpace;
+  swap_info.imageExtent = extent;
+  swap_info.imageArrayLayers = 1;
+  swap_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+  swap_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  swap_info.preTransform = caps.currentTransform;
+  swap_info.compositeAlpha = VkCompositeAlphaFlagBitsKHR(
+      caps.supportedCompositeAlpha & (~caps.supportedCompositeAlpha + 1u));
+  swap_info.presentMode = VK_PRESENT_MODE_FIFO_KHR;
+  swap_info.clipped = VK_TRUE;
+  VkSwapchainKHR swapchain{};
+  TRY(vkCreateSwapchainKHR(device, &swap_info, nullptr, &swapchain));
+  TRY(vkGetSwapchainImagesKHR(device, swapchain, &count, nullptr));
+  if (count == 0 || count > 64) return "No Android swapchain images.";
+  std::vector<VkImage> images(count);
+  TRY(vkGetSwapchainImagesKHR(device, swapchain, &count, images.data()));
+  VkSemaphoreCreateInfo semaphore_info{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+  VkSemaphore acquired{}, rendered{};
+  TRY(vkCreateSemaphore(device, &semaphore_info, nullptr, &acquired));
+  TRY(vkCreateSemaphore(device, &semaphore_info, nullptr, &rendered));
+  uint32_t index = 0;
+  TRY(vkAcquireNextImageKHR(device, swapchain, 2'000'000'000ull, acquired, VK_NULL_HANDLE, &index));
+  if (index >= count) return "Invalid Android swapchain image.";
+  VkImageViewCreateInfo view_info{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  view_info.image = images[index];
+  view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  view_info.format = format.format;
+  view_info.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  VkImageView view{};
+  TRY(vkCreateImageView(device, &view_info, nullptr, &view));
+  VkAttachmentDescription attachment{};
+  attachment.format = format.format;
+  attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+  attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+  VkAttachmentReference reference{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+  VkSubpassDescription subpass{};
+  subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+  subpass.colorAttachmentCount = 1;
+  subpass.pColorAttachments = &reference;
+  VkSubpassDependency dependency{VK_SUBPASS_EXTERNAL, 0, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+      VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0};
+  VkRenderPassCreateInfo pass_info{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+  pass_info.attachmentCount = pass_info.subpassCount = pass_info.dependencyCount = 1;
+  pass_info.pAttachments = &attachment;
+  pass_info.pSubpasses = &subpass;
+  pass_info.pDependencies = &dependency;
+  VkRenderPass pass{};
+  TRY(vkCreateRenderPass(device, &pass_info, nullptr, &pass));
+  VkFramebufferCreateInfo framebuffer_info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+  framebuffer_info.renderPass = pass;
+  framebuffer_info.attachmentCount = 1;
+  framebuffer_info.pAttachments = &view;
+  framebuffer_info.width = extent.width;
+  framebuffer_info.height = extent.height;
+  framebuffer_info.layers = 1;
+  VkFramebuffer framebuffer{};
+  TRY(vkCreateFramebuffer(device, &framebuffer_info, nullptr, &framebuffer));
+  VkCommandPoolCreateInfo pool_info{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+  pool_info.queueFamilyIndex = family;
+  VkCommandPool pool{};
+  TRY(vkCreateCommandPool(device, &pool_info, nullptr, &pool));
+  VkCommandBufferAllocateInfo allocation{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+  allocation.commandPool = pool;
+  allocation.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocation.commandBufferCount = 1;
+  VkCommandBuffer command{};
+  TRY(vkAllocateCommandBuffers(device, &allocation, &command));
+  VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  TRY(vkBeginCommandBuffer(command, &begin));
+  VkClearValue clear{};
+  clear.color = {{.04f, .18f, .12f, 1.f}};
+  VkRenderPassBeginInfo render{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+  render.renderPass = pass;
+  render.framebuffer = framebuffer;
+  render.renderArea.extent = extent;
+  render.clearValueCount = 1;
+  render.pClearValues = &clear;
+  vkCmdBeginRenderPass(command, &render, VK_SUBPASS_CONTENTS_INLINE);
+  vkCmdEndRenderPass(command);
+  TRY(vkEndCommandBuffer(command));
+  VkQueue queue{};
+  vkGetDeviceQueue(device, family, 0, &queue);
+  const VkPipelineStageFlags wait = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+  VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submit.waitSemaphoreCount = submit.commandBufferCount = submit.signalSemaphoreCount = 1;
+  submit.pWaitSemaphores = &acquired;
+  submit.pWaitDstStageMask = &wait;
+  submit.pCommandBuffers = &command;
+  submit.pSignalSemaphores = &rendered;
+  TRY(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
+  VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+  present.waitSemaphoreCount = present.swapchainCount = 1;
+  present.pWaitSemaphores = &rendered;
+  present.pSwapchains = &swapchain;
+  present.pImageIndices = &index;
+  TRY(vkQueuePresentKHR(queue, &present));
+  TRY(vkQueueWaitIdle(queue));
+  vkDestroyCommandPool(device, pool, nullptr);
+  vkDestroyFramebuffer(device, framebuffer, nullptr);
+  vkDestroyRenderPass(device, pass, nullptr);
+  vkDestroyImageView(device, view, nullptr);
+  vkDestroySemaphore(device, rendered, nullptr);
+  vkDestroySemaphore(device, acquired, nullptr);
+  vkDestroySwapchainKHR(device, swapchain, nullptr);
+#undef TRY
+  return {};
+}
+#endif
+
 std::string Probe(void* loader, std::string* first_name = nullptr,
                   uint32_t max_api = VK_API_VERSION_1_3, bool force_legacy = false,
-                  bool require_vertex_stores = true) {
+                  bool require_vertex_stores = true
+#if defined(__ANDROID__)
+                  , ANativeWindow* window = nullptr
+#endif
+                  ) {
   auto get = reinterpret_cast<PFN_vkGetInstanceProcAddr>(
       dlsym(loader, "vkGetInstanceProcAddr"));
   if (!get) return Error("Missing Vulkan entry points.");
@@ -285,6 +477,13 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
   app.apiVersion = std::min(api, max_api);
   VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
   ci.pApplicationInfo = &app;
+#if defined(__ANDROID__)
+  const char* surface_extensions[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME};
+  if (window) {
+    ci.enabledExtensionCount = 2;
+    ci.ppEnabledExtensionNames = surface_extensions;
+  }
+#endif
   VkInstance instance{};
   VkResult status = create(&ci, nullptr, &instance);
   if (status != VK_SUCCESS)
@@ -314,6 +513,22 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
     if (destroy) destroy(instance, nullptr);
     return Error("The Vulkan driver is missing required functions.");
   }
+#if defined(__ANDROID__)
+  VkSurfaceKHR surface{};
+  auto destroy_surface = Load<PFN_vkDestroySurfaceKHR>(get, instance, "vkDestroySurfaceKHR");
+  auto surface_support = Load<PFN_vkGetPhysicalDeviceSurfaceSupportKHR>(
+      get, instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
+  if (window) {
+    auto create_surface = Load<PFN_vkCreateAndroidSurfaceKHR>(get, instance, "vkCreateAndroidSurfaceKHR");
+    VkAndroidSurfaceCreateInfoKHR surface_info{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
+    surface_info.window = window;
+    if (!create_surface || !destroy_surface || !surface_support ||
+        create_surface(instance, &surface_info, nullptr, &surface) != VK_SUCCESS) {
+      destroy(instance, nullptr);
+      return Error("The driver could not create an Android presentation surface.");
+    }
+  }
+#endif
   uint32_t count = 0;
   enumerate(instance, &count, nullptr);
   if (!count || count > 32) {
@@ -388,6 +603,11 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
       if (qp[i].queueCount &&
           (qp[i].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) ==
               (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT)) {
+#if defined(__ANDROID__)
+        VkBool32 supported = VK_FALSE;
+        if (surface && (surface_support(device, i, surface, &supported) != VK_SUCCESS || !supported))
+          continue;
+#endif
         family = i;
         break;
       }
@@ -434,6 +654,15 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
       const auto error=RenderTest(get,instance,device,logical,family,core13,dynamic,format);
       if(!error.empty())return Error("HDR/10-bit readback: "+error);
     }
+    std::string window_check;
+#if defined(__ANDROID__)
+    if (surface) {
+      const auto error = PresentTest(get, instance, device, logical, family, surface, window);
+      if (!error.empty()) return Error(error);
+      window_check = ",{\"name\":\"First display frame\",\"ok\":true,"
+                     "\"detail\":\"Android swapchain clear and presentation passed\"}";
+    }
+#endif
     destroy_device(logical, nullptr);
     std::string gpu_family="other";std::string gpu_name=p.deviceName;
     std::transform(gpu_name.begin(),gpu_name.end(),gpu_name.begin(),[](unsigned char c){return char(std::tolower(c));});
@@ -463,9 +692,12 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
              "formats\",\"ok\":true,\"detail\":\"Required sampled, storage and "
              "depth formats\"},"
              "{\"name\":\"Render and readback\",\"ok\":true,\"detail\":\""
-             "RGBA8, 10-bit and float16 clear/readback passed; materials and full gameplay still need testing\"}]}";
+             "RGBA8, 10-bit and float16 clear/readback passed\"}" + window_check + "]}";
     break;
   }
+#if defined(__ANDROID__)
+  if (surface) destroy_surface(instance, surface, nullptr);
+#endif
   destroy(instance, nullptr);
   return result.empty() ? Error(last) : result;
 }
@@ -474,7 +706,10 @@ std::string Probe(void* loader, std::string* first_name = nullptr,
 
 #ifndef FH4DROID_DRIVER_PROBE_TEST
 extern "C" JNIEXPORT jstring JNICALL
-Java_studio_deimos_pinyonshift_DriverProbeActivity_nativeProbe(JNIEnv* env,jclass,jstring native_value,jstring root_value,jstring internal_value,jstring selected_value,jstring environment_value,jboolean no_preamble,jboolean require_vertex_stores){
+Java_studio_deimos_pinyonshift_DriverProbeActivity_nativeProbe(JNIEnv* env,jclass,jstring native_value,jstring root_value,jstring internal_value,jstring selected_value,jstring environment_value,jboolean no_preamble,jboolean require_vertex_stores,jobject surface){
+    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
+    if (!window) return env->NewStringUTF(Error("The driver test display surface is unavailable.").c_str());
+    std::unique_ptr<ANativeWindow, decltype(&ANativeWindow_release)> owned_window(window, ANativeWindow_release);
     rex::cvar::SetFlagByName("android_gpu_driver_env",Read(env,environment_value));
     rex::cvar::SetFlagByName("android_gpu_driver_no_preamble",no_preamble?"true":"false");
     const auto root=std::filesystem::path(Read(env,root_value));
@@ -496,7 +731,7 @@ Java_studio_deimos_pinyonshift_DriverProbeActivity_nativeProbe(JNIEnv* env,jclas
         if(!loader)return env->NewStringUTF(Error("The selected custom driver could not be loaded.").c_str());
         report.clear();
     }
-    if (report.empty()) report=Probe(loader,nullptr,VK_API_VERSION_1_3,false,require_vertex_stores);
+    report=Probe(loader,nullptr,VK_API_VERSION_1_3,false,require_vertex_stores,window);
     if(!report.empty()&&report.back()=='}'){report.pop_back();report+=",\"effective_driver\":"+Quote(selection)+"}";}
     if(!require_vertex_stores && !report.empty() && report.back()=='}'){report.pop_back();report+=",\"vertex_stores_fallback\":true}";}
     // A fresh process is killed after reporting; do not unload live driver hooks.

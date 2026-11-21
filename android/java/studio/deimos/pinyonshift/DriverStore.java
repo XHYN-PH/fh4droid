@@ -12,11 +12,18 @@ import java.util.zip.*;
 
 final class DriverStore {
     static File root(Context c){return new File(MobileConfig.base(c),"state/drivers");}
+    static Map<String,String> sessionSettings(Map<String,String> saved, String trial) {
+        if (trial == null) return saved;
+        Map<String,String> values = new LinkedHashMap<>(saved);
+        values.put("android_gpu_driver_env", trial.equals("sysmem") ? "TU_DEBUG=sysmem" : "");
+        values.put("android_gpu_driver_no_preamble", Boolean.toString(trial.equals("nopreamble")));
+        return values;
+    }
     static String probeKey(Context c,String selection,Map<String,String> settings) {
         try {
             android.content.pm.PackageInfo info=c.getPackageManager().getPackageInfo(c.getPackageName(),0);
             JSONArray key=new JSONArray();
-            key.put(1).put(info.getLongVersionCode()).put(info.lastUpdateTime).put(android.os.Build.FINGERPRINT);
+            key.put(2).put(info.getLongVersionCode()).put(info.lastUpdateTime).put(android.os.Build.FINGERPRINT);
             key.put(selection).put(settings.getOrDefault("android_gpu_driver_env",""))
                 .put(settings.getOrDefault("android_gpu_driver_no_preamble","true"))
                 .put(settings.getOrDefault("vulkan_require_vertex_pipeline_stores_and_atomics","true"));

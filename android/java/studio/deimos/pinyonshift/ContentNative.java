@@ -19,6 +19,12 @@ final class ContentNative {
     private static native byte[] nativeManifest(String path) throws IOException;
     private static native void nativeExtractDlc(String source,String destination,String id) throws IOException;
     private static native long nativeExtractForzaProfile(String source,String destination) throws IOException;
+    private static native void nativeValidateConfig(byte[] text) throws IOException;
+
+    static void validateConfig(String text) throws IOException {
+        load();
+        nativeValidateConfig(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
     static JSONObject manifest(File file) throws IOException {
         load();
         try { return new JSONObject(new String(nativeManifest(file.getAbsolutePath()),java.nio.charset.StandardCharsets.UTF_8)); }

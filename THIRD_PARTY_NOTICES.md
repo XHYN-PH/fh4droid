@@ -28,6 +28,10 @@ and checked by SHA-256, are staged beside the game in
   AMD's signed `amd_fidelityfx_vk.dll` on Windows and the library built
   from that source on Linux, macOS and Android
   (`upscalers/fidelityfx/1.1.4/LICENSE.txt`).
+- **Snapdragon Game Super Resolution 1** (Android Vulkan): the shader from
+  SnapdragonGameStudios/snapdragon-gsr at `d926f07` with ShiftGlue's Vulkan
+  integration. The BSD 3-Clause license is included in the APK at
+  `assets/licenses/snapdragon-gsr.txt`. [Shader source](https://github.com/SnapdragonGameStudios/snapdragon-gsr/tree/d926f07)
 
 LSFG frame generation, which runs only from the player's own Lossless
 Scaling install, is built from two sources in

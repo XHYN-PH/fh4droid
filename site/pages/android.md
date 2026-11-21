@@ -132,9 +132,11 @@ Automatic texture reserve is 64 MiB on low-RAM/up-to-4-GiB devices, 128 MiB up t
 
 **Advanced → Extended comparison capture** raises the diagnostic CSV bound from 16 to 64 MiB for long tests. Report exports keep a bounded tail and identify truncation. Detailed GPU timestamps are opt-in.
 
-Surface refresh hints follow the lower active game or presentation cap. When possible, **Match display refresh** favours seamless refresh rates that are an integer multiple of the game target, such as 120 Hz at 40 FPS. Memory and frame-timing samples run on a worker. **Advanced → CPU performance hints** is an off-by-default Android scheduling experiment. It reports budget and CPU work for the game frame thread. The older Android command/recording-thread experiment showed no clear benefit, so this experiment needs a fresh same-device comparison before any performance claim.
+**Match display refresh** uses the lower active game or presentation cap and requests the fastest evenly divisible mode at the current panel resolution, such as 120 Hz at 30 FPS. The runtime follows the display clock when guest vblanks fit the measured refresh interval and uses its normal timing otherwise. Memory and frame-timing samples run on a worker. **Advanced → CPU performance hints** remains optional.
 
-An unchanged, successful driver probe can be reused across Play launches. An Android or app update, changed driver files, changed probe settings, or an interrupted game triggers a fresh check. **Graphics drivers** shows the current selection alongside the driver and Vulkan version used in the last startup test. Each result identifies the check that passed or failed. The probe also reports BC and fragment-shading-rate availability. Coarse shading and prepared immersive-camera controls explain unavailable dependencies. Quit shows backup and closing progress until native shutdown completes.
+An unchanged, successful driver probe can be reused across Play launches. An Android or app update, changed driver files, changed probe settings, or an interrupted game triggers a fresh check. **Test driver** clears and presents a window frame and checks the required formats. After repeated early crashes, Automatic can make one retry with a previously playable driver. Driver-specific pipeline caches use the Vulkan cache UUID.
+
+**Snapdragon GSR 1** is available under **Upscaling filter**. **Advanced → Mali texture compression** can reduce texture memory on GPUs with ASTC and without BC. It can change translucent edges. Settings are validated before Android saves them. Startup can restore the last valid copy while preserving the unreadable config. Both resolution controls use 25–100%, and the screen layout detail explains when widescreen is showing original menu proportions.
 
 ## Saves
 
@@ -152,7 +154,7 @@ To transfer a base-game backup to another phone, choose **More → Save backups 
 
 **Settings → Audio → 0.5.1-style audio** uses the guest XAudio2 output, original FMOD mixer and EQ, inline XMA decoding, and per-frame audio updates on the next launch. The current decoder and Android output driver still provide their fixes. The switch lets the same phone compare current audio with the major game-side audio settings from Pinyon Shift 0.5.1.
 
-**In-game menu → More → Diagnostics → Capture a problem** saves recent frame times, audio counters, page recoveries and active settings. Capturing a white car or blank tile also tries to save the visible game frame. Export a problem report to include these captures. Regular Play records opens of the collision, glass and festival audio banks.
+**In-game menu → More → Diagnostics → Capture a problem** saves recent frame times, audio counters, page recoveries and active settings. Capturing car paint or glass corruption or a blank tile also tries to save the visible game frame. **Problem reports → Play once without mods** helps compare the same car and scene using the selected driver. **Compare Turnip flags** offers driver defaults, system memory only and no preamble only for one launch. Reports keep startup checkpoints and scope retained warnings across rotated logs.
 
 Regular **Play** records runtime logs, settings snapshots and bounded frame timing data. Reproduce the issue using Play and open **More → Problem reports → Share problem report**. Reports distinguish a session recorded without logs from earlier captures.
 
