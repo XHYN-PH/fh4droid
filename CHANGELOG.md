@@ -1,5 +1,17 @@
 # Changelog
 
+## FH4Droid 0.9.8 - 2026-11-21
+
+- Fix a first-frame crash on system Vulkan drivers. Driver testing now presents an Android window frame.
+- After repeated early crashes on Automatic, try a previously playable driver once. Keep Vulkan pipeline caches separate by driver UUID.
+- Match a compatible refresh mode to the frame target and align guest timing with Android's display clock when their rates fit.
+- Add Snapdragon GSR 1 as an upscaling choice and experimental Mali texture compression. Apply two PowerVR compatibility fixes for startup and missing draws.
+- Validate settings before saving. Keep a recovery copy, show saved and running values, and align Advanced resolution controls with the launcher's 25–100% range.
+- Explain when widescreen gameplay temporarily returns to original proportions in menus.
+- Add one-session launches without mods and with individual Turnip flags. Include startup events, rotated warnings and driver information in problem reports.
+
+[Full FH4Droid 0.9.8 release notes](docs/releases/fh4droid-0.9.8.md)
+
 ## FH4Droid 0.9.7 - 2026-11-20
 
 - Fix the sharp rectangle in the asphalt around the car with **Motion blur** enabled. The marked patch of road now receives the same motion blur as the surrounding asphalt.
