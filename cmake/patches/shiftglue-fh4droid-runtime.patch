@@ -116,6 +116,47 @@ index 01dfc4a9..225ac9a1 100644
    std::unique_ptr<memory::MappedMemory> OpenMapped(memory::MappedMemory::Mode mode, size_t offset,
                                                     size_t length) override;
  
+diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
+index f2cdf2dd..a91986dc 100644
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -413,6 +413,11 @@ class CommandProcessor {
+   // shader loads, swaps) in the same order. Packets whose effects the CPU
+   // sees wait for the recorder first. Backends opt in.
+   virtual bool SupportsRecordThread() const { return false; }
++  // Whether the decoder waits for the recorder after the swap of `frame` (the
++  // recorder's observation_frame_sequence_ at it), so that what the recorder
++  // sets up at that swap, such as a frame dump's packet recorder, is in place
++  // before the next packet decodes.
++  virtual bool RecordSyncAfterSwap(uint64_t frame) const { return false; }
+   bool record_split() const { return record_split_; }
+   // The register file the decoder reads: the shadow while split.
+   RegisterFile& decode_regs() { return record_split_ ? *decode_register_file_ : *register_file_; }
+@@ -762,6 +767,9 @@ class CommandProcessor {
+   // draw and its failure reporting.
+   void ExecuteDrawRecord(const DrawRecord& record);
+   uint32_t record_batch_draws_ = 0;
++  // The decoder's count of swaps: observation_frame_sequence_ as the recorder
++  // will have it when it runs the swap being decoded.
++  uint64_t decode_frame_sequence_ = 1;
+   void StartRecordThread();
+   void StopRecordThread();
+   void RecordThreadMain();
+diff --git a/include/rex/graphics/fh1_frame_dump.h b/include/rex/graphics/fh1_frame_dump.h
+index 57666831..26070d03 100644
+--- a/include/rex/graphics/fh1_frame_dump.h
++++ b/include/rex/graphics/fh1_frame_dump.h
+@@ -39,6 +39,10 @@ class Fh1FrameDumpMirror {
+ // loads from guest memory as the CPU holds them, vertex, index and texture
+ // ranges as the GPU mirror holds them when the draw reads them. The front
+ // buffer as the mirror holds it after the swap is the expected output.
++// Swaps and draws reach the recorder on the thread that records host work,
++// packets on the decoding one; with the decoder/recorder split
++// (gpu_record_thread), the decoder waits for the recorder at both swaps and
++// before every packet in between, so one thread at a time touches the dump.
+ //
+ // Replay (fh1_frame_replay, RunFh1FrameReplay): with no title running, the
+ // ranges are written to guest memory, the registers and shaders restored and
 diff --git a/include/rex/graphics/fh1_motion_blur.h b/include/rex/graphics/fh1_motion_blur.h
 new file mode 100644
 index 00000000..7ea96895
@@ -194,6 +235,34 @@ index 7395d04a..dbb39003 100644
  REXCVAR_DECLARE(bool, resolve_resolution_scale_fill_half_pixel_offset);
  REXCVAR_DECLARE(std::string, readback_resolve);
  REXCVAR_DECLARE(bool, occlusion_query_enable);
+diff --git a/include/rex/graphics/shared_memory.h b/include/rex/graphics/shared_memory.h
+index 3a0819ef..e6774eb9 100644
+--- a/include/rex/graphics/shared_memory.h
++++ b/include/rex/graphics/shared_memory.h
+@@ -110,6 +110,14 @@ class SharedMemory {
+   }
+   UploadKind upload_kind() const { return upload_kind_; }
+ 
++  // Upload hoisting: a count of CPU invalidations, and for each block of 64
++  // pages the count at its last one. A page invalidated no later than `epoch`
++  // and still invalid has not been read by the GPU since.
++  uint32_t invalidation_epoch() const {
++    return invalidation_epoch_.load(std::memory_order_acquire);
++  }
++  bool InvalidatedSince(uint32_t page_first, uint32_t page_last, uint32_t epoch) const;
++
+   // Command-processor thread only. Copy CPU-authoritative bytes, rejecting any
+   // GPU-written page and leaving destination unchanged on rejection. Callers
+   // must already watch the range. Enables write protection before copying to
+@@ -241,6 +249,8 @@ class SharedMemory {
+   // Subset of valid pages containing data written by the GPU.
+   std::vector<uint64_t> system_page_flags_valid_and_gpu_written_;
+   uint32_t num_system_page_flags_ = 0;
++  std::atomic<uint32_t> invalidation_epoch_{0};
++  std::vector<std::atomic<uint32_t>> block_invalidation_epochs_;
+ 
+   static std::pair<uint32_t, uint32_t> MemoryInvalidationCallbackThunk(
+       void* context_ptr, uint32_t physical_address_start, uint32_t length, bool exact_range);
 diff --git a/include/rex/graphics/texture_transcode_astc.h b/include/rex/graphics/texture_transcode_astc.h
 new file mode 100644
 index 00000000..ecf5b894
@@ -227,10 +296,58 @@ index 00000000..ecf5b894
 +
 +}  // namespace rex::graphics
 diff --git a/include/rex/graphics/vulkan/command_processor.h b/include/rex/graphics/vulkan/command_processor.h
-index a29328d8..7afce27c 100644
+index a29328d8..8d7fe960 100644
 --- a/include/rex/graphics/vulkan/command_processor.h
 +++ b/include/rex/graphics/vulkan/command_processor.h
-@@ -1829,6 +1829,7 @@ class VulkanCommandProcessor : public CommandProcessor {
+@@ -287,6 +287,16 @@ class VulkanCommandProcessor : public CommandProcessor {
+     return in_render_pass_ && id && current_fh1_rendering_id_ == id;
+   }
+   bool in_render_pass() const { return in_render_pass_; }
++  // vulkan_hoist_split_uploads: the stream position just before the open FH1
++  // rendering began, where uploads can go instead of ending it, and the
++  // shared memory invalidation count when it began.
++  bool Fh1UploadHoistSlot(size_t& slot, uint32_t& epoch) const {
++    if (!fh1_hoist_slot_valid_ || !in_render_pass_) return false;
++    slot = fh1_hoist_slot_;
++    epoch = fh1_hoist_epoch_;
++    return true;
++  }
++  void Fh1AdvanceUploadHoistSlot(size_t words) { fh1_hoist_slot_ += words; }
+   system::GraphicsShaderTranslationObserver GetShaderTranslationObserver() const;
+   // Submits the open submission, waits for every queue operation and reopens
+   // the submission if one was open (FH1 resolve read-backs).
+@@ -428,6 +438,10 @@ class VulkanCommandProcessor : public CommandProcessor {
+   // decode time; with the recorder their draws intermittently sampled other
+   // textures (frame-to-frame noise on FH1's foliage, flags and signs).
+   bool SupportsRecordThread() const override { return push_pixel_texture_descriptors_; }
++  // A frame dump starts recording packets at the swap before its frame.
++  bool RecordSyncAfterSwap(uint64_t frame) const override {
++    return frame + 1 == Fh1FrameDump::RequestedFrame();
++  }
+ 
+  private:
+   struct CommandBuffer {
+@@ -872,6 +886,9 @@ class VulkanCommandProcessor : public CommandProcessor {
+                                          VkWriteDescriptorSet* descriptor_set_writes_out);
+ 
+   bool device_lost_ = false;
++  // IssueDraw failures logged since device_lost_ last changed (rate limit).
++  uint64_t draw_failures_ = 0;
++  bool draw_failures_device_lost_ = false;
+ 
+   bool cache_clear_requested_ = false;
+ 
+@@ -1787,6 +1804,9 @@ class VulkanCommandProcessor : public CommandProcessor {
+   VkRenderPass current_render_pass_;
+   const VulkanRenderTargetCache::Framebuffer* current_framebuffer_;
+   bool in_render_pass_ = false;
++  size_t fh1_hoist_slot_ = 0;
++  uint32_t fh1_hoist_epoch_ = 0;
++  bool fh1_hoist_slot_valid_ = false;
+ #if defined(REXGPU_FH1_ORDERED_CENSUS)
+   uint64_t ordered_census_pass_ = 0;
+ #endif
+@@ -1829,6 +1849,7 @@ class VulkanCommandProcessor : public CommandProcessor {
    // Float constant usage masks of the last draw call.
    uint64_t current_float_constant_map_vertex_[4];
    uint64_t current_float_constant_map_pixel_[4];
@@ -238,6 +355,33 @@ index a29328d8..7afce27c 100644
  
    // System shader constants.
    SpirvShaderTranslator::SystemConstants system_constants_;
+diff --git a/include/rex/graphics/vulkan/deferred_command_buffer.h b/include/rex/graphics/vulkan/deferred_command_buffer.h
+index 72948dc9..e4a6ca11 100644
+--- a/include/rex/graphics/vulkan/deferred_command_buffer.h
++++ b/include/rex/graphics/vulkan/deferred_command_buffer.h
+@@ -10,6 +10,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <algorithm>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstring>
+@@ -33,6 +34,14 @@ class DeferredCommandBuffer {
+   // Exchanges the recorded commands (the submission worker takes a finished
+   // stream and leaves an empty one to record into).
+   void Swap(DeferredCommandBuffer& other) { command_stream_.swap(other.command_stream_); }
++  // The recorded stream's length, a command boundary to move commands to.
++  size_t GetSize() const { return command_stream_.size(); }
++  // Moves the commands recorded from `tail` on to `slot`, an earlier command
++  // boundary, ahead of the commands between them.
++  void MoveTail(size_t slot, size_t tail) {
++    std::rotate(command_stream_.begin() + slot, command_stream_.begin() + tail,
++                command_stream_.end());
++  }
+ 
+   // render_pass_begin->pNext of all barriers must be null.
+   void CmdVkBeginRenderPass(const VkRenderPassBeginInfo* render_pass_begin,
 diff --git a/include/rex/graphics/vulkan/fh1_native_executor.h b/include/rex/graphics/vulkan/fh1_native_executor.h
 index 3236516a..956a8d00 100644
 --- a/include/rex/graphics/vulkan/fh1_native_executor.h
@@ -283,6 +427,19 @@ index 9ae620f9..e59b2477 100644
  
    // Shader storage output stream, for preload in the next emulator runs.
    FILE* shader_storage_file_ = nullptr;
+diff --git a/include/rex/graphics/vulkan/shared_memory.h b/include/rex/graphics/vulkan/shared_memory.h
+index 104bdad3..98b1acaf 100644
+--- a/include/rex/graphics/vulkan/shared_memory.h
++++ b/include/rex/graphics/vulkan/shared_memory.h
+@@ -54,6 +54,8 @@ class VulkanSharedMemory : public SharedMemory {
+                                         uint32_t length_allocations) override;
+ 
+   bool UploadRanges(const std::vector<std::pair<uint32_t, uint32_t>>& upload_page_ranges) override;
++  // The copies of an upload into the buffer, recorded at the end of the stream.
++  bool RecordUploadCopies(const std::vector<std::pair<uint32_t, uint32_t>>& upload_page_ranges);
+ 
+  private:
+   void GetUsageMasks(Usage usage, VkPipelineStageFlags& stage_mask,
 diff --git a/include/rex/graphics/vulkan/texture_cache.h b/include/rex/graphics/vulkan/texture_cache.h
 index 93ae2606..819d6aa4 100644
 --- a/include/rex/graphics/vulkan/texture_cache.h
@@ -308,7 +465,7 @@ index 93ae2606..819d6aa4 100644
    // If both images can be placed in the same allocation, it's one allocation,
    // otherwise it's two separate.
 diff --git a/include/rex/perf/counter.h b/include/rex/perf/counter.h
-index e85efca0..6319612f 100644
+index e85efca0..3fb1a842 100644
 --- a/include/rex/perf/counter.h
 +++ b/include/rex/perf/counter.h
 @@ -11,6 +11,7 @@
@@ -319,7 +476,15 @@ index e85efca0..6319612f 100644
  #include <cstdint>
  #include <string>
  #include <string_view>
-@@ -320,6 +321,16 @@ int64_t GetCounter(CounterId id);
+@@ -241,6 +242,7 @@ enum class CounterId : uint16_t {
+   kGpuUploadSplitsVertex,
+   kGpuUploadSplitsIndex,
+   kGpuUploadSplitsTexture,
++  kGpuUploadsHoisted,
+   kGpuUploadBytes,
+   // D3D census (DL-0.1/DL-1.1, pinyon_shift_d3d_census): drawn draws the
+   // census counts as visible to an API-level renderer and as fallback; with
+@@ -320,6 +322,16 @@ int64_t GetCounter(CounterId id);
  // are not reset by the per-frame CSV snapshot.
  int64_t GetTotalCounter(CounterId id);
  
@@ -336,7 +501,7 @@ index e85efca0..6319612f 100644
  // Current host thread's accumulated user + kernel CPU time, or zero if unavailable.
  int64_t CurrentThreadCpuTimeNs();
  
-@@ -375,6 +386,7 @@ class Profiler {
+@@ -375,6 +387,7 @@ class Profiler {
    static void ThreadEnter(const char* name = nullptr) { OnThreadEnter(name); }
    static void ThreadExit() {}
    static void Flip() {
@@ -609,7 +774,7 @@ index 0c7aee01..7dba8c21 100644
      spdlog::flush_every(std::chrono::seconds(flush_interval));
  }
 diff --git a/src/core/perf/counter.cpp b/src/core/perf/counter.cpp
-index 4a6f100f..bfa9f2c0 100644
+index 4a6f100f..65224c8e 100644
 --- a/src/core/perf/counter.cpp
 +++ b/src/core/perf/counter.cpp
 @@ -15,15 +15,18 @@
@@ -674,7 +839,23 @@ index 4a6f100f..bfa9f2c0 100644
  
  namespace {
  
-@@ -709,6 +748,27 @@ void ResetFrameCounters() {
+@@ -271,6 +310,7 @@ constexpr const char* kCounterNames[] = {
+     "gpu_upload_splits_vertex",
+     "gpu_upload_splits_index",
+     "gpu_upload_splits_texture",
++    "gpu_uploads_hoisted",
+     "gpu_upload_bytes",
+     "d3d_census_visible_draws",
+     "d3d_census_fallback_draws",
+@@ -451,6 +491,7 @@ constexpr bool kIsGauge[] = {
+     false,  // kGpuUploadSplitsVertex
+     false,  // kGpuUploadSplitsIndex
+     false,  // kGpuUploadSplitsTexture
++    false,  // kGpuUploadsHoisted
+     false,  // kGpuUploadBytes
+     false,  // kD3dCensusVisibleDraws
+     false,  // kD3dCensusFallbackDraws
+@@ -709,6 +750,27 @@ void ResetFrameCounters() {
                            std::memory_order_relaxed);
      }
    }
@@ -1218,7 +1399,7 @@ index f3d68866..16c16c93 100644
  
      # Null backend (gpu_backend=null): packets without a device
 diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
-index 3ac490b8..fd721e41 100644
+index 3ac490b8..bd36c3d7 100644
 --- a/src/graphics/command_processor.cpp
 +++ b/src/graphics/command_processor.cpp
 @@ -545,10 +545,13 @@ void CommandProcessor::WorkerThreadMain() {
@@ -1238,6 +1419,30 @@ index 3ac490b8..fd721e41 100644
          }
          write_ptr_index = write_ptr_index_.load();
        } while (worker_running_ && !pending_any_ &&
+@@ -2524,6 +2527,10 @@ bool CommandProcessor::ExecutePacket(memory::RingBuffer* reader) {
+     d3d_census_decoder::Packet(packet_offset, packet);
+   }
+   if (packet_recorder_) {
++    // The recorder adds the guest ranges its draws read to the same recording:
++    // let it finish the packets before this one, so the two never overlap and
++    // the ranges are taken in the order they are without the split.
++    RecordSync();
+     uint32_t dword_count = 1;
+     switch (packet_type) {
+       case 0x00:
+@@ -3015,6 +3022,12 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, ui
+     }
+   });
+   PublishRecordBatch();
++  // The recorder sets and clears a packet recorder at a swap: the decoder may
++  // not decode further until it has.
++  if (record_split_ && (packet_recorder_ || RecordSyncAfterSwap(decode_frame_sequence_))) {
++    RecordSync();
++  }
++  ++decode_frame_sequence_;
+ 
+   ++counter_;
+   return true;
 diff --git a/src/graphics/flags.cpp b/src/graphics/flags.cpp
 index 786133db..04b600a3 100644
 --- a/src/graphics/flags.cpp
@@ -1895,6 +2100,58 @@ index 00000000..51e049a0
 +  dst[out_word + 2u] = blk[2];
 +  dst[out_word + 3u] = blk[3];
 +}
+diff --git a/src/graphics/shared_memory.cpp b/src/graphics/shared_memory.cpp
+index a1ff28bf..095eaff0 100644
+--- a/src/graphics/shared_memory.cpp
++++ b/src/graphics/shared_memory.cpp
+@@ -66,6 +66,7 @@ void SharedMemory::InitializeCommon() {
+   num_system_page_flags_ = ((kBufferSize >> page_size_log2_) + 63) / 64;
+   system_page_flags_valid_.assign(num_system_page_flags_, 0);
+   system_page_flags_valid_and_gpu_written_.assign(num_system_page_flags_, 0);
++  block_invalidation_epochs_ = std::vector<std::atomic<uint32_t>>(num_system_page_flags_);
+ 
+   memory_invalidation_callback_handle_ =
+       memory_.RegisterPhysicalMemoryInvalidationCallback(MemoryInvalidationCallbackThunk, this);
+@@ -120,6 +121,7 @@ void SharedMemory::ShutdownCommon() {
+   system_page_flags_valid_and_gpu_written_.clear();
+   system_page_flags_valid_and_gpu_written_.shrink_to_fit();
+   num_system_page_flags_ = 0;
++  block_invalidation_epochs_ = std::vector<std::atomic<uint32_t>>();
+ }
+ 
+ void SharedMemory::InvalidateAllPages() {
+@@ -128,6 +130,20 @@ void SharedMemory::InvalidateAllPages() {
+   std::fill(system_page_flags_valid_.begin(), system_page_flags_valid_.end(), uint64_t(0));
+   std::fill(system_page_flags_valid_and_gpu_written_.begin(),
+             system_page_flags_valid_and_gpu_written_.end(), uint64_t(0));
++  const uint32_t epoch = invalidation_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
++  for (std::atomic<uint32_t>& block : block_invalidation_epochs_) {
++    block.store(epoch, std::memory_order_release);
++  }
++}
++
++bool SharedMemory::InvalidatedSince(uint32_t page_first, uint32_t page_last,
++                                    uint32_t epoch) const {
++  for (uint32_t i = page_first >> 6; i <= (page_last >> 6) && i < num_system_page_flags_; ++i) {
++    if (int32_t(block_invalidation_epochs_[i].load(std::memory_order_acquire) - epoch) > 0) {
++      return true;
++    }
++  }
++  return false;
+ }
+ 
+ void SharedMemory::SetSystemPageBlocksValidWithGpuDataWritten() {
+@@ -784,7 +800,10 @@ std::pair<uint32_t, uint32_t> SharedMemory::MemoryInvalidationCallback(
+   }
+ 
+   bool any_kept = false;
++  const uint32_t invalidation_epoch =
++      invalidation_epoch_.fetch_add(1, std::memory_order_acq_rel) + 1;
+   for (uint32_t i = block_first; i <= block_last; ++i) {
++    block_invalidation_epochs_[i].store(invalidation_epoch, std::memory_order_release);
+     uint64_t invalidate_bits = UINT64_MAX;
+     if (i == block_first) {
+       invalidate_bits &= ~((uint64_t(1) << (page_first & 63)) - 1);
 diff --git a/src/graphics/texture_transcode_astc.cpp b/src/graphics/texture_transcode_astc.cpp
 new file mode 100644
 index 00000000..3d5b454d
@@ -2230,7 +2487,7 @@ index 00000000..3d5b454d
 +
 +}  // namespace rex::graphics
 diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
-index 066953ef..f8359f88 100644
+index 066953ef..4eae041f 100644
 --- a/src/graphics/vulkan/command_processor.cpp
 +++ b/src/graphics/vulkan/command_processor.cpp
 @@ -38,6 +38,7 @@
@@ -2250,7 +2507,75 @@ index 066953ef..f8359f88 100644
  }
  
  bool VulkanCommandProcessor::ExecutePacketType3_EVENT_WRITE_ZPD(memory::RingBuffer* reader,
-@@ -9624,7 +9625,8 @@ void VulkanCommandProcessor::UpdateDynamicState(const draw_util::ViewportInfo& v
+@@ -5425,6 +5426,9 @@ void VulkanCommandProcessor::SubmitBarriersAndBeginFh1Rendering(
+     return;
+   }
+   EndRenderPass();
++  fh1_hoist_slot_ = deferred_command_buffer_.GetSize();
++  fh1_hoist_epoch_ = shared_memory_ ? shared_memory_->invalidation_epoch() : 0;
++  fh1_hoist_slot_valid_ = true;
+   deferred_command_buffer_.CmdVkBeginRendering(&rendering_info);
+   PERF_counter_inc(kGpuRenderings);
+   const char* const next_rendering_label = next_rendering_label_;
+@@ -5619,6 +5623,7 @@ void VulkanCommandProcessor::FlushCpuVisibleResults() {
+ void VulkanCommandProcessor::EndRenderPass(std::source_location caller) {
+   assert_true(submission_open_);
+   current_fh1_rendering_id_ = 0;
++  fh1_hoist_slot_valid_ = false;
+   if (!in_render_pass_) {
+     return;
+   }
+@@ -6064,12 +6069,22 @@ bool VulkanCommandProcessor::IssueDrawImpl(xenos::PrimitiveType prim_type, uint3
+     draw_cost_.last = DrawCostNow();
+   }
+   auto draw_fail = [&](const char* stage) {
++    // After a lost device every draw fails: 15 rotated logs of this in 3 s
++    // (2026-10-22) took the lines before the loss with them. The first 100,
++    // then one in 10000, counted again from a loss or a recovery so earlier
++    // harmless failures never hide the ones after it.
++    if (draw_failures_device_lost_ != device_lost_) {
++      draw_failures_device_lost_ = device_lost_;
++      draw_failures_ = 0;
++    }
++    const uint64_t failure = draw_failures_++;
++    if (failure >= 100 && failure % 10000) return false;
+     auto vgt_draw_initiator = regs.Get<reg::VGT_DRAW_INITIATOR>();
+     REXGPU_ERROR(
+-        "Vulkan IssueDraw failed at {} "
++        "Vulkan IssueDraw failed at {} (failure {}) "
+         "(prim_type={}, index_count={}, source_select={}, major_mode={}, explicit_major={}, "
+         "path_select={}, tess_mode={}, edram_mode={})",
+-        stage, uint32_t(prim_type), index_count, uint32_t(vgt_draw_initiator.source_select),
++        stage, failure + 1, uint32_t(prim_type), index_count, uint32_t(vgt_draw_initiator.source_select),
+         uint32_t(vgt_draw_initiator.major_mode), uint32_t(major_mode_explicit),
+         uint32_t(regs.Get<reg::VGT_OUTPUT_PATH_CNTL>().path_select),
+         uint32_t(regs.Get<reg::VGT_HOS_CNTL>().tess_mode),
+@@ -6380,6 +6395,8 @@ bool VulkanCommandProcessor::IssueDrawImpl(xenos::PrimitiveType prim_type, uint3
+   VulkanShader::VulkanTranslation* vertex_shader_translation;
+   VulkanShader::VulkanTranslation* pixel_shader_translation;
+   bool memexport_writes_possible = memexport_used_vertex || memexport_used_pixel;
++  // Memory export may write pages an upload would be moved ahead of.
++  if (memexport_writes_possible) fh1_hoist_slot_valid_ = false;
+ 
+   DrawCostMark(kCostAnalysis);
+   // Two iterations because a submission (even the current one - in which case
+@@ -8540,6 +8557,7 @@ bool VulkanCommandProcessor::BeginSubmission(bool is_guest_command) {
+     // the end of the submission (when async pipeline object creation requests
+     // are fulfilled).
+     deferred_command_buffer_.Reset();
++    fh1_hoist_slot_valid_ = false;
+ 
+     // Reset cached state of the command buffer.
+     dynamic_viewport_update_needed_ = true;
+@@ -8809,6 +8827,7 @@ bool VulkanCommandProcessor::EndSubmission(bool is_swap) {
+         tape = std::make_unique<DeferredCommandBuffer>(*this);
+       }
+       tape->Swap(deferred_command_buffer_);
++      fh1_hoist_slot_valid_ = false;
+       {
+         std::lock_guard<std::mutex> lock(submission_worker_mutex_);
+         SubmissionJob job{std::move(tape), command_buffer, current_submission_wait_semaphores_,
+@@ -9624,7 +9643,8 @@ void VulkanCommandProcessor::UpdateDynamicState(const draw_util::ViewportInfo& v
    // fh1_debug_raster_percent: the draw rasterizes a top-left share of its
    // target (RS-0.3 probe; the image is wrong).
    const float raster_fraction =
@@ -2260,7 +2585,7 @@ index 066953ef..f8359f88 100644
    if (raster_fraction < 1.0f) {
      viewport.x *= raster_fraction;
      viewport.y *= raster_fraction;
-@@ -10514,10 +10516,14 @@ bool VulkanCommandProcessor::UpdateBindings(const VulkanShader* vertex_shader,
+@@ -10514,10 +10534,14 @@ bool VulkanCommandProcessor::UpdateBindings(const VulkanShader* vertex_shader,
      }
    }
    uint32_t float_constant_count_pixel = 0;
@@ -2275,7 +2600,7 @@ index 066953ef..f8359f88 100644
      for (uint32_t i = 0; i < 4; ++i) {
        if (current_float_constant_map_pixel_[i] != float_constant_map_pixel.float_bitmap[i]) {
          current_float_constant_map_pixel_[i] = float_constant_map_pixel.float_bitmap[i];
-@@ -10530,6 +10536,13 @@ bool VulkanCommandProcessor::UpdateBindings(const VulkanShader* vertex_shader,
+@@ -10530,6 +10554,13 @@ bool VulkanCommandProcessor::UpdateBindings(const VulkanShader* vertex_shader,
    } else {
      std::memset(current_float_constant_map_pixel_, 0, sizeof(current_float_constant_map_pixel_));
    }
@@ -2289,7 +2614,7 @@ index 066953ef..f8359f88 100644
  
    // Write the new constant buffers.
    constexpr uint32_t kAllConstantBuffersMask =
-@@ -10652,6 +10665,16 @@ bool VulkanCommandProcessor::UpdateBindings(const VulkanShader* vertex_shader,
+@@ -10652,6 +10683,16 @@ bool VulkanCommandProcessor::UpdateBindings(const VulkanShader* vertex_shader,
        buffer_info.range = VkDeviceSize(float_constants_size);
        GatherFloatConstants(mapping, current_float_constant_map_pixel_,
                             &regs.values[XE_GPU_REG_SHADER_CONSTANT_256_X]);
@@ -2999,6 +3324,108 @@ index 1f6873d9..aa42602f 100644
  }
  
  void VulkanPipelineCache::EndSubmission() {
+diff --git a/src/graphics/vulkan/shared_memory.cpp b/src/graphics/vulkan/shared_memory.cpp
+index fdf4fa02..bbcaa74a 100644
+--- a/src/graphics/vulkan/shared_memory.cpp
++++ b/src/graphics/vulkan/shared_memory.cpp
+@@ -17,6 +17,7 @@
+ 
+ #include <rex/assert.h>
+ #include <rex/cvar.h>
++#include <rex/platform.h>
+ #include <rex/graphics/vulkan/command_processor.h>
+ #include <rex/graphics/vulkan/deferred_command_buffer.h>
+ #include <rex/graphics/vulkan/shared_memory.h>
+@@ -26,6 +27,17 @@
+ #include <rex/perf/counter.h>
+ #include <rex/ui/vulkan/util.h>
+ 
++REXCVAR_DEFINE_BOOL(vulkan_hoist_split_uploads, REX_PLATFORM_WIN32, "GPU/Vulkan",
++                    "Record a vertex or index upload needed during an open FH1 rendering ahead "
++                    "of that rendering, instead of ending it, when no draw in it can have read "
++                    "the uploaded pages (on Windows only until measured elsewhere; on the "
++                    "Adreno 740 the upfront copies cost more than the split)")
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++REXCVAR_DEFINE_BOOL(vulkan_debug_skip_split_uploads, false, "GPU/Vulkan",
++                    "Diagnostics: drop the uploads that would end an open rendering, leaving "
++                    "the GPU's old copy of the memory (wrong geometry), to bound what the "
++                    "splits cost")
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ REXCVAR_DEFINE_BOOL(vulkan_sparse_shared_memory, true, "GPU/Vulkan",
+                     "Use sparse shared memory on Vulkan")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+@@ -310,6 +322,59 @@ bool VulkanSharedMemory::UploadRanges(
+   for (const std::pair<uint32_t, uint32_t>& upload_range : upload_page_ranges) {
+     PERF_counter_add(kGpuUploadBytes, int64_t(upload_range.second) << page_size_log2());
+   }
++  if (command_processor_.in_render_pass() && REXCVAR_GET(vulkan_debug_skip_split_uploads)) {
++    for (const std::pair<uint32_t, uint32_t>& upload_range : upload_page_ranges) {
++      MakeRangeValid(upload_range.first << page_size_log2(),
++                     upload_range.second << page_size_log2(), false);
++    }
++    return true;
++  }
++  // vulkan_hoist_split_uploads: vertex and index uploads during an open FH1
++  // rendering go ahead of the rendering in the deferred stream instead of
++  // ending it, when no page of theirs was invalidated after it began (so no
++  // draw in it can have read them).
++  size_t hoist_slot = 0;
++  uint32_t hoist_epoch = 0;
++  const uint32_t page_first = upload_page_ranges.front().first;
++  const uint32_t page_last =
++      upload_page_ranges.back().first + upload_page_ranges.back().second - 1;
++  if (command_processor_.in_render_pass() && REXCVAR_GET(vulkan_hoist_split_uploads) &&
++      (upload_kind() == UploadKind::kVertex || upload_kind() == UploadKind::kIndex) &&
++      command_processor_.Fh1UploadHoistSlot(hoist_slot, hoist_epoch) &&
++      !InvalidatedSince(page_first, page_last, hoist_epoch)) {
++    DeferredCommandBuffer& command_buffer = command_processor_.deferred_command_buffer();
++    const size_t tail = command_buffer.GetSize();
++    VkBufferMemoryBarrier barrier = {};
++    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
++    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++    barrier.buffer = buffer_;
++    barrier.offset = VkDeviceSize(page_first) << page_size_log2();
++    barrier.size = VkDeviceSize(page_last - page_first + 1) << page_size_log2();
++    // Anything before the slot may have read or written the range.
++    constexpr VkPipelineStageFlags kUses =
++        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
++        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
++        VK_PIPELINE_STAGE_TRANSFER_BIT;
++    barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
++    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++    command_buffer.CmdVkPipelineBarrier(kUses, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1,
++                                        &barrier, 0, nullptr);
++    const bool successful = RecordUploadCopies(upload_page_ranges);
++    // Later writes to the range too (a normal upload, memexport), so they
++    // wait for this copy rather than racing it.
++    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++    barrier.dstAccessMask = VK_ACCESS_INDEX_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT |
++                            VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT |
++                            VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
++    command_buffer.CmdVkPipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, kUses, 0, 0, nullptr, 1,
++                                        &barrier, 0, nullptr);
++    const size_t words = command_buffer.GetSize() - tail;
++    command_buffer.MoveTail(hoist_slot, tail);
++    command_processor_.Fh1AdvanceUploadHoistSlot(words);
++    PERF_counter_inc(kGpuUploadsHoisted);
++    return successful;
++  }
+   // An upload while a rendering is open ends it: count it by what it was for.
+   if (command_processor_.in_render_pass()) {
+     switch (upload_kind()) {
+@@ -347,6 +412,11 @@ bool VulkanSharedMemory::UploadRanges(
+     VulkanCommandProcessor& processor;
+     ~EndLabel() { processor.EndDebugLabel(); }
+   } end_label{command_processor_};
++  return RecordUploadCopies(upload_page_ranges);
++}
++
++bool VulkanSharedMemory::RecordUploadCopies(
++    const std::vector<std::pair<uint32_t, uint32_t>>& upload_page_ranges) {
+   DeferredCommandBuffer& command_buffer = command_processor_.deferred_command_buffer();
+   uint64_t submission_current = command_processor_.GetCurrentSubmission();
+   bool successful = true;
 diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
 index d93e9970..5e19215f 100644
 --- a/src/graphics/vulkan/texture_cache.cpp
@@ -3259,6 +3686,83 @@ index d93e9970..5e19215f 100644
  
    if (device_properties.samplerAnisotropy) {
      max_anisotropy_ = xenos::AnisoFilter(
+diff --git a/src/input/input_system.cpp b/src/input/input_system.cpp
+index 7ae9509c..38241648 100644
+--- a/src/input/input_system.cpp
++++ b/src/input/input_system.cpp
+@@ -311,25 +311,45 @@ X_RESULT InputSystem::GetHostPadState(uint32_t user_index, X_INPUT_STATE* out_st
+ namespace {
+ // Host shortcuts on controllers: a chord held together runs a bind once, and
+ // the title does not see the chord's buttons until all are released.
++//
++// One controller can reach a user through several devices (SDL and XInput
++// both report it, or Steam adds a virtual pad), polled a moment apart. With
++// one held flag per user, the device that had not seen the press yet cleared
++// it and the next poll fired the bind again: L3+R3 opened and closed the
++// overlay several times per press. The chord now fires when the first
++// device completes it and re-arms only once every device has let it go.
+ struct PadChord {
+   const char* bind;
+-  bool held[4] = {};
++  std::vector<DeviceId> holding[4];
+ };
+ PadChord g_pad_chord_debug_overlay = {"bind_debug_overlay"};
+ PadChord g_pad_chord_game_menu = {"bind_game_menu"};
+ 
+-void ApplyPadChord(PadChord& chord, const std::string& text, uint32_t user_index,
++// Devices no longer mapped to the user (unplugged) stop holding the chord.
++void PrunePadChord(PadChord& chord, uint32_t user_index, const std::vector<DeviceId>& ids) {
++  if (user_index >= 4) return;
++  auto& holding = chord.holding[user_index];
++  std::erase_if(holding, [&](DeviceId id) {
++    return std::find(ids.begin(), ids.end(), id) == ids.end();
++  });
++}
++
++void ApplyPadChord(PadChord& chord, const std::string& text, uint32_t user_index, DeviceId device,
+                    X_INPUT_GAMEPAD& pad) {
+   const uint16_t buttons = PadChordButtons(text);
+   if (!buttons || user_index >= 4) return;
+-  bool& held = chord.held[user_index];
++  auto& holding = chord.holding[user_index];
++  const auto it = std::find(holding.begin(), holding.end(), device);
++  bool held = it != holding.end();
+   if ((pad.buttons & buttons) == buttons) {
+-    if (!held) {
++    if (holding.empty()) {
+       REXLOG_INFO("Controller chord {} on pad {}: {}", text, user_index, chord.bind);
+       rex::ui::TriggerBind(chord.bind);
+     }
++    if (!held) holding.push_back(device);
+     held = true;
+   } else if (!(pad.buttons & buttons)) {
++    if (held) holding.erase(it);
+     held = false;
+   }
+   if (held) pad.buttons = uint16_t(pad.buttons & ~buttons);
+@@ -348,6 +368,11 @@ X_RESULT InputSystem::GetMergedState(uint32_t user_index, bool host_pads_only,
+   std::vector<DeviceId> ids;
+   assignment_->DevicesForUser(user_index, ids);
+ 
++  if (!host_pads_only) {
++    PrunePadChord(g_pad_chord_debug_overlay, user_index, ids);
++    PrunePadChord(g_pad_chord_game_menu, user_index, ids);
++  }
++
+   X_INPUT_STATE merged = {};
+   bool any = false;
+   for (DeviceId id : ids) {
+@@ -364,8 +389,8 @@ X_RESULT InputSystem::GetMergedState(uint32_t user_index, bool host_pads_only,
+     // layout so a remap can never lock the player out of the remap screen.
+     if (!host_pads_only && !driver->is_keyboard_and_mouse()) {
+       ApplyPadChord(g_pad_chord_debug_overlay, REXCVAR_GET(pad_chord_debug_overlay), user_index,
+-                    state.gamepad);
+-      ApplyPadChord(g_pad_chord_game_menu, REXCVAR_GET(pad_chord_game_menu), user_index,
++                    id, state.gamepad);
++      ApplyPadChord(g_pad_chord_game_menu, REXCVAR_GET(pad_chord_game_menu), user_index, id,
+                     state.gamepad);
+       ApplyPadRemap(state.gamepad);
+     }
 diff --git a/src/kernel/xboxkrnl/xboxkrnl_io.cpp b/src/kernel/xboxkrnl/xboxkrnl_io.cpp
 index 9328c1aa..0982a5d0 100644
 --- a/src/kernel/xboxkrnl/xboxkrnl_io.cpp
