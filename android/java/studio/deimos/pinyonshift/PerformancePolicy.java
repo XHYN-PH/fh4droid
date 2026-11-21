@@ -29,10 +29,13 @@ final class PerformancePolicy {
         return Float.isFinite(match)?match:0;
     }
     static boolean evenCadence(float fps,float refresh) {
-        if (!Float.isFinite(refresh) || refresh<=0) return false;
+        if (!Float.isFinite(fps) || fps<=0 || !Float.isFinite(refresh) || refresh<=0) return false;
         float multiple = refresh / fps;
         int repeat = Math.round(multiple);
         return repeat >= 1 && Math.abs(multiple-repeat) <= repeat*.0015f;
+    }
+    static boolean preferDisplayMode(float fps, float refresh, float chosen, boolean batterySaver) {
+        return refresh > chosen && (!batterySaver || refresh <= 60.1f) && evenCadence(fps, refresh);
     }
     private static float rate(String text) {
         if (text == null) return 0;

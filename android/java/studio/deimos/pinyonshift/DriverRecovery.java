@@ -54,10 +54,15 @@ final class DriverRecovery {
         JSONObject attempt = read(context, "driver-attempt");
         if (!attempt.optBoolean("automatic") || attempt.optInt("streak") < 2
                 || attempt.optBoolean("used_retry") || !startupCrash(context, attempt)) return null;
+        return lastPlayable(context, attempt.optString("driver"));
+    }
+
+    static String lastPlayable(Context context, String failedDriver) {
         JSONObject good = read(context, "driver-last-playable");
-        String driver = good.optString("driver", "auto");
+        if (!good.has("driver")) return null;
+        String driver = good.optString("driver");
         String stamp = identity(context, driver);
-        if (driver.equals(attempt.optString("driver")) || stamp == null
+        if (driver.equals(failedDriver) || stamp == null
                 || !stamp.equals(good.optString("identity"))) return null;
         return driver;
     }

@@ -37,6 +37,9 @@ final class MobileSettings {
       o("Advanced", "vulkan_bc_transcode", "Mali texture compression", "false", true,
           "Experimental. On GPUs with ASTC but without BC, transcodes some textures "
               + "to ASTC to reduce memory. Transparent textures can look different.", "false", "true"),
+      o("Advanced", "vulkan_hoist_split_uploads", "Earlier geometry uploads", "false", true,
+          "Experimental. Moves eligible vertex and index uploads before rendering to reduce "
+              + "interruptions. Compare the same scene before keeping it enabled.", "false", "true"),
       o("Graphics", "anisotropic_override", "Texture filtering", "-1", false,
           "Higher filtering keeps roads clearer at an angle and adds GPU work.", "-1", "0", "3",
           "4", "5"),

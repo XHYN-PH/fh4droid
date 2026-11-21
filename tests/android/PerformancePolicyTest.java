@@ -25,6 +25,10 @@ public final class PerformancePolicyTest {
         check(PerformancePolicy.seamlessCadence(30,59.94f,new float[]{90,120})==59.94f);
         check(PerformancePolicy.seamlessCadence(40,60,new float[]{60,90})==0);
         check(PerformancePolicy.seamlessCadence(0,120,new float[]{60})==0);
+        check(PerformancePolicy.preferDisplayMode(30,120,60,false));
+        check(PerformancePolicy.preferDisplayMode(30,59.94f,0,true));
+        check(!PerformancePolicy.preferDisplayMode(30,120,60,true));
+        check(!PerformancePolicy.preferDisplayMode(40,60,0,true));
         check(Math.abs(ControllerTools.shaped(.5f,0,1,2)-.25f)<.0001f);
         check(ControllerTools.shaped(-.3f,.4f,.9f,1)==0);
         for(int level:new int[]{0,5,20})check(!PerformancePolicy.trim(level));

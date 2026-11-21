@@ -61,5 +61,11 @@ public final class DriverProbeActivity extends Activity {
             final String report=result;handler.post(()->finishProbe(report));},"DriverPreflight").start();
     }
     private void finishProbe(String result){if(done)return;done=true;handler.removeCallbacksAndMessages(null);setResult(RESULT_OK,new Intent().putExtra("report",result));finish();}
+    @Override public void onBackPressed() {
+        done = true;
+        handler.removeCallbacksAndMessages(null);
+        setResult(RESULT_CANCELED, new Intent().putExtra("probe_cancelled", true));
+        finish();
+    }
     @Override protected void onDestroy(){handler.removeCallbacksAndMessages(null);super.onDestroy();android.os.Process.killProcess(android.os.Process.myPid());}
 }

@@ -7,6 +7,7 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.provider.OpenableColumns;
 import android.provider.Settings;
 import android.system.ErrnoException;
@@ -125,12 +126,18 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     private android.os.Vibrator phoneVibrator;
     private int rumbleAmplitude;private long lastRumbleMs,fpsTime,fpsFrames;
     private float lastFrameRateHint = -1, lastDisplayRefresh = -1;
+    private float requestedRefreshHz = -1;
+    private boolean lastBatterySaver;
     private long nextFrameRateRequest;
     private android.view.Surface hintedSurface;
     private final android.view.SurfaceHolder.Callback pacingSurface = new android.view.SurfaceHolder.Callback() {
         public void surfaceCreated(android.view.SurfaceHolder holder) { invalidateFrameRateHint(); }
         public void surfaceChanged(android.view.SurfaceHolder holder, int format, int width, int height) { invalidateFrameRateHint(); }
-        public void surfaceDestroyed(android.view.SurfaceHolder holder) { hintedSurface = null; lastFrameRateHint = -1; }
+        public void surfaceDestroyed(android.view.SurfaceHolder holder) {
+            hintedSurface = null;
+            lastFrameRateHint = -1;
+            requestedRefreshHz = -1;
+        }
     };
     private android.hardware.display.DisplayManager displays;
     private final android.hardware.display.DisplayManager.DisplayListener displayListener =
@@ -674,6 +681,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     private void invalidateFrameRateHint() {
         hintedSurface = null;
         lastFrameRateHint = -1;
+        requestedRefreshHz = -1;
         nextFrameRateRequest = 0;
         refreshFrameRateHint();
     }
@@ -687,14 +695,15 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             framePacingEnabled = match;
             nativeApplySetting("android_vblank_display_lock", Boolean.toString(match));
         }
-        float target = match
-            ? PerformancePolicy.presentationTarget(nativeSettingValue("pinyon_shift_fh1_render_fps_limit"),
-                nativeSettingValue("host_present_fps_limit")) : 0;
+        float target = match ? presentationTarget() : 0;
+        boolean savingPower = batterySaver();
+        boolean sameRequest = surface == hintedSurface && target == lastFrameRateHint
+            && savingPower == lastBatterySaver;
         Display display = mSurface.getDisplay();
         float refresh = display == null ? -1 : display.getRefreshRate();
-        if (surface == hintedSurface && target == lastFrameRateHint && Math.abs(refresh - lastDisplayRefresh) < .1f) return;
+        if (sameRequest && Math.abs(refresh - lastDisplayRefresh) < .1f) return;
         long now = android.os.SystemClock.elapsedRealtime();
-        if (surface == hintedSurface && target == lastFrameRateHint && now < nextFrameRateRequest) return;
+        if (sameRequest && now < nextFrameRateRequest) return;
         nextFrameRateRequest = now + 1000;
         Display.Mode preferred = null;
         if (target > 0 && display != null) {
@@ -702,25 +711,36 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
             for (Display.Mode candidate : display.getSupportedModes()) {
                 if (candidate.getPhysicalWidth() == current.getPhysicalWidth()
                         && candidate.getPhysicalHeight() == current.getPhysicalHeight()
-                        && PerformancePolicy.evenCadence(target, candidate.getRefreshRate())
-                        && (preferred == null || candidate.getRefreshRate() > preferred.getRefreshRate())) {
+                        && PerformancePolicy.preferDisplayMode(target, candidate.getRefreshRate(),
+                            preferred == null ? 0 : preferred.getRefreshRate(), savingPower)) {
                     preferred = candidate;
                 }
             }
         }
-        float cadence = preferred == null ? target : preferred.getRefreshRate();
-        if (PlatformCompat.frameRate(surface, cadence)) {
-            WindowManager.LayoutParams attrs=getWindow().getAttributes();
-            int modeId = preferred == null ? 0 : preferred.getModeId();
-            if (attrs.preferredDisplayModeId != modeId || attrs.preferredRefreshRate != 0) {
-                attrs.preferredDisplayModeId = modeId;
-                attrs.preferredRefreshRate = 0;
-                getWindow().setAttributes(attrs);
-            }
+        float cadence = preferred != null ? preferred.getRefreshRate() : savingPower ? 0 : target;
+        WindowManager.LayoutParams attrs = getWindow().getAttributes();
+        int modeId = preferred == null ? 0 : preferred.getModeId();
+        if (attrs.preferredDisplayModeId != modeId || attrs.preferredRefreshRate != 0) {
+            attrs.preferredDisplayModeId = modeId;
+            attrs.preferredRefreshRate = 0;
+            getWindow().setAttributes(attrs);
+        }
+        boolean hinted = PlatformCompat.frameRate(surface, cadence);
+        requestedRefreshHz = hinted || preferred != null ? cadence : -1;
+        if (hinted) {
             hintedSurface = surface;
             lastFrameRateHint = target;
             lastDisplayRefresh = refresh;
+            lastBatterySaver = savingPower;
         }
+    }
+    private float presentationTarget() {
+        return PerformancePolicy.presentationTarget(nativeSettingValue("pinyon_shift_fh1_render_fps_limit"),
+            nativeSettingValue("host_present_fps_limit"));
+    }
+    private boolean batterySaver() {
+        PowerManager power = getSystemService(PowerManager.class);
+        return power != null && power.isPowerSaveMode();
     }
     private void recordLaunchSettings(List<String> args){try{org.json.JSONObject data=new org.json.JSONObject();data.put("captured_ms",System.currentTimeMillis());data.put("source_commit",buildCommit);data.put("settings",new org.json.JSONObject(MobileConfig.reportSettings(launchSettings())));data.put("arguments",new org.json.JSONArray(args));
         data.put("resolved_driver",getIntent().getStringExtra("verified_driver"));
@@ -741,7 +761,12 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         if(!sessionLoggingEnabled()||!nativeReady){if(afterCapture!=null)afterCapture.run();return;}
         try{org.json.JSONObject live=new org.json.JSONObject();for(MobileSettings.Option option:MobileSettings.OPTIONS){String value=nativeSettingValue(option.key);if(value!=null)live.put(option.key,value);}
             for(String key:new String[]{"fh1_render_scale_percent","present_letterbox","pinyon_shift_hor_plus","pinyon_shift_fov_scale","fh1_msaa_single_sample","fh1_msaa_2x","pinyon_shift_cheats","android_gpu_turbo","android_gpu_driver_no_preamble","android_gpu_driver_env","vulkan_fh1_native_executor","vulkan_dynamic_rendering","pinyon_shift_save_backups"}){String value=nativeSettingValue(key);if(value!=null)live.put(key,value);}
-            org.json.JSONObject data=new org.json.JSONObject();data.put("captured_ms",System.currentTimeMillis());data.put("source_commit",buildCommit);data.put("live",live);data.put("surface_frame_rate_hint",lastFrameRateHint);lastReportedMenu=nativeMenuContext();data.put("menu_context",lastReportedMenu);data.put("frame",nativeFrameCount());data.put("snapshot_interval_ms",getIntent().getBooleanExtra("debug_report",false)?5000:0);data.put("shader_preparation",new org.json.JSONArray(nativePreparation()));data.put("paused",!gameResumed);
+            org.json.JSONObject data=new org.json.JSONObject();data.put("captured_ms",System.currentTimeMillis());data.put("source_commit",buildCommit);data.put("live",live);lastReportedMenu=nativeMenuContext();data.put("menu_context",lastReportedMenu);data.put("frame",nativeFrameCount());data.put("snapshot_interval_ms",getIntent().getBooleanExtra("debug_report",false)?5000:0);data.put("shader_preparation",new org.json.JSONArray(nativePreparation()));data.put("paused",!gameResumed);
+            Display display = mSurface == null ? null : mSurface.getDisplay();
+            data.put("target_fps", presentationTarget());
+            data.put("requested_refresh_hz", requestedRefreshHz < 0 ? org.json.JSONObject.NULL : requestedRefreshHz);
+            data.put("observed_refresh_hz", display == null ? org.json.JSONObject.NULL : display.getRefreshRate());
+            data.put("battery_saver", batterySaver());
             android.view.View view=getWindow().getDecorView();android.graphics.Rect safe=PlatformCompat.safeInsets(view.getRootWindowInsets());data.put("window_width",view.getWidth());data.put("window_height",view.getHeight());data.put("safe_insets",new org.json.JSONArray(new int[]{safe.left,safe.top,safe.right,safe.bottom}));
             telemetry.execute(()->{
                 try{

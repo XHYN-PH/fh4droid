@@ -215,18 +215,24 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         showRecovery("The last game stopped unexpectedly", GameSession.recoveryMessage(this,interrupted), true);
     }
     private void showRecovery(String title, String message, boolean launch) {
+        showRecovery(title, message, launch, null, true);
+    }
+    private void showRecovery(String title, String message, boolean launch, String failedDriver,
+                              boolean offerRetry) {
         LinearLayout options = FestivalUi.column(this);
         options.addView(FestivalUi.text(this, message, 14, FestivalUi.MUTED));
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle(title).setView(options)
             .setNegativeButton("Back", null).create();
-        FestivalUi.action(this, options, launch ? "Try system driver once" : "Test system driver", () -> {
-            dialog.dismiss();
-            if (!launch || GameFiles.ready(this)) {
-                work("Checking the game executables…", () -> {
-                    if (launch) { ContentFiles.recoverForLaunch(this); GameFiles.verify(this); }
-                }, () -> probe("", launch, true));
-            } else files();
-        });
+        String lastPlayable = offerRetry ? DriverRecovery.lastPlayable(this, failedDriver) : null;
+        if (lastPlayable != null) {
+            String titlePrefix = launch ? "Try last playable driver once" : "Test last playable driver";
+            FestivalUi.action(this, options, titlePrefix + " · " + DriverStore.displayName(this, lastPlayable),
+                () -> { dialog.dismiss(); retryDriver(lastPlayable, launch); });
+        }
+        if (offerRetry && !"".equals(failedDriver) && !"".equals(lastPlayable)) {
+            FestivalUi.action(this, options, launch ? "Try system driver once" : "Test system driver",
+                () -> { dialog.dismiss(); retryDriver("", launch); });
+        }
         if (GraphicsProfilePage.lastGood(this).isFile()) {
             FestivalUi.action(this, options, "Restore last working graphics", () -> {
                 dialog.dismiss();
@@ -239,6 +245,16 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
         }
         FestivalUi.action(this, options, "Export report", () -> { dialog.dismiss(); ProblemReports.share(this); });
         dialog.show();
+    }
+    private void retryDriver(String driver, boolean launch) {
+        if (!canManage()) return;
+        if (launch && !GameFiles.ready(this)) { files(); return; }
+        work("Checking the game executables…", () -> {
+            if (launch) { ContentFiles.recoverForLaunch(this); GameFiles.verify(this); }
+        }, () -> {
+            recoveryProbe = true;
+            probe(driver, launch, true);
+        });
     }
     private boolean canManage(){if(busy)return false;if(GameFiles.running(this)){toast("Quit the game before changing files, saves or drivers.");return false;}return true;}
     private void work(String message, Task task, Runnable success) {
@@ -747,14 +763,18 @@ public final class LauncherActivity extends Activity implements FestivalUi.Panel
     private void probeResult(int result,Intent data){
         boolean launch=playAfterProbe,oneOff=oneOffProbe;playAfterProbe=false;oneOffProbe=false;
         boolean retry=recoveryProbe;recoveryProbe=false;
+        if (data != null && data.getBooleanExtra("probe_cancelled", false)) return;
         String report=result==RESULT_OK&&data!=null?data.getStringExtra("report"):null;
+        String failedDriver = pendingDriver;
         try{if(!oneOff)AdrenoSettings.record(this,pendingDriver,report==null?"{}":report);JSONObject json=new JSONObject(report==null?"{}":report);
+            failedDriver = json.optString("effective_driver", pendingDriver);
             if(!json.optBoolean("ok",false))throw new IOException(json.optString("error","The graphics driver test stopped unexpectedly."));
             if(!oneOff&&!launch)MobileConfig.put(this,"android_gpu_driver",MobileConfig.quote(pendingDriver==null?"":pendingDriver));
             if(launch)startGame(pendingSessionMode,json.getString("effective_driver"),retry);
-            else toast(oneOff?"System driver passed the startup check.":"Driver passed and selected for the next launch.");
+            else toast(oneOff?"Driver passed the startup check.":"Driver passed and selected for the next launch.");
         }catch(Exception e){
-            showRecovery("Graphics driver could not start", e.getMessage(), launch);
+            showRecovery("Graphics driver could not start", e.getMessage(), launch, failedDriver,
+                !retry && (!launch || pendingSessionMode.driverTrial == null));
         }
         refresh();rebuildTop();
     }
