@@ -10,12 +10,43 @@ import java.util.regex.*;
 
 /** Edits individual host settings without replacing unrelated PC/game settings. */
 final class MobileConfig {
+    private static final boolean ANDROID = "Dalvik".equals(System.getProperty("java.vm.name"));
+    private static final int MAX_SIZE = 2 * 1024 * 1024;
     private static final Pattern BARE_FRACTION =
         Pattern.compile("([\\t ]*[+-]?)(\\.[0-9]+(?:[eE][+-]?[0-9]+)?[\\t ]*(?:#.*)?)");
     static File base(Context c){File f=c.getExternalFilesDir(null);return f!=null?f:c.getFilesDir();}
     static File file(Context c){return new File(base(c),SetupActivity.CONFIG_FILE);}
-    static synchronized Map<String,String> read(Context c){return readFile(file(c));}
+    private static String cachedStamp;
+    private static File cachedFile;
+    private static Map<String,String> cachedValues;
+    static synchronized Map<String,String> read(Context c){
+        File file = file(c);
+        if (!ANDROID || !file.isFile()) return readFile(file);
+        String stamp = FileIdentity.stamp(file);
+        if (stamp != null && stamp.equals(cachedStamp) && file.equals(cachedFile))
+            return new LinkedHashMap<>(cachedValues);
+        Map<String,String> values = readFile(file);
+        if (stamp != null && stamp.equals(FileIdentity.stamp(file))) {
+            cachedStamp = stamp;
+            cachedFile = file;
+            cachedValues = new LinkedHashMap<>(values);
+        }
+        return values;
+    }
     static Map<String,String> readFile(File file){
+        if (ANDROID) {
+            if (!file.isFile() || file.length() > MAX_SIZE) return new LinkedHashMap<>();
+            try { return ContentNative.readConfig(Files.readAllBytes(file.toPath())); }
+            catch (IOException ignored) {
+                File backup = new File(file.getPath()+".last-good");
+                try {
+                    if (backup.isFile() && backup.length() <= MAX_SIZE)
+                        return ContentNative.readConfig(Files.readAllBytes(backup.toPath()));
+                } catch (IOException ignoredBackup) {}
+                return new LinkedHashMap<>();
+            }
+        }
+        // Host storage tests run on a JVM without Android native libraries.
         Map<String,String> values=new LinkedHashMap<>();
         if(file.length()>2*1024*1024)return values;
         Pattern row=Pattern.compile("^\\s*([a-zA-Z0-9_]+)\\s*=\\s*(.*)$");
@@ -80,27 +111,27 @@ final class MobileConfig {
         }
     }
     private static void putFileLocked(File f,Map<String,String> updates)throws IOException{
-        if(f.length()>2*1024*1024)throw new IOException("Settings file is too large.");
+        if(f.length()>MAX_SIZE)throw new IOException("Settings file is too large.");
         for(Map.Entry<String,String> e:updates.entrySet())if(!e.getKey().matches("[a-zA-Z0-9_]+")||e.getValue()==null||e.getValue().indexOf('\n')>=0||e.getValue().indexOf('\r')>=0)throw new IOException("Invalid setting");
         Files.createDirectories(f.getParentFile().toPath());
         String text=f.isFile()?new String(Files.readAllBytes(f.toPath()),StandardCharsets.UTF_8):defaults();
-        if(text.startsWith("\ufeff"))text=text.substring(1);
+        if(!ANDROID && text.startsWith("\ufeff"))text=text.substring(1);
+        StringBuilder changes = new StringBuilder();
         for(Map.Entry<String,String> e:updates.entrySet()){
             String key=e.getKey(),literal=e.getValue();
             Matcher fraction=BARE_FRACTION.matcher(literal);
             if(fraction.matches())literal=fraction.group(1)+"0"+fraction.group(2);
-            Pattern row=Pattern.compile("(?m)^[\\t ]*"+Pattern.quote(key)+"[\\t ]*=.*$");Matcher m=row.matcher(text);
-            text=m.find()?m.replaceAll(Matcher.quoteReplacement(key+" = "+literal)):text+"\n"+key+" = "+literal+"\n";
+            if (ANDROID) changes.append(key).append(" = ").append(literal).append('\n');
+            else {
+                Pattern row=Pattern.compile("(?m)^[\\t ]*"+Pattern.quote(key)+"[\\t ]*=.*$");Matcher m=row.matcher(text);
+                text=m.find()?m.replaceAll(Matcher.quoteReplacement(key+" = "+literal)):text+"\n"+key+" = "+literal+"\n";
+            }
         }
-        writeText(f,text);
+        writeText(f,ANDROID ? ContentNative.updateConfig(text, changes.toString()) : text);
     }
     private static void writeText(File f,String text)throws IOException{
-        // Use the runtime's TOML parser on Android. The file editor is also
-        // used by host tools, where the Android JNI library cannot be loaded.
-        boolean onAndroid = "Dalvik".equals(System.getProperty("java.vm.name"));
-        if (onAndroid) ContentNative.validateConfig(text);
         replaceText(f, text);
-        if (onAndroid) {
+        if (ANDROID) {
             try { replaceText(new File(f.getPath()+".last-good"), text); }
             catch (IOException error) { android.util.Log.w("FH4Droid", "Could not save the settings recovery copy", error); }
         }
@@ -116,6 +147,13 @@ final class MobileConfig {
         if(!key.matches("[a-zA-Z0-9_]+"))throw new IOException("Invalid recovery setting.");
         Files.createDirectories(f.getParentFile().toPath());
         try(RandomAccessFile lockFile=new RandomAccessFile(new File(f.getPath()+".lock"),"rw");FileChannel channel=lockFile.getChannel();FileLock lock=channel.lock()){
+            if (ANDROID) {
+                String stored = previous == null ? "" : ContentFiles.text(previous, MAX_SIZE);
+                String text = f.isFile() ? ContentFiles.text(f, MAX_SIZE) : defaults();
+                String restored = ContentNative.restoreConfig(text, stored, key);
+                if (!text.equals(restored)) writeText(f, restored);
+                return;
+            }
             Pattern row=Pattern.compile("(?m)^[\\t ]*"+Pattern.quote(key)+"[\\t ]*=([^\\r\\n]*)");
             String before=previous==null?"":ContentFiles.text(previous,2*1024*1024);if(before.startsWith("\ufeff"))before=before.substring(1);Matcher match=row.matcher(before);
             if(match.find())putFileLocked(f,Collections.singletonMap(key,match.group(1).trim()));

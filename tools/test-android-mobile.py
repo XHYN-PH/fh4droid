@@ -27,6 +27,12 @@ for test in tests:
 import shutil, tempfile
 cxx=shutil.which("c++")
 if os.name=="posix" and cxx:
+    root_settings=out/"root-settings-test"
+    subprocess.run([cxx,"-std=c++23","-O2","-UNDEBUG","-I"+str(root),
+        "-I"+str(pinyon_android.rexsdk_dir()/"thirdparty/tomlplusplus/include"),
+        str(root/"tests/config/android_root_settings_test.cpp"),"-o",str(root_settings)],
+        check=True,timeout=120)
+    subprocess.run([str(root_settings)],check=True,timeout=30)
     native=out/"host-config-test"
     subprocess.run([cxx,"-std=c++23","-O2","-UNDEBUG","-I"+str(root/"src"),
         str(root/"tests/config/host_config_test.cpp"),str(root/"src/config/host_config.cpp"),

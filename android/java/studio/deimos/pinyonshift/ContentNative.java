@@ -2,6 +2,10 @@ package studio.deimos.pinyonshift;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import org.json.JSONObject;
 
 /** Content tools do not load the game or install custom Vulkan hooks. */
@@ -19,11 +23,33 @@ final class ContentNative {
     private static native byte[] nativeManifest(String path) throws IOException;
     private static native void nativeExtractDlc(String source,String destination,String id) throws IOException;
     private static native long nativeExtractForzaProfile(String source,String destination) throws IOException;
-    private static native void nativeValidateConfig(byte[] text) throws IOException;
+    private static native byte[] nativeReadConfig(byte[] text) throws IOException;
+    private static native byte[] nativeUpdateConfig(byte[] text, byte[] changes) throws IOException;
+    private static native byte[] nativeRestoreConfig(byte[] text, byte[] before, String key) throws IOException;
 
-    static void validateConfig(String text) throws IOException {
+    static Map<String,String> readConfig(byte[] text) throws IOException {
         load();
-        nativeValidateConfig(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        Map<String,String> settings = new LinkedHashMap<>();
+        try {
+            JSONObject values = new JSONObject(new String(nativeReadConfig(text), StandardCharsets.UTF_8));
+            for (Iterator<String> keys = values.keys(); keys.hasNext();) {
+                String key = keys.next();
+                settings.put(key, values.getString(key));
+            }
+        } catch (org.json.JSONException error) {
+            throw new IOException("Could not read the settings", error);
+        }
+        return settings;
+    }
+    static String updateConfig(String text, String changes) throws IOException {
+        load();
+        return new String(nativeUpdateConfig(text.getBytes(StandardCharsets.UTF_8),
+            changes.getBytes(StandardCharsets.UTF_8)), StandardCharsets.UTF_8);
+    }
+    static String restoreConfig(String text, String before, String key) throws IOException {
+        load();
+        return new String(nativeRestoreConfig(text.getBytes(StandardCharsets.UTF_8),
+            before.getBytes(StandardCharsets.UTF_8), key), StandardCharsets.UTF_8);
     }
     static JSONObject manifest(File file) throws IOException {
         load();

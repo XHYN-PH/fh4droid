@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <toml++/toml.hpp>
 #include "content/dlc_extract.h"
+#include "root_settings.h"
 
 namespace {
 std::string Read(JNIEnv* env, jstring value) {
@@ -20,6 +21,28 @@ void Error(JNIEnv* env, const std::exception& error) {
   if (env->ExceptionCheck()) return;
   jclass type = env->FindClass("java/io/IOException");
   if (type) { env->ThrowNew(type, error.what()); env->DeleteLocalRef(type); }
+}
+
+std::string ReadBytes(JNIEnv* env, jbyteArray bytes) {
+  constexpr jsize kMaxSettingsBytes = 2 * 1024 * 1024;
+  if (!bytes || env->GetArrayLength(bytes) > kMaxSettingsBytes)
+    throw std::runtime_error("Settings file is too large or unavailable");
+  std::string text(size_t(env->GetArrayLength(bytes)), '\0');
+  env->GetByteArrayRegion(bytes, 0, jsize(text.size()), reinterpret_cast<jbyte*>(text.data()));
+  if (env->ExceptionCheck()) throw std::runtime_error("Settings bytes are unavailable");
+  return text;
+}
+
+jbyteArray WriteBytes(JNIEnv* env, std::string_view bytes) {
+  auto result = env->NewByteArray(jsize(bytes.size()));
+  if (result) env->SetByteArrayRegion(result, 0, jsize(bytes.size()), reinterpret_cast<const jbyte*>(bytes.data()));
+  return result;
+}
+
+void SettingsError(JNIEnv* env, const toml::parse_error& error) {
+  const auto location = error.source().begin;
+  Error(env, std::runtime_error("Settings syntax at line " + std::to_string(location.line) +
+                                ", column " + std::to_string(location.column)));
 }
 
 class ContentWorker {
@@ -43,19 +66,38 @@ class ContentWorker {
   jmethodID interrupted_ = nullptr;
 };
 }
-extern "C" JNIEXPORT void JNICALL
-Java_studio_deimos_pinyonshift_ContentNative_nativeValidateConfig(JNIEnv* env, jclass, jbyteArray input) {
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_studio_deimos_pinyonshift_ContentNative_nativeReadConfig(JNIEnv* env, jclass, jbyteArray input) {
   try {
-    std::string text(size_t(env->GetArrayLength(input)), '\0');
-    env->GetByteArrayRegion(input, 0, jsize(text.size()), reinterpret_cast<jbyte*>(text.data()));
-    if (!env->ExceptionCheck()) (void)toml::parse(text);
+    const auto settings = pinyon_shift::android_config::Read(ReadBytes(env, input));
+    std::ostringstream json;
+    json << toml::json_formatter{settings};
+    return WriteBytes(env, json.str());
   } catch (const toml::parse_error& error) {
-    const auto location = error.source().begin;
-    Error(env, std::runtime_error("Settings syntax at line " + std::to_string(location.line) +
-                                  ", column " + std::to_string(location.column)));
+    SettingsError(env, error);
   } catch (const std::exception& error) {
     Error(env, error);
   }
+  return nullptr;
+}
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_studio_deimos_pinyonshift_ContentNative_nativeUpdateConfig(JNIEnv* env, jclass,
+    jbyteArray input, jbyteArray changes) {
+  try {
+    return WriteBytes(env, pinyon_shift::android_config::Update(ReadBytes(env, input), ReadBytes(env, changes)));
+  } catch (const toml::parse_error& error) { SettingsError(env, error); }
+  catch (const std::exception& error) { Error(env, error); }
+  return nullptr;
+}
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_studio_deimos_pinyonshift_ContentNative_nativeRestoreConfig(JNIEnv* env, jclass,
+    jbyteArray input, jbyteArray before, jstring key) {
+  try {
+    return WriteBytes(env, pinyon_shift::android_config::Restore(
+        ReadBytes(env, input), ReadBytes(env, before), Read(env, key)));
+  } catch (const toml::parse_error& error) { SettingsError(env, error); }
+  catch (const std::exception& error) { Error(env, error); }
+  return nullptr;
 }
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_studio_deimos_pinyonshift_ContentNative_nativeManifest(JNIEnv* env, jclass,
