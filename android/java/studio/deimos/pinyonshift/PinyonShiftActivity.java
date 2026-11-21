@@ -79,6 +79,8 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
     private static native String nativeAchievements();
     private static native String nativePressedControls();
     private static native boolean nativeMenuContext();
+    private static native boolean nativeModdedProfile();
+    private static native boolean nativeAddTrainerCredits(int amount);
     private boolean nativeReady,gameResumed;
     private boolean closing;
     private android.app.AlertDialog closingDialog;
@@ -537,6 +539,8 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
         public void changed(String key,String value){if(!nativeReady)return;nativeApplySetting(key,value);if(key.equals("pinyon_shift_fh1_render_fps_limit")&&driveAssist!=null)driveAssist.applyTarget();refreshFrameRateHint();captureReportState();}
         public String value(String key){return nativeReady?nativeSettingValue(key):null;}
     };}
+    boolean usesModdedProfile() { return nativeReady && nativeModdedProfile(); }
+    boolean addTrainerCredits(int amount) { return nativeReady && nativeAddTrainerCredits(amount); }
     void reloadControls(){TouchLayout layout=new TouchLayout();layout.load(this);touchHaptics=layout.haptics;if(bridgeLoaded)nativeReloadTouch(TouchLayout.file(this).getAbsolutePath(),hasController());}
     void refreshMobilePreferences(){
         if(!nativeReady)return;
@@ -582,6 +586,7 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
           case "Settings":SettingsHub.show(this,runtime,editor,()->{});break;
           case "Touch controls":SettingsHub.page(this,"Controls",runtime,editor);break;
           case "Controller":SettingsHub.page(this,"Controller",runtime,editor);break;
+          case "Trainer":TrainerPage.show(this,runtime);break;
           case "More":{
               android.widget.LinearLayout more=FestivalUi.column(this);
               FestivalUi.action(this,more,"Profile",()->ProfilePage.show(this,null,()->FestivalUi.explain(this,"Save backups","Quit to the launcher to export, import or restore saves.")));
@@ -595,7 +600,6 @@ public class PinyonShiftActivity extends SDLActivity implements FestivalUi.Panel
                   ProblemReports.action(this,details,sessionLoggingEnabled()?"Report a problem":"Share existing reports");
                   showPanel("Diagnostics",details);
               });
-              FestivalUi.action(this,more,"Trainer · separate profile",()->TrainerPage.show(this,runtime));
               showPanel("More tools",more);
               break;
           }

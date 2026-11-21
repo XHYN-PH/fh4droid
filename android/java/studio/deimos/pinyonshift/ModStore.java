@@ -72,6 +72,30 @@ final class ModStore {
             if(value){JSONObject data=manifest(new File(root(c),id));validateSupported(c,id,data);if(!on.contains(id))on.add(id);}else on.remove(id);
             validateDependencies(c,on);rebuild(c,on,null);return null;});
     }
+    static void enableQuickPlaythrough(Context c) throws Exception {
+        String id = "festival_pacing";
+        File directory = new File(root(c), id);
+        if (!directory.exists()) installBuiltin(c, id);
+        ContentFiles.locked(c, () -> {
+            if (!new File(directory, ".pinyon-builtin").isFile()) {
+                throw new IOException("Quick Playthrough requires the built-in Festival pacing mod.");
+            }
+            JSONObject mod = manifest(directory);
+            JSONObject saved = options(c);
+            JSONObject selected = saved.optJSONObject(id);
+            if (selected == null) selected = new JSONObject();
+            selected.put("prices", "0.5");
+            selected.put("rewards", "3");
+            saved.put(id, selected);
+            optionValues(mod, saved, id);
+            List<String> on = enabled(c);
+            on.remove(GENERATED);
+            if (!on.contains(id)) on.add(id);
+            validateDependencies(c, on);
+            rebuild(c, on, saved);
+            return null;
+        });
+    }
     static void move(Context c,String id,int direction)throws Exception{
         ContentFiles.locked(c,()->{name(id);List<String> on=enabled(c);on.remove(GENERATED);int index=on.indexOf(id),next=index+direction;if(index<0||next<0||next>=on.size())return null;Collections.swap(on,index,next);rebuild(c,on,null);return null;});
     }

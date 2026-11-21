@@ -85,6 +85,10 @@ final class MobileSettings {
           "Synchronizes presentation to the display; changing it recreates the "
               + "presentation surface.",
           "false", "true"),
+      s("Display", "present_frame_generation", "Frame generation", "off", true,
+          "FSR 3 interpolates frames on supported Vulkan drivers. Experimental on Android. "
+              + "Use a 120 Hz display and a steady 60 FPS game target for testing. "
+              + "The game and controls still run at their real frame rate.", "off", "fsr3"),
       s("Display", "present_effect", "Upscaling filter", "auto", false,
           "Automatic sharpens reduced resolutions with CAS and uses bilinear at 100%. "
               + "Off keeps pixels unsmoothed. FSR 1 and Snapdragon GSR 1 upscale along edges.",
@@ -193,6 +197,8 @@ final class MobileSettings {
     str = SettingValues.plain(str);
     if(option.key.equals("pinyon_shift_fh1_render_fps_limit"))return str+" FPS";
     if (option.key.equals("fh1_coarse_shading")) return str.isEmpty() ? "Full" : "Coarse";
+    if (option.key.equals("present_frame_generation"))
+      return str.equals("fsr3") ? "FSR 3 (experimental)" : "Off";
     if (str.equals("true") || str.equals("false")) {
       boolean zEquals = str.equals("true");
       if (option.key.startsWith("disable_") || option.key.equals("hud_hidden")) {

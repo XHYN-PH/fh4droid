@@ -27,7 +27,8 @@ final class GameMenuView extends LinearLayout {
     LayoutParams primary = new LayoutParams(-1,-2);
     primary.topMargin = FestivalUi.dp(a,8);
     content.addView(resume,primary);
-    for (String[] pair : new String[][]{{"Settings","Touch controls"},{"Controller","More"}}) {
+    for (String[] pair : new String[][]{
+        {"Settings","Touch controls"},{"Controller","Trainer"},{"More","Quit to launcher"}}) {
       LinearLayout row = new LinearLayout(a);
       LayoutParams rowSize = new LayoutParams(-1,-2);
       rowSize.topMargin = FestivalUi.dp(a,6);
@@ -35,14 +36,11 @@ final class GameMenuView extends LinearLayout {
       for (String label : pair) {
         LayoutParams size = new LayoutParams(0,-2,1);
         if (row.getChildCount() > 0) size.leftMargin = FestivalUi.dp(a,6);
-        row.addView(button(a,label,false,action),size);
+        Button item = button(a,label,false,action);
+        if (label.equals("Quit to launcher")) item.setTextColor(FestivalUi.MUTED);
+        row.addView(item,size);
       }
     }
-    Button quit = button(a,"Quit to launcher",false,action);
-    quit.setTextColor(FestivalUi.MUTED);
-    LayoutParams exit = new LayoutParams(-1,-2);
-    exit.topMargin = FestivalUi.dp(a,12);
-    content.addView(quit,exit);
     setTag(FestivalUi.DEFAULT_FOCUS,resume);
     post(() -> FestivalUi.restorePage(this));
   }

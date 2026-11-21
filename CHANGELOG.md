@@ -1,5 +1,14 @@
 # Changelog
 
+## FH4Droid 0.9.10 - 2026-11-22
+
+- The F3 overlay shows game FPS, displayed FPS, and both recent and total dropped and repeated frames.
+- Open Trainer directly from the in-game menu. See which save is active, add credits with controller-friendly presets, and try experimental fast travel in free roam.
+- Quick Playthrough sets half prices and triple rewards through Festival pacing on the modded save.
+- Experimental FSR 3 frame generation is available as an opt-in graphics setting. It starts off and needs a game restart. Use SDR and a 120 Hz display for testing.
+
+[Full FH4Droid 0.9.10 release notes](docs/releases/fh4droid-0.9.10.md)
+
 ## FH4Droid 0.9.9 - 2026-11-22
 
 - Save and restore Android settings at the top level of the TOML file. Preserve comments and settings inside unrelated sections.

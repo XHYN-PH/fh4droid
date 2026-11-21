@@ -65,7 +65,7 @@ class AndroidPortTest(unittest.TestCase):
         # explicitly supplied menu images; game content stays local.
         for name in files:
             path = ROOT / "android" / name
-            self.assertIn(path.suffix, (".java", ".cpp", ".xml", ".txt", ".png"), name)
+            self.assertIn(path.suffix, (".java", ".cpp", ".h", ".xml", ".txt", ".png"), name)
             self.assertNotIn(path.read_bytes()[:4], (b"XEX2", b"\x7fELF"), name)
             self.assertLess(path.stat().st_size, 2 * 1024 * 1024, name)
         self.assertEqual(sorted(name for name in files if name.startswith("art/")),

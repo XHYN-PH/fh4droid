@@ -14,27 +14,38 @@ final class TrainerPage {
   }
   private static LinearLayout build(Activity a, MobileSettings.Runtime runtime) {
     LinearLayout body = FestivalUi.column(a);
-    body.addView(FestivalUi.text(a,
-        "Cheats play a separate modded copy of your profile. Enabling or "
-            + "disabling this mode "
-            + "requires restarting the game. Local achievements remain "
-            + "associated with that profile.",
-        12, FestivalUi.MUTED));
     boolean enabled = MobileConfig.get(a, "pinyon_shift_cheats", "false").equals("true");
+    boolean live = runtime != null && "true".equals(runtime.value("pinyon_shift_cheats"));
+    if (a instanceof PinyonShiftActivity) {
+      String active = ((PinyonShiftActivity) a).usesModdedProfile() ? "Modded save" : "Normal save";
+      body.addView(FestivalUi.text(a, active + (live ? " · Trainer on" : " · Trainer off"),
+          14, FestivalUi.TEXT));
+    }
+    String status = runtime != null && enabled != live
+        ? (enabled ? "Restart to turn the trainer on." : "Restart to turn the trainer off.")
+        : "Starting with the trainer enabled loads your modded save.";
     FestivalUi.toggle(a, body, "Use cheat profile on next launch",
-        "Your normal racing save is kept separate.", enabled, on -> {
+        status, enabled, on -> {
           if (SettingsHub.apply(a, runtime,
                   Collections.singletonMap("pinyon_shift_cheats", Boolean.toString(on)), true)
               && a instanceof FestivalUi.PanelHost)
             ((FestivalUi.PanelHost) a).replacePanel("Cheats · modded profile", build(a, runtime));
         });
-    boolean live = runtime != null && "true".equals(runtime.value("pinyon_shift_cheats"));
     if (!enabled && !live) {
       body.addView(FestivalUi.text(
           a, "Enable the cheat profile to configure trainer options.", 13, FestivalUi.MUTED));
       return body;
     }
     final boolean pending = !live;
+    if (live && a instanceof PinyonShiftActivity) {
+      FestivalUi.action(a, body, "Add credits", () -> FestivalUi.choose(a, "Add credits",
+          new String[] {"+100,000", "+1,000,000", "+10,000,000"}, -1, i -> {
+            int[] amounts = {100000, 1000000, 10000000};
+            boolean queued = ((PinyonShiftActivity) a).addTrainerCredits(amounts[i]);
+            Toast.makeText(a, queued ? "Credits queued for the active profile."
+                : "Start a game with the trainer enabled first.", Toast.LENGTH_SHORT).show();
+          }));
+    }
     FestivalUi.action(a, body, "Set credits", () -> {
       EditText input = new EditText(a);
       input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
@@ -97,11 +108,13 @@ final class TrainerPage {
                     Collections.singletonMap(
                         "cheat_day_length_minutes", new String[] {"0", "12", "24", "48", "120"}[i]),
                     pending)));
-    for (String[] option : new String[][] {{"cheat_free_camera", "Free camera"},
-             {"cheat_show_collectibles", "Show collectibles on map"},
-             {"cheat_any_car_events", "Any car in any event"}}) {
+    for (String[] option : new String[][] {
+             {"cheat_free_camera", "Free camera", "Use the free camera while driving."},
+             {"cheat_show_collectibles", "Show collectibles on map", "Reveal eligible signs and barn finds."},
+             {"cheat_any_car_events", "Any car in any event", "Applies when the next event loads."},
+             {"cheat_fast_travel_anywhere", "Fast travel anywhere", "Experimental. Select a road on the free-roam map."}}) {
       String key = option[0];
-      FestivalUi.toggle(a, body, option[1], "Event restrictions change when the next event loads.",
+      FestivalUi.toggle(a, body, option[1], option[2],
           MobileConfig.get(a, key, "false").equals("true"),
           on
           -> SettingsHub.apply(

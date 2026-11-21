@@ -535,7 +535,8 @@ final class SettingsHub {
       if (key.equals("present_letterbox"))
         fallback = "true";
       if (key.equals("pinyon_shift_cheats") || key.equals("cheat_free_camera")
-          || key.equals("cheat_show_collectibles") || key.equals("cheat_any_car_events"))
+          || key.equals("cheat_show_collectibles") || key.equals("cheat_any_car_events")
+          || key.equals("cheat_fast_travel_anywhere"))
         fallback = "false";
       if (key.equals("cheat_time_scale") || key.equals("fh4droid_pad_outer")
           || key.equals("fh4droid_pad_curve") || key.equals("fh4droid_trigger_outer"))

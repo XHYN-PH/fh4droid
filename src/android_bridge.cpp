@@ -17,6 +17,7 @@
 #include <unordered_set>
 
 #include "cheats.h"
+#include "mod/mod_host.h"
 #include "pinyon_shift_diagnostics.h"
 #include "ui/settings_menu.h"
 #include "ui/touch_pad.h"
@@ -191,7 +192,7 @@ Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeApplySetting(
       "cheat_set_credits",      "cheat_time_scale",
       "cheat_time_of_day",      "cheat_day_length_minutes",
       "cheat_free_camera",      "cheat_show_collectibles",
-      "cheat_any_car_events"};
+      "cheat_any_car_events",    "cheat_fast_travel_anywhere"};
   std::lock_guard lock(bridge_mutex);
   const bool cheat = key.starts_with("cheat_");
   if (menu_handler && (allowed.contains(key) || extra.contains(key)) &&
@@ -201,6 +202,24 @@ Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeApplySetting(
       pinyon_shift::ui::ApplyMasterVolume();
   }
 }
+extern "C" JNIEXPORT jboolean JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeModdedProfile(JNIEnv*, jclass) {
+  return pinyon_shift::mod::ModdedProfile();
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeAddTrainerCredits(
+    JNIEnv*, jclass, jint amount) {
+  std::lock_guard lock(bridge_mutex);
+  if (!menu_handler || !pinyon_shift::cheats::Enabled() ||
+      !pinyon_shift::mod::ModdedProfile() ||
+      (amount != 100000 && amount != 1000000 && amount != 10000000)) {
+    return JNI_FALSE;
+  }
+  pinyon_shift::cheats::AddCredits(amount);
+  return JNI_TRUE;
+}
+
 extern "C" JNIEXPORT jstring JNICALL
 Java_studio_deimos_pinyonshift_PinyonShiftActivity_nativeSettingValue(
     JNIEnv *env, jclass, jstring name) {

@@ -46,6 +46,13 @@ class ReleaseSigningTests(unittest.TestCase):
             root=pathlib.Path(temp);build=root/"build";build.mkdir();work=root/"work"
             for name in (*pinyon_android.NATIVE_LIBRARIES,*pinyon_android.ADRENOTOOLS_HOOKS,"libc++_shared.so"):
                 (build/name).write_bytes(("unstripped-"+name).encode())
+            fidelityfx=build/"fidelityfx-vk"/"ffx-api"/pinyon_android.FIDELITYFX_LIBRARY
+            fidelityfx.parent.mkdir(parents=True)
+            fidelityfx.write_bytes(b"fidelityfx fixture")
+            for dependency, notice in (("snapdragon-gsr", "LICENSE"), ("fidelityfx-vk", "LICENSE.txt")):
+                license_file=root/"sdk"/"thirdparty"/dependency/notice
+                license_file.parent.mkdir(parents=True)
+                license_file.write_text(dependency+" notice")
             (root/"android/art").mkdir(parents=True);(root/"config").mkdir()
             (root/"android/AndroidManifest.xml").write_text("<manifest />")
             for name in ("supported-extracted-ms-2505.json", "supported-dlc.json", "supported-dumps.json"):
@@ -87,6 +94,9 @@ class ReleaseSigningTests(unittest.TestCase):
             with zipfile.ZipFile(work/"pinyon-shift.apk") as apk:
                 shipped=apk.read("lib/arm64-v8a/libmain.so")
                 manifest=json.loads(apk.read("assets/pinyon_shift_build.json"))
+                self.assertEqual(apk.read("assets/licenses/fidelityfx.txt"), b"fidelityfx-vk notice")
+                self.assertEqual(apk.read("lib/arm64-v8a/"+pinyon_android.FIDELITYFX_LIBRARY),
+                                 b"stripped-fidelityfx fixture")
             self.assertNotEqual(shipped,(build/"libmain.so").read_bytes())
             self.assertEqual(manifest["executable_sha256"],hashlib.sha256(shipped).hexdigest().upper())
 

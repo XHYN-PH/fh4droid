@@ -960,6 +960,10 @@ def package(args: argparse.Namespace, tools: Tools | None = None) -> int:
         if PACKAGE == "ph.xhyn.fh4droid":
             apk.write(rexsdk_dir() / "thirdparty" / "snapdragon-gsr" / "LICENSE",
                       "assets/licenses/snapdragon-gsr.txt")
+        if fidelityfx.is_file():
+            license_file = (fidelityfx.with_name("LICENSE.txt") if shell else
+                            rexsdk_dir() / "thirdparty" / "fidelityfx-vk" / "LICENSE.txt")
+            apk.write(license_file, "assets/licenses/fidelityfx.txt")
         if validation is not None:
             for name in ("LICENSE.txt", "NOTICE.txt"):
                 apk.write(ROOT / "android" / "validation" / name, "assets/validation/" + name)

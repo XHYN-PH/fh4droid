@@ -86,12 +86,16 @@ def verify(apk,baseline):
             require(alignments and min(alignments)>=16384,"ELF alignment below 16 KiB: "+path.name)
             library_records[path.name]={"sha256":hashlib.sha256(data).hexdigest(),"bytes":len(data),"min_load_alignment":min(alignments)}
         expected=set(android.NATIVE_LIBRARIES+android.ADRENOTOOLS_HOOKS+("libc++_shared.so",))
-        require(set(libraries) - {android.FIDELITYFX_LIBRARY} == expected,
+        expected.add(android.FIDELITYFX_LIBRARY)
+        require(set(libraries) == expected,
                 "Unexpected/missing native library set")
+        require("assets/licenses/fidelityfx.txt" in names,"FidelityFX notice is missing")
         require(metadata["executable_sha256"].lower()==library_records["libmain.so"]["sha256"],"Main hash describes different bytes")
         require(identity[2].encode() in libraries["libmain.so"].read_bytes(),"Native game library contains another build version")
         android.android_module_check.verify(list(libraries.values()),readelf,nm)
         symbols={name:defined(tools,path) for name,path in libraries.items()}
+        require({"ffxQuery","ffxCreateContext","ffxDispatch","ffxConfigure","ffxDestroyContext"}
+                <= symbols[android.FIDELITYFX_LIBRARY],"FidelityFX runtime API is incomplete")
         require("rex_android_preparation_progress" in symbols["librexgpu-fh1.so"],"GPU preparation bridge is missing")
         for cls,library in [("PinyonShiftActivity","libmain.so"),("DriverProbeActivity","libfh4droid_android.so"),("ContentNative","libfh4droid_android.so")]:
             text=(ROOT/"android/java/studio/deimos/pinyonshift"/(cls+".java")).read_text()

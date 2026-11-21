@@ -509,6 +509,30 @@ index e85efca0..3fb1a842 100644
  #ifdef REXGLUE_ENABLE_PROFILING
      if (tracy::IsProfilerStarted()) {
        FrameMark;
+diff --git a/include/rex/ui/overlay/debug_overlay.h b/include/rex/ui/overlay/debug_overlay.h
+index c16738b2..9355ef5f 100644
+--- a/include/rex/ui/overlay/debug_overlay.h
++++ b/include/rex/ui/overlay/debug_overlay.h
+@@ -55,13 +55,17 @@ class DebugOverlayDialog : public ImGuiDialog {
+   double real_fps_ = 0.0;
+   double generated_fps_ = 0.0;
+   double failed_per_second_ = 0.0;
++  bool generator_availability_known_ = false;
++  bool generator_available_ = false;
+ #ifdef REXGLUE_ENABLE_PERF_COUNTERS
+   uint64_t rate_sample_tick_ = 0;
+   int64_t rate_source_frames_ = 0;
+-  int64_t rate_presents_ = 0;
++  int64_t previous_drops_ = 0;
++  int64_t previous_repeats_ = 0;
+   int64_t rate_simulation_time_ns_ = 0;
+   double source_fps_ = 0.0;
+-  double present_fps_ = 0.0;
++  double dropped_per_second_ = 0.0;
++  double repeated_per_second_ = 0.0;
+   double title_speed_ = 0.0;
+ #endif
+ };
 diff --git a/include/rex/ui/presenter.h b/include/rex/ui/presenter.h
 index 64fe4681..dc24d358 100644
 --- a/include/rex/ui/presenter.h
@@ -3875,6 +3899,106 @@ index 907dcd46..4a81bcbb 100644
          REXSYS_WARN(
              "Recovered stale physical page protection for guest {:08X} (host {:016X}, "
              "guest_protect {:08X})",
+diff --git a/src/ui/overlay/debug_overlay.cpp b/src/ui/overlay/debug_overlay.cpp
+index feea3bda..cb953341 100644
+--- a/src/ui/overlay/debug_overlay.cpp
++++ b/src/ui/overlay/debug_overlay.cpp
+@@ -92,14 +92,14 @@ void DebugOverlayDialog::OnDraw(ImGuiIO& io) {
+     const double shown_fps = real_fps_ + generated_fps_;
+ 
+     if (guest.frame_count > 0) {
+-      ImGui::Text("Game      %6.1f fps  %6.2f ms", guest.fps, guest.frame_time_ms);
++      ImGui::Text("Game FPS       %6.1f  %6.2f ms", guest.fps, guest.frame_time_ms);
+     }
+     if (presenter) {
+-      ImGui::Text("Shown     %6.1f fps  %6.2f ms", shown_fps,
++      ImGui::Text("Displayed FPS  %6.1f  %6.2f ms", shown_fps,
+                   shown_fps > 0.0 ? 1000.0 / shown_fps : 0.0);
+       if (!present.frame_generation.empty()) {
+         ImGui::Text("  real    %6.1f fps", real_fps_);
+-        ImGui::Text("  made    %6.1f fps", generated_fps_);
++        ImGui::Text("  generated %6.1f FPS", generated_fps_);
+         const std::string& name = present.frame_generation_name.empty()
+                                       ? present.frame_generation
+                                       : present.frame_generation_name;
+@@ -115,7 +115,16 @@ void DebugOverlayDialog::OnDraw(ImGuiIO& io) {
+           ImGui::Text("  not made %5.1f a second", failed_per_second_);
+         }
+       } else {
+-        ImGui::TextUnformatted("Frame generation: off");
++        if (!generator_availability_known_) {
++          const auto providers = presenter->GetFrameGenerators();
++          generator_available_ =
++              std::any_of(providers.begin(), providers.end(), [](const auto& info) {
++                return info.available;
++              });
++          generator_availability_known_ = true;
++        }
++        ImGui::TextUnformatted(generator_available_ ? "Frame generation: off (provider loaded)"
++                                                     : "Frame generation: unavailable");
+       }
+       if (present.render_width && present.output_width) {
+         ImGui::Text("Render %ux%u to %ux%u%s%s", present.render_width, present.render_height,
+@@ -139,46 +148,40 @@ void DebugOverlayDialog::OnDraw(ImGuiIO& io) {
+ 
+     const int64_t source_frames =
+         rex::perf::GetTotalCounter(rex::perf::CounterId::kSourceFrameCount);
+-    // The presenter's counter holds real frames only: add the generated
+-    // presents so this line shows what reaches the display, as Shown does.
+-    const int64_t presents =
+-        rex::perf::GetTotalCounter(rex::perf::CounterId::kPresentCount) +
+-        int64_t(present.generated_presents);
++    const int64_t dropped = rex::perf::GetTotalCounter(rex::perf::CounterId::kDroppedPresentCount);
++    const int64_t repeated = rex::perf::GetTotalCounter(rex::perf::CounterId::kDuplicatePresentCount);
+     const int64_t simulation_time_ns =
+         rex::perf::GetTotalCounter(rex::perf::CounterId::kSimulationTimeNs);
+     if (!rate_sample_tick_) {
+       rate_sample_tick_ = now_tick;
+       rate_source_frames_ = source_frames;
+-      rate_presents_ = presents;
++      previous_drops_ = dropped;
++      previous_repeats_ = repeated;
+       rate_simulation_time_ns_ = simulation_time_ns;
+     } else if (now_tick > rate_sample_tick_ &&
+                now_tick - rate_sample_tick_ >= tick_frequency / 2) {
+       const double elapsed_seconds =
+           double(now_tick - rate_sample_tick_) / double(tick_frequency);
+       source_fps_ = double(source_frames - rate_source_frames_) / elapsed_seconds;
+-      present_fps_ = double(presents - rate_presents_) / elapsed_seconds;
++      dropped_per_second_ = double(std::max<int64_t>(0, dropped - previous_drops_)) / elapsed_seconds;
++      repeated_per_second_ = double(std::max<int64_t>(0, repeated - previous_repeats_)) / elapsed_seconds;
+       title_speed_ =
+           double(simulation_time_ns - rate_simulation_time_ns_) /
+           (elapsed_seconds * 1000000000.0);
+       rate_sample_tick_ = now_tick;
+       rate_source_frames_ = source_frames;
+-      rate_presents_ = presents;
++      previous_drops_ = dropped;
++      previous_repeats_ = repeated;
+       rate_simulation_time_ns_ = simulation_time_ns;
+     }
+ 
+-    const double source_frame_ms = source_fps_ > 0.0 ? 1000.0 / source_fps_ : 0.0;
+-    const double present_frame_ms = present_fps_ > 0.0 ? 1000.0 / present_fps_ : 0.0;
+-    ImGui::Text("Render:  %6.1f FPS  %6.2f ms", source_fps_, source_frame_ms);
+-    if (present.frame_generation.empty()) {
+-      ImGui::Text("Present: %6.1f FPS  %6.2f ms", present_fps_, present_frame_ms);
+-    } else {
+-      ImGui::Text("Present: %6.1f FPS  %6.2f ms (generated included)", present_fps_,
+-                  present_frame_ms);
++    if (!guest.frame_count) {
++      ImGui::Text("Game FPS       %6.1f  %6.2f ms", source_fps_,
++                  source_fps_ > 0.0 ? 1000.0 / source_fps_ : 0.0);
+     }
+     ImGui::Text("Title speed: %5.1f%%", title_speed_ * 100.0);
+-    ImGui::Text("Dropped: %" PRId64 "  Duplicates: %" PRId64,
+-                rex::perf::GetTotalCounter(rex::perf::CounterId::kDroppedPresentCount),
+-                rex::perf::GetTotalCounter(rex::perf::CounterId::kDuplicatePresentCount));
++    ImGui::Text("Dropped %.1f/s (%" PRId64 " total)", dropped_per_second_, dropped);
++    ImGui::Text("Repeated %.1f/s (%" PRId64 " total)", repeated_per_second_, repeated);
+     ImGui::Separator();
+ 
+     // GPU
 diff --git a/src/ui/presenter.cpp b/src/ui/presenter.cpp
 index 0cb2aee3..90c7223f 100644
 --- a/src/ui/presenter.cpp
@@ -4750,8 +4874,33 @@ index 9983e131..3cdf355b 100644
      XE_UI_VULKAN_FEATURE(samplerAnisotropy)
      XE_UI_VULKAN_FEATURE(occlusionQueryPrecise)
      XE_UI_VULKAN_FEATURE(vertexPipelineStoresAndAtomics)
+diff --git a/src/ui/vulkan/vulkan_ffx_upscaler.cpp b/src/ui/vulkan/vulkan_ffx_upscaler.cpp
+index a9d934c8..d6f51e39 100644
+--- a/src/ui/vulkan/vulkan_ffx_upscaler.cpp
++++ b/src/ui/vulkan/vulkan_ffx_upscaler.cpp
+@@ -585,6 +585,20 @@ class VulkanFfxFrameGenerator final : public VulkanFrameGenerator {
+     info_.name = "AMD FidelityFX Super Resolution 3 frame generation";
+     info_.uses_depth = true;
+     info_.uses_motion_vectors = true;
++#if defined(__ANDROID__)
++    // The mobile presenter feeds sampled depth and motion with storage writes.
++    constexpr VkFormatFeatureFlags kCameraFeatures =
++        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
++    for (const VkFormat format : {VK_FORMAT_R32_SFLOAT, VK_FORMAT_R16G16_SFLOAT}) {
++      VkFormatProperties properties = {};
++      device_->vulkan_instance()->functions().vkGetPhysicalDeviceFormatProperties(
++          device_->physical_device(), format, &properties);
++      if ((properties.optimalTilingFeatures & kCameraFeatures) != kCameraFeatures) {
++        info_.unavailable_reason = "driver lacks depth or motion image support";
++        return;
++      }
++    }
++#endif
+     const FfxRuntime& runtime = GetFfxRuntime();
+     if (!runtime.loaded()) {
+       info_.unavailable_reason = runtime.error;
 diff --git a/src/ui/vulkan/vulkan_presenter.cpp b/src/ui/vulkan/vulkan_presenter.cpp
-index 590c6024..49de64d8 100644
+index 590c6024..b6da38ff 100644
 --- a/src/ui/vulkan/vulkan_presenter.cpp
 +++ b/src/ui/vulkan/vulkan_presenter.cpp
 @@ -253,6 +253,7 @@ namespace shaders {
@@ -4778,7 +4927,53 @@ index 590c6024..49de64d8 100644
    for (const std::unique_ptr<VulkanUpscaler>& upscaler : upscalers_) {
      infos.push_back(upscaler->info());
    }
-@@ -2303,6 +2313,12 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
+@@ -1112,7 +1122,9 @@ bool VulkanPresenter::RecordFrameGeneration(
+     }
+     state.waiting = id == "off" ? std::string()
+                     : !paint_context_.swapchain_frame_generation
+-                        ? std::string("restart to turn it on")
++                        ? (paint_context_.swapchain_frame_generation_requested
++                               ? std::string("surface does not support it")
++                               : std::string("restart to turn it on"))
+                         : std::string("unavailable");
+     if (id != "off" && !state.logged_unusable) {
+       state.logged_unusable = true;
+@@ -1157,6 +1169,7 @@ bool VulkanPresenter::RecordFrameGeneration(
+     return false;
+   }
+   if (!EnsureFrameGenerationImages(generator)) {
++    frame_generating_.store(false, std::memory_order_relaxed);
+     state.reset = true;
+     state.waiting = "no memory for its images";
+     return false;
+@@ -1165,6 +1178,7 @@ bool VulkanPresenter::RecordFrameGeneration(
+   const VkExtent2D source_extent = guest_output_image->extent();
+   if (!generator->Prepare(extent.width, extent.height, source_extent.width,
+                           source_extent.height)) {
++    frame_generating_.store(false, std::memory_order_relaxed);
+     ++state.failed;
+     ++state.total_failed;
+     state.reset = true;
+@@ -1178,6 +1192,7 @@ bool VulkanPresenter::RecordFrameGeneration(
+       dfn.vkAcquireNextImageKHR(device, paint_context_.swapchain, UINT64_C(10000000),
+                                 acquire_semaphore, VK_NULL_HANDLE, &generated_index);
+   if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) {
++    frame_generating_.store(false, std::memory_order_relaxed);
+     ++state.skipped_no_image;
+     state.reset = true;
+     state.waiting = "no swapchain image";
+@@ -1556,6 +1571,10 @@ Presenter::PresentStats VulkanPresenter::GetPresentStatsFromUIThread() const {
+     if (stats.frame_generation_waiting.empty()) {
+       stats.frame_generation_waiting = state.waiting;
+     }
++    if (stats.frame_generation_waiting.empty() && !paint_context_.swapchain_frame_generation &&
++        paint_context_.swapchain != VK_NULL_HANDLE) {
++      stats.frame_generation_waiting = "surface does not support it";
++    }
+   }
+   stats.render_width = state.render_width;
+   stats.render_height = state.render_height;
+@@ -2303,6 +2322,12 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
      }
      paint_context_.swapchain_render_pass = new_render_pass;
      paint_context_.swapchain_render_pass_format = render_pass_format;
@@ -4791,7 +4986,7 @@ index 590c6024..49de64d8 100644
      // UP-4: the same pass over an image already painted and copied from:
      // compatible with it, so its framebuffers and pipelines serve both.
      render_pass_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-@@ -2320,8 +2336,6 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
+@@ -2320,8 +2345,6 @@ VulkanPresenter::ConnectOrReconnectPaintingToSurfaceFromUIThread(Surface& new_su
                    "the HUD and UI in generated frames");
      }
      paint_context_.swapchain_render_pass_hdr = hdr;
@@ -4800,7 +4995,49 @@ index 590c6024..49de64d8 100644
    }
  
    // Get the swapchain images.
-@@ -3615,7 +3629,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+@@ -2860,10 +2883,22 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
+   // and the compositor may hold two more (gamescope does).
+   const VkImageUsageFlags frame_generation_usage =
+       VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+-  const bool frame_generation =
++  bool frame_generation =
+       REXCVAR_GET(present_frame_generation) != "off" &&
+       (surface_capabilities.supportedUsageFlags & frame_generation_usage) ==
+           frame_generation_usage;
++#if REX_PLATFORM_ANDROID
++  if (frame_generation) {
++    VkFormatProperties properties = {};
++    ifn.vkGetPhysicalDeviceFormatProperties(
++        vulkan_device->physical_device(), image_format.format, &properties);
++    constexpr VkFormatFeatureFlags kBlit = VK_FORMAT_FEATURE_BLIT_SRC_BIT |
++                                           VK_FORMAT_FEATURE_BLIT_DST_BIT;
++    // Qualify the SDR presentation path first. The portable provider still
++    // handles runtime failures and missing inputs by presenting real frames.
++    frame_generation = !hdr_out && (properties.optimalTilingFeatures & kBlit) == kBlit;
++  }
++#endif
+   swapchain_create_info.minImageCount =
+       std::max(kSubmissionCount + (frame_generation ? 2u : 0u),
+                surface_capabilities.minImageCount);
+@@ -2961,7 +2996,7 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
+   // modes that tear are left out, so the swapchain is mailbox or FIFO, as
+   // Direct3D 12 presents without its tearing flag. Unregistered counts as on.
+   const bool vsync = rex::cvar::GetFlagByName("vsync") != "false";
+-  if (!vsync && REXCVAR_GET(vulkan_allow_present_mode_immediate) &&
++  if (!frame_generation && !vsync && REXCVAR_GET(vulkan_allow_present_mode_immediate) &&
+       std::find(present_modes.cbegin(), present_modes.cend(), VK_PRESENT_MODE_IMMEDIATE_KHR) !=
+           present_modes.cend()) {
+     // Allowing tearing to reduce latency, and possibly variable refresh rate
+@@ -2977,7 +3012,7 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
+     // and the GPU at its top clock).
+     // Allowing dropping frames to reduce latency, but no tearing.
+     swapchain_create_info.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+-  } else if (!vsync && REXCVAR_GET(vulkan_allow_present_mode_fifo_relaxed) &&
++  } else if (!frame_generation && !vsync && REXCVAR_GET(vulkan_allow_present_mode_fifo_relaxed) &&
+              std::find(present_modes.cbegin(), present_modes.cend(),
+                        VK_PRESENT_MODE_FIFO_RELAXED_KHR) != present_modes.cend()) {
+     // Limiting the frame rate, but lets too long frames cause tearing not to
+@@ -3615,7 +3650,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
          guest_output_image_descriptor_write.pImageInfo = &guest_output_image_descriptor_image_info;
          guest_output_image_descriptor_write.pBufferInfo = nullptr;
          guest_output_image_descriptor_write.pTexelBufferView = nullptr;
@@ -4814,7 +5051,7 @@ index 590c6024..49de64d8 100644
        }
  
        // Make sure intermediate textures of the needed size are available, and
-@@ -4104,9 +4123,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+@@ -4104,9 +4144,12 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
              effect_src_descriptor_set = PaintContext::GuestOutputDescriptorSet(
                  PaintContext::kGuestOutputDescriptorSetIntermediate0Sampled + (i - 1));
            } else {
@@ -4829,7 +5066,7 @@ index 590c6024..49de64d8 100644
            }
            dfn.vkCmdBindDescriptorSets(
                draw_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-@@ -4133,6 +4155,7 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+@@ -4133,6 +4176,7 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
              FsrEasuConstants fsr_easu;
              FsrRcasConstants fsr_rcas;
  #endif
@@ -4837,7 +5074,7 @@ index 590c6024..49de64d8 100644
            } effect_constants;
            switch (guest_output_paint_pipeline_layout_index) {
              case kGuestOutputPaintPipelineLayoutIndexBilinear: {
-@@ -4159,6 +4182,10 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
+@@ -4159,6 +4203,10 @@ Presenter::PaintResult VulkanPresenter::PaintAndPresentImpl(bool execute_ui_draw
                effect_constants.fsr_rcas.Initialize(guest_output_flow, i, guest_output_paint_config);
              } break;
  #endif
@@ -4848,7 +5085,7 @@ index 590c6024..49de64d8 100644
              default:
                break;
            }
-@@ -4547,13 +4574,11 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+@@ -4547,13 +4595,11 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
    guest_output_image_sampler_bindings[0].descriptorCount = 1;
    guest_output_image_sampler_bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
    guest_output_image_sampler_bindings[0].pImmutableSamplers = nullptr;
@@ -4863,7 +5100,7 @@ index 590c6024..49de64d8 100644
    VkDescriptorSetLayoutCreateInfo guest_output_paint_image_descriptor_set_layout_create_info;
    guest_output_paint_image_descriptor_set_layout_create_info.sType =
        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-@@ -4613,6 +4638,9 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+@@ -4613,6 +4659,9 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
          guest_output_paint_push_constant_range_ffx.size = sizeof(FsrRcasConstants);
          break;
  #endif
@@ -4873,7 +5110,7 @@ index 590c6024..49de64d8 100644
        case kGuestOutputPaintPipelineLayoutIndexHdr:
          guest_output_paint_push_constant_range_ffx.size = sizeof(HdrOutputConstants);
          break;
-@@ -4689,12 +4717,22 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+@@ -4689,12 +4738,22 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
          shader_module_create_info.pCode = shaders::guest_output_ffx_fsr_rcas_dither_ps;
          break;
  #endif
@@ -4896,7 +5133,7 @@ index 590c6024..49de64d8 100644
        REXLOG_ERROR(
            "VulkanPresenter: Failed to create the guest output painting shader "
            "module for effect {}",
-@@ -4776,6 +4814,12 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+@@ -4776,6 +4835,12 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
      VkPipeline guest_output_paint_intermediate_pipeline = CreateGuestOutputPaintPipeline(
          GuestOutputPaintEffect(i), guest_output_intermediate_render_pass_);
      if (guest_output_paint_intermediate_pipeline == VK_NULL_HANDLE) {
@@ -4909,7 +5146,7 @@ index 590c6024..49de64d8 100644
        return false;
      }
      paint_context_.guest_output_paint_pipelines[i].intermediate_pipeline =
-@@ -4787,9 +4831,6 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+@@ -4787,9 +4852,6 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
    guest_output_paint_descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
    guest_output_paint_descriptor_pool_sizes[0].descriptorCount =
        PaintContext::kGuestOutputDescriptorSetCount;
@@ -4919,7 +5156,7 @@ index 590c6024..49de64d8 100644
    guest_output_paint_descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_SAMPLER;
    guest_output_paint_descriptor_pool_sizes[1].descriptorCount =
        PaintContext::kGuestOutputDescriptorSetCount;
-@@ -4835,6 +4876,29 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
+@@ -4835,6 +4897,29 @@ bool VulkanPresenter::InitializeSurfaceIndependent() {
      return false;
    }
  
@@ -4949,7 +5186,7 @@ index 590c6024..49de64d8 100644
    upscalers_ = CreateVulkanUpscalers(vulkan_device_);
    if (std::unique_ptr<VulkanFrameGenerator> generator =
            CreateVulkanFfxFrameGenerator(vulkan_device_)) {
-@@ -4977,7 +5041,6 @@ bool VulkanPresenter::CreateHdrSwapchainImages(VkFormat swapchain_format) {
+@@ -4977,7 +5062,6 @@ bool VulkanPresenter::CreateHdrSwapchainImages(VkFormat swapchain_format) {
    }
  
    const uint32_t image_count = uint32_t(context.swapchain_images.size());
@@ -4957,7 +5194,7 @@ index 590c6024..49de64d8 100644
    VkDescriptorPoolSize pool_sizes[2] = {{VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, image_count},
                                          {VK_DESCRIPTOR_TYPE_SAMPLER, image_count}};
    VkDescriptorPoolCreateInfo pool_create_info = {};
-@@ -5064,13 +5127,20 @@ bool VulkanPresenter::CreateHdrSwapchainImages(VkFormat swapchain_format) {
+@@ -5064,13 +5148,20 @@ bool VulkanPresenter::CreateHdrSwapchainImages(VkFormat swapchain_format) {
      }
      VkDescriptorImageInfo image_info = {VK_NULL_HANDLE, hdr_image.srgb_view,
                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};

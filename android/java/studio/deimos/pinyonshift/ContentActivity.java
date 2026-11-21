@@ -85,6 +85,8 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
     private static JSONObject find(List<JSONObject> items,String key,String id){for(JSONObject item:items)if(id.equals(item.optString(key)))return item;return null;}
     private boolean available(){if(busy||loading)return false;if(GameFiles.running(this)){error("Quit the game before changing content.");return false;}return true;}
     private void mods(LinearLayout body)throws Exception{
+        FestivalUi.listRow(this, body, "flag", "Quick Playthrough",
+            "Half-price upgrades and cars · Triple rewards · Modded save", this::quickPlaythrough);
         section(body,"Installed mods");
         if(optionsProblem!=null&&!optionsProblem.isEmpty())body.addView(FestivalUi.text(this,"Saved mod options could not be read. Disable optional mods for recovery: "+optionsProblem,14,FestivalUi.ORANGE));
         ArrayList<View> installed=new ArrayList<>();
@@ -107,6 +109,15 @@ public final class ContentActivity extends Activity implements FestivalUi.PanelH
         contentTiles(body,builtIns);
         FestivalUi.listRow(this,body,"wrench","Cheats · separate profile","Open trainer options.",()->TrainerPage.show(this,null));
         body.addView(FestivalUi.text(this,"Game-file overlays, database scripts and Android ARM64 plugins are supported. Mods that rebuild archive members need preparation with the PC mod tools before import.",12,FestivalUi.MUTED));
+    }
+    private void quickPlaythrough() {
+        new AlertDialog.Builder(this).setTitle("Enable Quick Playthrough?")
+            .setMessage("Set Festival pacing to half-price base-game cars and upgrades and triple race rewards. The next launch uses your modded save.")
+            .setNegativeButton("Cancel", null).setPositiveButton("Enable", (dialog, which) ->
+                perform("Preparing Quick Playthrough…", () -> {
+                    ModStore.enableQuickPlaythrough(this);
+                    return "Quick Playthrough is ready for the next launch.";
+                })).show();
     }
     private void section(LinearLayout body,String name){
         TextView heading=FestivalUi.text(this,name,14,FestivalUi.TEXT);
