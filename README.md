@@ -14,7 +14,7 @@
 
 **FH4Droid focuses on Android only.** It brings the original Xbox 360 **Forza Horizon (2012)** to compatible phones and handhelds.
 
-**Current release is FH4Droid 0.9.8.** It uses Pinyon Shift 0.9.1 with selected ShiftGlue fixes. [Android release notes](docs/releases/fh4droid-0.9.8.md)
+**Current release is FH4Droid 0.9.9.** It uses Pinyon Shift 0.9.1 with selected ShiftGlue fixes. [Android release notes](docs/releases/fh4droid-0.9.9.md)
 
 **XHYN-PH is stepping away from maintenance.** The source and release downloads are public. To build the app, sign a fork or continue maintenance, see the [fork and maintainer guide](docs/releases/fork-handoff.md).
 

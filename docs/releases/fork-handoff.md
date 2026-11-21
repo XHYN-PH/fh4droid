@@ -1,15 +1,15 @@
 # FH4Droid fork and maintainer guide
 
-FH4Droid 0.9.8, build 918, is the current stable release from XHYN-PH. The APK, its SHA-256 checksum and its verification report are available on GitHub. The `v0.9.8` tag identifies the source used to build the APK. [Release downloads](https://github.com/XHYN-PH/fh4droid/releases/tag/v0.9.8) · [Tagged source](https://github.com/XHYN-PH/fh4droid/tree/v0.9.8) · [Changelog](../../CHANGELOG.md)
+FH4Droid 0.9.9, build 919, is the current stable release from XHYN-PH. The APK, its SHA-256 checksum and its verification report are available on GitHub. The `v0.9.9` tag identifies the source used to build the APK. [Release downloads](https://github.com/XHYN-PH/fh4droid/releases/tag/v0.9.9) · [Tagged source](https://github.com/XHYN-PH/fh4droid/tree/v0.9.9) · [Changelog](../../CHANGELOG.md)
 
-The source includes the Android launcher, runtime changes, SDK patches, build tooling and tests. FH4Droid 0.9.8 uses Pinyon Shift 0.9.1 and pins ShiftGlue at `537b2b6465e612880597aa54e026b56f9aeacfc5`. Preserve the license and third-party notices in a fork. [License](../../LICENSE) · [Third-party notices](../../THIRD_PARTY_NOTICES.md)
+The source includes the Android launcher, runtime changes, SDK patches, build tooling and tests. FH4Droid 0.9.9 uses Pinyon Shift 0.9.1 and pins ShiftGlue at `537b2b6465e612880597aa54e026b56f9aeacfc5`. Preserve the license and third-party notices in a fork. [License](../../LICENSE) · [Third-party notices](../../THIRD_PARTY_NOTICES.md)
 
 ## Build from source
 
-Fork on GitHub and clone with recursive submodules. Use `v0.9.8` when reproducing the published version. To develop from the latest source, use `main`. [Fork FH4Droid](https://github.com/XHYN-PH/fh4droid/fork)
+Fork on GitHub and clone with recursive submodules. Use `v0.9.9` when reproducing the published version. To develop from the latest source, use `main`. [Fork FH4Droid](https://github.com/XHYN-PH/fh4droid/fork)
 
 ```sh
-git clone --branch v0.9.8 --recurse-submodules https://github.com/XHYN-PH/fh4droid.git
+git clone --branch v0.9.9 --recurse-submodules https://github.com/XHYN-PH/fh4droid.git
 cd fh4droid
 git submodule status --recursive
 ```

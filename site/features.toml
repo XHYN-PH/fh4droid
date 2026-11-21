@@ -325,4 +325,4 @@ cells = ["n/a", "n/a", "n/a", "partly: mod ZIP/folder import, order and options,
 [[platform]]
 feature = "Android resource policy and performance comparisons"
 link = "android.md#android-resource-policy"
-cells = ["n/a", "n/a", "n/a", "partly: adaptive initial texture reserve, pressure-aware trimming, effective refresh hints, known pipelines prepared and cached before gameplay, and controlled comparison tooling; phone FPS/thermal qualification pending"]
+cells = ["n/a", "n/a", "n/a", "partly: adaptive texture reserve, pressure-aware trimming, Battery Saver-aware refresh matching, pipeline preparation, and controlled comparisons. Earlier geometry uploads are optional and need phone measurements."]

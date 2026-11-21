@@ -1,5 +1,16 @@
 # Changelog
 
+## FH4Droid 0.9.9 - 2026-11-22
+
+- Save and restore Android settings at the top level of the TOML file. Preserve comments and settings inside unrelated sections.
+- Offer the last playable driver once if the driver test fails. Keep the saved driver selection.
+- Rate-limit repeated draw errors after device loss and fix concurrent writes during renderer frame dumps.
+- Trigger controller chords once when two input devices report the same press.
+- Respect Battery Saver when matching the display refresh rate. Report the frame target, requested refresh rate, and observed refresh rate separately.
+- Add **Advanced → Earlier geometry uploads**, an opt-in experiment for reducing render-pass interruptions.
+
+[Full FH4Droid 0.9.9 release notes](docs/releases/fh4droid-0.9.9.md)
+
 ## FH4Droid 0.9.8 - 2026-11-21
 
 - Fix a first-frame crash on system Vulkan drivers. Driver testing now presents an Android window frame.
