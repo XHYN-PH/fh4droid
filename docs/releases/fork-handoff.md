@@ -1,15 +1,15 @@
 # FH4Droid fork and maintainer guide
 
-FH4Droid 0.9.9, build 919, is the current stable release from XHYN-PH. The APK, its SHA-256 checksum and its verification report are available on GitHub. The `v0.9.9` tag identifies the source used to build the APK. [Release downloads](https://github.com/XHYN-PH/fh4droid/releases/tag/v0.9.9) · [Tagged source](https://github.com/XHYN-PH/fh4droid/tree/v0.9.9) · [Changelog](../../CHANGELOG.md)
+FH4Droid 0.9.10, build 920, is the final release from XHYN-PH. It supports compatible ARM64 devices running Android 13 or newer. The signed APK, SHA-256 checksum and verification report are on GitHub. Tag `v0.9.10` points to the exact APK source, commit `f9f6a98217b96ab3d6e390451e1ce0065850f35a`. Start new development from `main`. [Release downloads](https://github.com/XHYN-PH/fh4droid/releases/tag/v0.9.10) · [Tagged source](https://github.com/XHYN-PH/fh4droid/tree/v0.9.10) · [Changelog](../../CHANGELOG.md)
 
-The source includes the Android launcher, runtime changes, SDK patches, build tooling and tests. FH4Droid 0.9.9 uses Pinyon Shift 0.9.1 and pins ShiftGlue at `537b2b6465e612880597aa54e026b56f9aeacfc5`. Preserve the license and third-party notices in a fork. [License](../../LICENSE) · [Third-party notices](../../THIRD_PARTY_NOTICES.md)
+The source includes the Android launcher, runtime changes, SDK patches, build tooling and tests. FH4Droid 0.9.10 uses Pinyon Shift 0.9.1 and pins ShiftGlue at `537b2b6465e612880597aa54e026b56f9aeacfc5`. Preserve the license and third-party notices in a fork. [License](../../LICENSE) · [Third-party notices](../../THIRD_PARTY_NOTICES.md)
 
 ## Build from source
 
-Fork on GitHub and clone with recursive submodules. Use `v0.9.9` when reproducing the published version. To develop from the latest source, use `main`. [Fork FH4Droid](https://github.com/XHYN-PH/fh4droid/fork)
+Fork on GitHub and clone with recursive submodules. Use `v0.9.10` when reproducing the published version. [Fork FH4Droid](https://github.com/XHYN-PH/fh4droid/fork)
 
 ```sh
-git clone --branch v0.9.9 --recurse-submodules https://github.com/XHYN-PH/fh4droid.git
+git clone --branch v0.9.10 --recurse-submodules https://github.com/XHYN-PH/fh4droid.git
 cd fh4droid
 git submodule status --recursive
 ```
@@ -85,3 +85,11 @@ The v0.9.5 public signing certificate is available for verification. Its SHA-256
 Run `python3 tools/check-android-sdk-patches.py` on the patched submodule and `python3 tools/test-android-mobile.py` against the pinned SDK. Run the launcher UI tests with `mvn -B -f tests/android/ui/pom.xml test`. The source workflow exercises these checks without game files and provides a starting point for fork CI. [Android source checks](../../.github/workflows/android-source.yml)
 
 Test on an Android 13 or later ARMv8.2-A device. Import game files, start a drive, open and resume from the in-game menu, and try touch and controller navigation. Check audio, low-resolution rendering, and a save export and restore. For an update, install over the previous release and verify the existing profile and settings.
+
+The final APK passed the signature, package, native library and upgrade checks against 0.9.9. FSR 3 initialized on software Vulkan. Phone gameplay checks for FSR 3 and fast travel are still pending. [Verification report](https://github.com/XHYN-PH/fh4droid/releases/download/v0.9.10/FH4Droid-0.9.10-arm64-verification.json)
+
+## Upstream submissions
+
+- Keep the source profile selected after importing a multi-profile save. [Pinyon Shift PR #1124](https://github.com/arcanite24/pinyon-shift/pull/1124)
+- Recover malformed decimals in settings from older Android builds. [Pinyon Shift PR #1125](https://github.com/arcanite24/pinyon-shift/pull/1125)
+- Correct the road motion-blur boundary around the car on Vulkan. The upstream issue includes the ShiftGlue patch and test results. [Pinyon Shift issue #1126](https://github.com/arcanite24/pinyon-shift/issues/1126)

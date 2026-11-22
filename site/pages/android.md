@@ -6,7 +6,7 @@ description: FH4Droid launcher, game files, settings, controls and troubleshooti
 ---
 
 
-FH4Droid focuses on the Android port of Forza Horizon (2012), Xbox 360. The current source integrates Pinyon Shift 0.9.1 and retains the race-grid launcher, Android input, and save management from 0.8.2-ui-polish-test5. Upstream measurements describe their named devices and builds. This integration awaits Android gameplay testing.
+FH4Droid is the Android fork of Pinyon Shift for Forza Horizon (2012). The final release from XHYN-PH is 0.9.10, based on Pinyon Shift 0.9.1 with selected ShiftGlue fixes. Community maintainers can use the build, signing and save-transfer guide to continue in a fork. [Release downloads](https://github.com/XHYN-PH/fh4droid/releases/tag/v0.9.10) · [Fork and maintainer guide](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fork-handoff.md)
 
 ## Current changes and limits
 

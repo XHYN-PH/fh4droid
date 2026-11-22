@@ -7,16 +7,16 @@
 <p align="center">Forza Horizon (2012) for Android.<br>Based on Pinyon Shift. Android fork by XHYN-PH.</p>
 
 <p align="center">
-  <a href="https://github.com/XHYN-PH/fh4droid/releases">Download APK</a> ·
+  <a href="https://github.com/XHYN-PH/fh4droid/releases/tag/v0.9.10">Download APK</a> ·
   <a href="https://youtube.com/@xhyn_ph">YouTube</a> ·
   <a href="https://t.me/xhynports">Telegram</a>
 </p>
 
 **FH4Droid focuses on Android only.** It brings the original Xbox 360 **Forza Horizon (2012)** to compatible phones and handhelds.
 
-**Current release is FH4Droid 0.9.9.** It uses Pinyon Shift 0.9.1 with selected ShiftGlue fixes. [Android release notes](docs/releases/fh4droid-0.9.9.md)
+**FH4Droid 0.9.10 is the final release from XHYN-PH.** It uses Pinyon Shift 0.9.1 with selected ShiftGlue fixes. The release includes the signed ARM64 APK, SHA-256 checksum, verification report and matching source tag. [Release downloads](https://github.com/XHYN-PH/fh4droid/releases/tag/v0.9.10) · [Changelog](CHANGELOG.md)
 
-**XHYN-PH is stepping away from maintenance.** The source and release downloads are public. To build the app, sign a fork or continue maintenance, see the [fork and maintainer guide](docs/releases/fork-handoff.md).
+**Community handoff.** To continue development in a fork, follow the build, signing and save-transfer instructions. The guide also links to the fixes submitted upstream. [Fork and maintainer guide](docs/releases/fork-handoff.md)
 
 **You must provide your own legally obtained game files.** Use the supported USA Xbox 360 base-game ISO or complete extracted folder. Game files and game-download links are not provided here.
 
@@ -24,7 +24,7 @@
 
 - Fixed landscape UI, an adaptive Home dashboard with a dedicated footer, right-side setting details, and an animated in-game drawer with Resume.
 - Searchable settings, pinned favourites, section resets, undo and active/saved value labels.
-- Graphics presets, screen modes, FSR profiles, custom values and restart labels.
+- Graphics presets, screen modes, FSR upscaling, optional experimental FSR 3 frame generation and restart labels.
 - 25–100% rendering resolution in one-percent steps; performance depends on the device.
 - Text labels for driving touch controls, explicit **Arrows / Stick** steering, named local layouts, handed templates, per-control fading and floating/fixed/invisible sticks.
 - Controller calibration, optional phone tilt and rumble, achievements and a trainer on a separate profile.
@@ -58,7 +58,7 @@ Local import uses an ISO or extracted folder already on the device; the app has 
 
 Keep the ISO accessible while playing. ISO mode caches only the menu and audio configuration files; it does not extract the whole game. Use folder mode for mods that add new files.
 
-While playing, tap **☰** or press Android Back for the in-game menu. Choose **Advanced game settings** for the full game settings and controller mapping. **Controls** on the launcher opens the touch editor.
+While playing, tap **☰** or press Android Back for the in-game menu. Open **Settings**, **Controller**, **Touch controls**, or **Trainer** from there. **Controls** on the launcher opens the touch editor.
 
 Open **More → Save backups** while the game is closed to export or restore a base-game profile, import a compatible Xbox 360 `ForzaProfile` package, or clear the selected saves with a recovery backup. A modded console save uses its original player ID during modded play. Regular **Play** records detailed session logs. Open **More → Problem reports** to share a report or choose **Play without logs** for one session.
 

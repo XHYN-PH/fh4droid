@@ -8,3 +8,7 @@ Available for ARM64 phones running Android 13 or newer.
 - **Experimental FSR 3 frame generation.** Open **Settings → Graphics → Display → Frame generation** and select **FSR 3 (experimental)**, then restart the game. It is off by default. Test with SDR, a 120 Hz display, and a steady 60 FPS target. The F3 overlay shows when it is generating frames and why it may be waiting or unavailable. Generated frames smooth motion at the existing game and input rate.
 
 Android device testing for FSR 3 and fast travel is pending.
+
+## Community handoff
+
+This is the final FH4Droid release from XHYN-PH. Use tag `v0.9.10` for the exact APK source. The maintainer guide covers building, signing a fork, transferring saves, and the patches submitted upstream. [Fork and maintainer guide](https://github.com/XHYN-PH/fh4droid/blob/main/docs/releases/fork-handoff.md) · [Tagged source](https://github.com/XHYN-PH/fh4droid/tree/v0.9.10)
